@@ -47,14 +47,7 @@ func (m Model) usageLine() string {
 }
 
 func (m Model) footerStatusText() string {
-	parts := make([]string, 0, 2)
-	if usage := m.usageLine(); usage != "" {
-		parts = append(parts, usage)
-	}
-	if status := m.agentStatusLine(); status != "" {
-		parts = append(parts, status)
-	}
-	return strings.Join(parts, "  ")
+	return m.usageLine()
 }
 
 func (m Model) agentStatusLine() string {

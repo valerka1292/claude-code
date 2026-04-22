@@ -20,7 +20,7 @@ func (m *Model) refreshViewport(forceBottom bool) {
 	if m.layout.width == 0 {
 		return
 	}
-	spinnerLine := ""
+	spinnerLine := m.agentStatusLine()
 	wasBottom := m.viewport.AtBottom()
 	content := messages.View(m.chat.messages, m.viewport.Width, spinnerLine, "", m.chat.streamingText)
 	m.viewport.SetContent(content)
