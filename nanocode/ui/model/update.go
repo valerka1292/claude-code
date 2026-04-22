@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"nanocode/ui/components/spinner"
+	"nanocode/ui/config"
 	"nanocode/ui/types"
 )
 
@@ -16,35 +17,76 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout.width = msg.Width
 		m.layout.height = msg.Height
 		m.input.Width = max(10, msg.Width-6)
+		m.providers.input.Width = max(30, msg.Width/2)
 		m.resizeViewport()
 		m.refreshViewport(false)
 		return m, nil
-
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
-
 	case nobbyTickMsg:
 		m.nobbyStep++
 		return m, nobbyTickCmd(m.nobbyPose, m.nobbyStep)
-
 	case spinnerChangedMsg:
 		if msg.saved {
-			m.chat.messages = append(m.chat.messages, types.Message{
-				Role: types.RoleAssistant,
-				Text: "Settings saved: spinner style updated.",
-			})
+			m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: "Settings saved: spinner style updated."})
 			m.refreshViewport(true)
 		}
 		return m, nil
-
+	case providerSavedMsg:
+		if msg.saved {
+			m.providers.open = false
+			m.providers.mode = providerModeMenu
+			m.providers.input.Blur()
+			m.reloadProviderNames()
+			m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: msg.message, Timestamp: time.Now()})
+			m.refreshViewport(true)
+		}
+		return m, nil
+	case streamStartedMsg:
+		m.stream.ch = msg.ch
+		return m, pollStreamCmd(m.stream.ch)
+	case streamEventMsg:
+		if msg.done {
+			m.chat.thinking = false
+			m.chat.spinnerVerb = ""
+			m.chat.spinnerStep = 0
+			if strings.TrimSpace(m.chat.streamingText) != "" {
+				m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: m.chat.streamingText, Timestamp: time.Now()})
+			}
+			m.chat.streamingText = ""
+			m.chat.streamingThought = ""
+			m.refreshViewport(true)
+			return m, nil
+		}
+		if msg.event.ErrorText != "" {
+			m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: "Error: " + msg.event.ErrorText, Timestamp: time.Now()})
+			m.chat.thinking = false
+			m.chat.streamingText = ""
+			m.chat.streamingThought = ""
+			m.refreshViewport(true)
+			return m, nil
+		}
+		if msg.event.ReasoningDelta != "" {
+			m.chat.streamingThought += msg.event.ReasoningDelta
+		}
+		if msg.event.ContentDelta != "" {
+			m.chat.streamingText += msg.event.ContentDelta
+		}
+		if msg.event.Usage != nil {
+			m.chat.usage = *msg.event.Usage
+		}
+		m.refreshViewport(true)
+		return m, pollStreamCmd(m.stream.ch)
 	case tea.KeyMsg:
 		if m.settings.open {
 			return m.handleSettingsKeys(msg)
 		}
+		if m.providers.open {
+			return m.handleProviderKeys(msg)
+		}
 		if nextModel, cmd, handled := m.handleKeyMsg(msg); handled {
 			return nextModel, cmd
 		}
-
 	case spinnerTickMsg:
 		if !m.chat.thinking {
 			return m, nil
@@ -52,28 +94,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.chat.spinnerStep++
 		m.refreshViewport(true)
 		return m, spinnerTickCmd(m.settings.values.SpinnerStyle)
-
-	case assistantReplyMsg:
-		if !m.chat.thinking {
-			return m, nil
-		}
-		userText := ""
-		for i := len(m.chat.messages) - 1; i >= 0; i-- {
-			if m.chat.messages[i].Role == types.RoleUser {
-				userText = m.chat.messages[i].Text
-				break
-			}
-		}
-		m.chat.messages = append(m.chat.messages, types.Message{
-			Role:      types.RoleAssistant,
-			Text:      fmt.Sprintf("Got it: %q. This is a mock nanocode response after a 2-second wait.", userText),
-			Timestamp: time.Now(),
-		})
-		m.chat.thinking = false
-		m.chat.spinnerStep = 0
-		m.chat.spinnerVerb = ""
-		m.refreshViewport(true)
-		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -125,17 +145,12 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 		if len(m.commands.suggestions) > 0 {
-			selected := m.commands.suggestions[m.commands.selected]
-			m.input.SetValue(selected)
+			m.input.SetValue(m.commands.suggestions[m.commands.selected])
 			m.clearCommandSuggestions()
-			m.resizeViewport()
-			nextModel, cmd := m.executeInput()
-			return nextModel, cmd, true
 		}
 		nextModel, cmd := m.executeInput()
 		return nextModel, cmd, true
 	}
-
 	return m, nil, false
 }
 
@@ -144,13 +159,28 @@ func (m Model) executeInput() (tea.Model, tea.Cmd) {
 	if text == "" {
 		return m, nil
 	}
-
 	if text == "/settings" {
 		m.settings.open = true
 		m.settings.selectedStyle = spinnerIndexFor(m.settings.values.SpinnerStyle)
 		m.input.SetValue("")
 		m.clearCommandSuggestions()
 		m.resizeViewport()
+		return m, nil
+	}
+	if text == "/provider" {
+		m.openProviderPanel()
+		m.input.SetValue("")
+		m.clearCommandSuggestions()
+		m.resizeViewport()
+		return m, nil
+	}
+
+	active, ok := config.ActiveProvider(m.providers.data)
+	if !ok {
+		m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: "No active provider. Run /provider and create one first."})
+		m.input.SetValue("")
+		m.clearCommandSuggestions()
+		m.refreshViewport(true)
 		return m, nil
 	}
 
@@ -160,7 +190,237 @@ func (m Model) executeInput() (tea.Model, tea.Cmd) {
 	m.chat.thinking = true
 	m.chat.spinnerStep = 0
 	m.chat.spinnerVerb = spinner.RandomVerb()
+	m.chat.streamingText = ""
+	m.chat.streamingThought = ""
 	m.resizeViewport()
 	m.refreshViewport(true)
-	return m, tea.Batch(spinnerTickCmd(m.settings.values.SpinnerStyle), mockReplyCmd())
+	return m, tea.Batch(spinnerTickCmd(m.settings.values.SpinnerStyle), startAgentStreamCmd(active, m.chat.messages))
+}
+
+func (m Model) handleProviderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.providers.mode {
+	case providerModeInputValue, providerModeCreate, providerModeEditInput:
+		if msg.String() == "esc" {
+			m.providers.open = false
+			m.providers.mode = providerModeMenu
+			m.providers.input.Blur()
+			m.resizeViewport()
+			return m, nil
+		}
+		if msg.String() == "enter" {
+			return m.submitProviderInput()
+		}
+		var cmd tea.Cmd
+		m.providers.input, cmd = m.providers.input.Update(msg)
+		return m, cmd
+	}
+
+	switch msg.String() {
+	case "esc":
+		m.providers.open = false
+		m.providers.mode = providerModeMenu
+		m.providers.input.Blur()
+		m.resizeViewport()
+		return m, nil
+	case "up":
+		switch m.providers.mode {
+		case providerModeMenu:
+			m.providers.menuIndex = clamp(m.providers.menuIndex-1, 0, 3)
+		case providerModeSelect, providerModeEditPick, providerModeDelete:
+			m.providers.selectedProvider = clamp(m.providers.selectedProvider-1, 0, len(m.providers.names)-1)
+		case providerModeEditField:
+			m.providers.selectedField = clamp(m.providers.selectedField-1, 0, 4)
+		}
+		return m, nil
+	case "down":
+		switch m.providers.mode {
+		case providerModeMenu:
+			m.providers.menuIndex = clamp(m.providers.menuIndex+1, 0, 3)
+		case providerModeSelect, providerModeEditPick, providerModeDelete:
+			m.providers.selectedProvider = clamp(m.providers.selectedProvider+1, 0, len(m.providers.names)-1)
+		case providerModeEditField:
+			m.providers.selectedField = clamp(m.providers.selectedField+1, 0, 4)
+		}
+		return m, nil
+	case "enter":
+		return m.handleProviderSelect()
+	}
+	return m, nil
+}
+
+func (m Model) handleProviderSelect() (tea.Model, tea.Cmd) {
+	switch m.providers.mode {
+	case providerModeMenu:
+		switch m.providers.menuIndex {
+		case 0:
+			m.beginProviderCreate()
+		case 1:
+			m.providers.mode = providerModeSelect
+		case 2:
+			m.providers.mode = providerModeEditPick
+		case 3:
+			m.providers.mode = providerModeDelete
+		}
+		return m, nil
+	case providerModeSelect:
+		if len(m.providers.names) == 0 {
+			return m, nil
+		}
+		selected := m.providers.names[m.providers.selectedProvider]
+		for name, provider := range m.providers.data.Providers {
+			provider.Active = name == selected
+			m.providers.data.Providers[name] = provider
+		}
+		return m, m.saveProvidersCmd(fmt.Sprintf("Active provider set to %s.", selected))
+	case providerModeDelete:
+		if len(m.providers.names) == 0 {
+			return m, nil
+		}
+		selected := m.providers.names[m.providers.selectedProvider]
+		delete(m.providers.data.Providers, selected)
+		return m, m.saveProvidersCmd(fmt.Sprintf("Provider %s deleted.", selected))
+	case providerModeEditPick:
+		if len(m.providers.names) == 0 {
+			return m, nil
+		}
+		m.providers.currentProviderRef = m.providers.names[m.providers.selectedProvider]
+		m.providers.mode = providerModeEditField
+		m.providers.selectedField = 0
+		return m, nil
+	case providerModeEditField:
+		return m.startEditFieldInput()
+	}
+	return m, nil
+}
+
+func (m Model) startEditFieldInput() (tea.Model, tea.Cmd) {
+	p := m.providers.data.Providers[m.providers.currentProviderRef]
+	m.providers.mode = providerModeEditInput
+	m.providers.input.Focus()
+	switch m.providers.selectedField {
+	case 0:
+		m.providers.inputPrompt = "Edit name"
+		m.providers.inputField = "name"
+		m.providers.input.SetValue(p.Name)
+	case 1:
+		m.providers.inputPrompt = "Edit base URL"
+		m.providers.inputField = "base_url"
+		m.providers.input.SetValue(p.BaseURL)
+	case 2:
+		m.providers.inputPrompt = "Edit model"
+		m.providers.inputField = "model"
+		m.providers.input.SetValue(p.Model)
+	case 3:
+		m.providers.inputPrompt = "Edit API key"
+		m.providers.inputField = "api_key"
+		m.providers.input.SetValue(p.APIKey)
+	case 4:
+		m.providers.inputPrompt = "Edit context size"
+		m.providers.inputField = "context_size"
+		m.providers.input.SetValue(fmt.Sprintf("%d", p.ContextSize))
+	}
+	return m, nil
+}
+
+func (m Model) submitProviderInput() (tea.Model, tea.Cmd) {
+	value := strings.TrimSpace(m.providers.input.Value())
+	switch m.providers.inputField {
+	case "name":
+		if value == "" {
+			return m, nil
+		}
+		if m.providers.mode == providerModeEditInput {
+			p := m.providers.data.Providers[m.providers.currentProviderRef]
+			delete(m.providers.data.Providers, m.providers.currentProviderRef)
+			p.Name = value
+			m.providers.data.Providers[value] = p
+			m.providers.currentProviderRef = value
+			return m, m.saveProvidersCmd("Provider name updated.")
+		}
+		m.providers.formName = value
+		m.providers.inputField = "base_url"
+		m.providers.inputPrompt = "Enter base URL"
+		m.providers.input.SetValue("")
+		return m, nil
+	case "base_url":
+		if value == "" {
+			return m, nil
+		}
+		if m.providers.mode == providerModeEditInput {
+			p := m.providers.data.Providers[m.providers.currentProviderRef]
+			p.BaseURL = config.NormalizeBaseURL(value)
+			m.providers.data.Providers[m.providers.currentProviderRef] = p
+			return m, m.saveProvidersCmd("Provider base URL updated.")
+		}
+		m.providers.formBaseURL = config.NormalizeBaseURL(value)
+		m.providers.inputField = "model"
+		m.providers.inputPrompt = "Enter model"
+		m.providers.input.SetValue("")
+		return m, nil
+	case "model":
+		if value == "" {
+			return m, nil
+		}
+		if m.providers.mode == providerModeEditInput {
+			p := m.providers.data.Providers[m.providers.currentProviderRef]
+			p.Model = value
+			m.providers.data.Providers[m.providers.currentProviderRef] = p
+			return m, m.saveProvidersCmd("Provider model updated.")
+		}
+		m.providers.formModel = value
+		m.providers.inputField = "api_key"
+		m.providers.inputPrompt = "Enter API key"
+		m.providers.input.SetValue("")
+		return m, nil
+	case "api_key":
+		if value == "" {
+			return m, nil
+		}
+		if m.providers.mode == providerModeEditInput {
+			p := m.providers.data.Providers[m.providers.currentProviderRef]
+			p.APIKey = value
+			m.providers.data.Providers[m.providers.currentProviderRef] = p
+			return m, m.saveProvidersCmd("Provider API key updated.")
+		}
+		m.providers.formAPIKey = value
+		m.providers.inputField = "context_size"
+		m.providers.inputPrompt = "Enter context size"
+		m.providers.input.SetValue("")
+		return m, nil
+	case "context_size":
+		size, err := parseContextSize(value)
+		if err != nil || size <= 0 {
+			return m, nil
+		}
+		if m.providers.mode == providerModeEditInput {
+			p := m.providers.data.Providers[m.providers.currentProviderRef]
+			p.ContextSize = size
+			m.providers.data.Providers[m.providers.currentProviderRef] = p
+			return m, m.saveProvidersCmd("Provider context size updated.")
+		}
+		m.providers.formContextSize = value
+		for name, provider := range m.providers.data.Providers {
+			provider.Active = false
+			m.providers.data.Providers[name] = provider
+		}
+		m.providers.data.Providers[m.providers.formName] = config.Provider{
+			Name:        m.providers.formName,
+			BaseURL:     m.providers.formBaseURL,
+			Model:       m.providers.formModel,
+			APIKey:      m.providers.formAPIKey,
+			ContextSize: size,
+			Active:      true,
+		}
+		return m, m.saveProvidersCmd(fmt.Sprintf("Provider %s created and activated.", m.providers.formName))
+	}
+	return m, nil
+}
+
+func (m Model) saveProvidersCmd(success string) tea.Cmd {
+	return func() tea.Msg {
+		if err := config.SaveProviders(m.providers.data); err != nil {
+			return providerSavedMsg{saved: false, message: err.Error()}
+		}
+		return providerSavedMsg{saved: true, message: success}
+	}
 }

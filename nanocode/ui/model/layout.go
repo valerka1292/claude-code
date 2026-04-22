@@ -5,6 +5,7 @@ import (
 	"nanocode/ui/components/header"
 	"nanocode/ui/components/nobby"
 	"nanocode/ui/components/prompt"
+	"nanocode/ui/components/providers"
 	"nanocode/ui/components/settings"
 	"nanocode/ui/components/suggestions"
 )
@@ -13,15 +14,19 @@ func (m *Model) resizeViewport() {
 	if m.layout.width == 0 || m.layout.height == 0 {
 		return
 	}
-	headerHeight := lipgloss.Height(header.View(m.cwd, nobby.Render(m.nobbyPose, m.nobbyStep)))
+	headerHeight := lipgloss.Height(header.View(m.cwd, nobby.Render(m.nobbyPose, m.nobbyStep), m.activeProviderName(), m.activeModelName()))
 	inputHeight := lipgloss.Height(prompt.InputBar(m.input.View(), m.layout.width))
-	footerHeight := lipgloss.Height(prompt.Footer())
+	footerHeight := lipgloss.Height(prompt.Footer(m.layout.width, m.usageLine()))
 	reserved := headerHeight + inputHeight + footerHeight + 3
 	if len(m.commands.suggestions) > 0 {
 		reserved += lipgloss.Height(suggestions.CommandList(m.layout.width, m.commands.suggestions, m.commands.selected))
 	}
 	if m.settings.open {
 		reserved += lipgloss.Height(settings.Panel(m.layout.width, m.settings.selectedStyle, m.settings.values.SpinnerStyle))
+	}
+	if m.providers.open {
+		title, desc, options, selected, inputView := m.providerPanelViewData()
+		reserved += lipgloss.Height(providers.Panel(m.layout.width, title, desc, options, selected, inputView))
 	}
 	vHeight := m.layout.height - reserved
 	if vHeight < 6 {
