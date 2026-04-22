@@ -4,8 +4,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"nanocode/ui/theme"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 type Pose string
@@ -128,7 +129,9 @@ func DurationFor(pose Pose, step int) time.Duration {
 func Render(pose Pose, step int) string {
 	f := FrameFor(pose, step)
 	lineStyle := lipgloss.NewStyle().Foreground(f.Color)
-	bodyStyle := lipgloss.NewStyle().Foreground(f.Color).Background(theme.SurfaceBackground)
+
+	// 1. Убрали Background(theme.SurfaceBackground)
+	bodyStyle := lipgloss.NewStyle().Foreground(f.Color)
 
 	lines := []string{
 		lineStyle.Render(f.Antenna),
@@ -137,8 +140,6 @@ func Render(pose Pose, step int) string {
 		lineStyle.Render(f.Legs),
 	}
 
-	container := lipgloss.NewStyle().
-		Background(theme.SurfaceBackground).
-		Padding(0, 1)
+	container := lipgloss.NewStyle().Padding(0, 1)
 	return container.Render(strings.Join(lines, "\n"))
 }

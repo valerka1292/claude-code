@@ -1,10 +1,9 @@
 package header
 
 import (
-	"fmt"
+	"nanocode/ui/theme"
 
 	"github.com/charmbracelet/lipgloss"
-	"nanocode/ui/theme"
 )
 
 var (
@@ -14,16 +13,20 @@ var (
 )
 
 func View(cwd string, mascot string) string {
-	rows := []string{
+
+	infoRows := []string{
 		titleStyle.Render("nanocode v0.0.1"),
 		metaStyle.Render("Mock Model · API Usage Billing"),
 		metaStyle.Render(cwd),
-		"",
-		noteStyle.Render("↑ Fastest coding agent· 5x faster than other agents, 5x cheaper!"),
 	}
+	info := lipgloss.NewStyle().PaddingLeft(1).Render(lipgloss.JoinVertical(lipgloss.Left, infoRows...))
 
-	info := lipgloss.NewStyle().PaddingLeft(1).Render(fmt.Sprintf("%s", lipgloss.JoinVertical(lipgloss.Left, rows...)))
+	topSection := lipgloss.JoinHorizontal(lipgloss.Top, mascot, info)
+
+	note := noteStyle.Render("↑ Fastest coding agent· 5x faster than other agents, 5x cheaper!")
+
+	content := lipgloss.JoinVertical(lipgloss.Left, topSection, "", note)
 
 	wrap := lipgloss.NewStyle().Background(theme.AppBackground).Padding(0, 1)
-	return wrap.Render(lipgloss.JoinHorizontal(lipgloss.Top, mascot, info))
+	return wrap.Render(content)
 }
