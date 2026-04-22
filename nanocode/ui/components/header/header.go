@@ -14,7 +14,7 @@ var (
 	noteStyle    = lipgloss.NewStyle().Foreground(theme.SecondaryAccent).Bold(true)
 )
 
-func View(cwd string, mascot string) string {
+func View(cwd string, mascot string, providerName string, modelName string) string {
 	title := lipgloss.JoinHorizontal(
 		lipgloss.Left,
 		nameStyle.Render(version.Name),
@@ -24,7 +24,7 @@ func View(cwd string, mascot string) string {
 
 	infoRows := []string{
 		title,
-		metaStyle.Render("Mock Model · API Usage Billing"),
+		metaStyle.Render(modelName + " · " + providerName),
 		metaStyle.Render(cwd),
 	}
 	info := lipgloss.NewStyle().PaddingLeft(1).Render(lipgloss.JoinVertical(lipgloss.Left, infoRows...))
