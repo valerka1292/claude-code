@@ -56,6 +56,10 @@ type ChatState struct {
 	streamingText    string
 	streamingThought string
 	usage            UsageState
+	cycleStartedAt   time.Time
+	liveDownTokens   int
+	showInferring    bool
+	lastWorkedForSec int
 }
 
 type CommandState struct {

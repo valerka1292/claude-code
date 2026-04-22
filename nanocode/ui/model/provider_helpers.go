@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"nanocode/ui/components/providers"
+	"nanocode/ui/components/spinner"
 	"nanocode/ui/config"
 )
 
@@ -42,6 +44,40 @@ func (m Model) usageLine() string {
 	used := m.chat.usage.TotalTokens
 	percent := (float64(used) / float64(active.ContextSize)) * 100
 	return fmt.Sprintf("%s / %s (%.1f%% ctx)", formatCompact(used), formatCompact(active.ContextSize), percent)
+}
+
+func (m Model) footerStatusText() string {
+	parts := make([]string, 0, 2)
+	if usage := m.usageLine(); usage != "" {
+		parts = append(parts, usage)
+	}
+	if status := m.agentStatusLine(); status != "" {
+		parts = append(parts, status)
+	}
+	return strings.Join(parts, "  ")
+}
+
+func (m Model) agentStatusLine() string {
+	if m.chat.showInferring && !m.chat.cycleStartedAt.IsZero() {
+		elapsed := int(time.Since(m.chat.cycleStartedAt).Seconds())
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		return fmt.Sprintf(
+			"%s Inferring… (%ds · ↓ %s tokens · thinking)",
+			spinner.Indicator(m.settings.values.SpinnerStyle, m.chat.spinnerStep),
+			elapsed,
+			formatCompact(m.chat.liveDownTokens),
+		)
+	}
+	if m.chat.lastWorkedForSec > 0 {
+		return fmt.Sprintf(
+			"%s Worked for %ds",
+			spinner.Indicator(m.settings.values.SpinnerStyle, m.chat.spinnerStep),
+			m.chat.lastWorkedForSec,
+		)
+	}
+	return ""
 }
 
 func formatCompact(value int) string {

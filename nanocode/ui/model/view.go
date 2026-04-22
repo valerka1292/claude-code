@@ -21,11 +21,8 @@ func (m *Model) refreshViewport(forceBottom bool) {
 		return
 	}
 	spinnerLine := ""
-	if m.chat.thinking {
-		spinnerLine = spinner.Status(m.chat.spinnerStep, m.chat.spinnerVerb, m.settings.values.SpinnerStyle)
-	}
 	wasBottom := m.viewport.AtBottom()
-	content := messages.View(m.chat.messages, m.viewport.Width, spinnerLine, m.chat.streamingThought, m.chat.streamingText)
+	content := messages.View(m.chat.messages, m.viewport.Width, spinnerLine, "", m.chat.streamingText)
 	m.viewport.SetContent(content)
 	targetHeight := min(max(1, m.viewport.TotalLineCount()), m.layout.viewportMaxHeight)
 	if targetHeight < 1 {
@@ -59,7 +56,7 @@ func (m Model) View() string {
 		parts = append(parts, providers.Panel(m.layout.width, title, desc, options, selected, inputView))
 	}
 
-	parts = append(parts, prompt.Footer(m.layout.width, m.usageLine()))
+	parts = append(parts, prompt.Footer(m.layout.width, m.footerStatusText()))
 	root := lipgloss.NewStyle().Background(theme.AppBackground).Foreground(theme.PrimaryText)
 	return root.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }

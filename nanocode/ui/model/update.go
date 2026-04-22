@@ -50,6 +50,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.thinking = false
 			m.chat.spinnerVerb = ""
 			m.chat.spinnerStep = 0
+			m.chat.showInferring = false
+			if !m.chat.cycleStartedAt.IsZero() {
+				m.chat.lastWorkedForSec = int(time.Since(m.chat.cycleStartedAt).Seconds())
+			}
 			if strings.TrimSpace(m.chat.streamingText) != "" {
 				m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: m.chat.streamingText, Timestamp: time.Now()})
 			}
@@ -61,6 +65,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.event.ErrorText != "" {
 			m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: "Error: " + msg.event.ErrorText, Timestamp: time.Now()})
 			m.chat.thinking = false
+			m.chat.showInferring = false
 			m.chat.streamingText = ""
 			m.chat.streamingThought = ""
 			m.refreshViewport(true)
@@ -68,12 +73,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.event.ReasoningDelta != "" {
 			m.chat.streamingThought += msg.event.ReasoningDelta
+			m.chat.liveDownTokens += estimateTokens(msg.event.ReasoningDelta)
 		}
 		if msg.event.ContentDelta != "" {
+			m.chat.showInferring = false
 			m.chat.streamingText += msg.event.ContentDelta
+			m.chat.liveDownTokens += estimateTokens(msg.event.ContentDelta)
 		}
 		if msg.event.Usage != nil {
 			m.chat.usage = *msg.event.Usage
+			if msg.event.Usage.CompletionTokens > 0 {
+				m.chat.liveDownTokens = msg.event.Usage.CompletionTokens
+			}
 		}
 		m.refreshViewport(true)
 		return m, pollStreamCmd(m.stream.ch)
@@ -88,7 +99,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return nextModel, cmd
 		}
 	case spinnerTickMsg:
-		if !m.chat.thinking {
+		if !m.chat.thinking || !m.chat.showInferring {
 			return m, nil
 		}
 		m.chat.spinnerStep++
@@ -192,6 +203,10 @@ func (m Model) executeInput() (tea.Model, tea.Cmd) {
 	m.chat.spinnerVerb = spinner.RandomVerb()
 	m.chat.streamingText = ""
 	m.chat.streamingThought = ""
+	m.chat.cycleStartedAt = time.Now()
+	m.chat.liveDownTokens = 0
+	m.chat.showInferring = true
+	m.chat.lastWorkedForSec = 0
 	m.resizeViewport()
 	m.refreshViewport(true)
 	return m, tea.Batch(spinnerTickCmd(m.settings.values.SpinnerStyle), startAgentStreamCmd(active, m.chat.messages))
