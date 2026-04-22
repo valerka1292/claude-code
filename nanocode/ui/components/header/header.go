@@ -2,20 +2,28 @@ package header
 
 import (
 	"nanocode/ui/theme"
+	"nanocode/version"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
 var (
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.PrimaryText)
-	metaStyle  = lipgloss.NewStyle().Foreground(theme.MutedText)
-	noteStyle  = lipgloss.NewStyle().Foreground(theme.SecondaryAccent).Bold(true)
+	nameStyle    = lipgloss.NewStyle().Bold(true).Foreground(theme.PrimaryText)
+	versionStyle = lipgloss.NewStyle().Foreground(theme.MutedText)
+	metaStyle    = lipgloss.NewStyle().Foreground(theme.MutedText)
+	noteStyle    = lipgloss.NewStyle().Foreground(theme.SecondaryAccent).Bold(true)
 )
 
 func View(cwd string, mascot string) string {
+	title := lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		nameStyle.Render(version.Name),
+		" ",
+		versionStyle.Render("v"+version.Current),
+	)
 
 	infoRows := []string{
-		titleStyle.Render("nanocode v0.0.1"),
+		title,
 		metaStyle.Render("Mock Model · API Usage Billing"),
 		metaStyle.Render(cwd),
 	}
