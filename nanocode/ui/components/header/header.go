@@ -4,29 +4,26 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
+	"nanocode/ui/theme"
 )
 
 var (
-	logoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("209"))
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("252"))
-	metaStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	noteStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.PrimaryText)
+	metaStyle  = lipgloss.NewStyle().Foreground(theme.MutedText)
+	noteStyle  = lipgloss.NewStyle().Foreground(theme.SecondaryAccent).Bold(true)
 )
 
-func View(cwd string) string {
-	art := []string{
-		" ▐▛███▜▌   ",
-		"▝▜█████▛▘  ",
-		"  ▘▘ ▝▝    ",
-	}
-
+func View(cwd string, mascot string) string {
 	rows := []string{
-		logoStyle.Render(art[0]) + titleStyle.Render("nanocode v0.0.1"),
-		logoStyle.Render(art[1]) + metaStyle.Render("Mock Model · API Usage Billing"),
-		logoStyle.Render(art[2]) + metaStyle.Render(cwd),
+		titleStyle.Render("nanocode v0.0.1"),
+		metaStyle.Render("Mock Model · API Usage Billing"),
+		metaStyle.Render(cwd),
 		"",
-		noteStyle.Render(" ↑ Fastest coding agent· 5x faster than other agents, 5x cheaper!"),
+		noteStyle.Render("↑ Fastest coding agent· 5x faster than other agents, 5x cheaper!"),
 	}
 
-	return lipgloss.NewStyle().Padding(0, 1).Render(fmt.Sprintf("%s", lipgloss.JoinVertical(lipgloss.Left, rows...)))
+	info := lipgloss.NewStyle().PaddingLeft(1).Render(fmt.Sprintf("%s", lipgloss.JoinVertical(lipgloss.Left, rows...)))
+
+	wrap := lipgloss.NewStyle().Background(theme.AppBackground).Padding(0, 1)
+	return wrap.Render(lipgloss.JoinHorizontal(lipgloss.Top, mascot, info))
 }

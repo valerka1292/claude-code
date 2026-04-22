@@ -4,14 +4,15 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"nanocode/ui/theme"
 	"nanocode/ui/types"
 )
 
 var (
-	panelStyle = lipgloss.NewStyle().Padding(0, 0, 1, 0)
-	userStyle  = lipgloss.NewStyle().Background(lipgloss.Color("238")).Foreground(lipgloss.Color("255")).Padding(0, 1)
-	agentStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).PaddingLeft(1)
-	dotStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	panelStyle = lipgloss.NewStyle().Padding(0, 0, 1, 0).Background(theme.AppBackground)
+	userStyle  = lipgloss.NewStyle().Background(theme.SurfaceBackground).Foreground(theme.PrimaryText).Padding(0, 1)
+	agentStyle = lipgloss.NewStyle().Foreground(theme.PrimaryText).PaddingLeft(1)
+	dotStyle   = lipgloss.NewStyle().Foreground(theme.PrimaryAccent)
 )
 
 func View(list []types.Message, width int, spinnerLine string) string {

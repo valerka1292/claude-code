@@ -13,9 +13,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"nanocode/ui/components/header"
 	"nanocode/ui/components/messages"
+	"nanocode/ui/components/nobby"
 	"nanocode/ui/components/prompt"
 	"nanocode/ui/components/spinner"
 	"nanocode/ui/config"
+	"nanocode/ui/theme"
 	"nanocode/ui/types"
 )
 
@@ -24,6 +26,8 @@ type spinnerTickMsg time.Time
 type assistantReplyMsg struct{}
 
 type spinnerChangedMsg struct{ saved bool }
+
+type nobbyTickMsg time.Time
 
 type command struct {
 	Name string
@@ -47,6 +51,9 @@ type Model struct {
 	commandIndex       int
 	settingsOpen       bool
 	settingsIndex      int
+
+	nobbyPose nobby.Pose
+	nobbyStep int
 }
 
 func New() Model {
@@ -80,13 +87,15 @@ func New() Model {
 		settingsOpen:       false,
 		spinnerStep:        0,
 		commandSuggestions: nil,
+		nobbyPose:          nobby.PoseIdle,
+		nobbyStep:          0,
 	}
 	m.refreshViewport(true)
 	return m
 }
 
 func (m Model) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, nobbyTickCmd(m.nobbyPose, m.nobbyStep))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -98,6 +107,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resizeViewport()
 		m.refreshViewport(false)
 		return m, nil
+
+	case nobbyTickMsg:
+		m.nobbyStep++
+		return m, nobbyTickCmd(m.nobbyPose, m.nobbyStep)
 
 	case spinnerChangedMsg:
 		if msg.saved {
@@ -125,6 +138,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "tab":
 				m.input.SetValue(m.commandSuggestions[m.commandIndex] + " ")
 				m.clearCommandSuggestions()
+				m.resizeViewport()
 				return m, nil
 			}
 		}
@@ -156,6 +170,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				selected := m.commandSuggestions[m.commandIndex]
 				m.input.SetValue(selected)
 				m.clearCommandSuggestions()
+				m.resizeViewport()
 				return m.executeInput()
 			}
 			return m.executeInput()
@@ -195,6 +210,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	m.updateCommandSuggestions()
+	m.resizeViewport()
 	m.refreshViewport(false)
 	return m, cmd
 }
@@ -210,6 +226,7 @@ func (m Model) executeInput() (tea.Model, tea.Cmd) {
 		m.settingsIndex = spinnerIndexFor(m.settings.SpinnerStyle)
 		m.input.SetValue("")
 		m.clearCommandSuggestions()
+		m.resizeViewport()
 		return m, nil
 	}
 
@@ -219,6 +236,7 @@ func (m Model) executeInput() (tea.Model, tea.Cmd) {
 	m.thinking = true
 	m.spinnerStep = 0
 	m.spinnerVerb = spinner.RandomVerb()
+	m.resizeViewport()
 	m.refreshViewport(true)
 	return m, tea.Batch(spinnerTickCmd(m.settings.SpinnerStyle), mockReplyCmd())
 }
@@ -227,6 +245,7 @@ func (m Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.settingsOpen = false
+		m.resizeViewport()
 		return m, nil
 	case "up":
 		m.settingsIndex = clamp(m.settingsIndex-1, 0, 1)
@@ -238,6 +257,7 @@ func (m Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		style := spinnerStyleFor(m.settingsIndex)
 		m.settings.SpinnerStyle = style
 		m.settingsOpen = false
+		m.resizeViewport()
 		m.refreshViewport(false)
 		return m, func() tea.Msg {
 			if err := config.SaveSettings(m.settings); err != nil {
@@ -278,7 +298,7 @@ func (m *Model) resizeViewport() {
 	if m.width == 0 || m.height == 0 {
 		return
 	}
-	headerHeight := lipgloss.Height(header.View(m.cwd))
+	headerHeight := lipgloss.Height(header.View(m.cwd, nobby.Render(m.nobbyPose, m.nobbyStep)))
 	inputHeight := lipgloss.Height(prompt.InputBar(m.input.View(), m.width))
 	footerHeight := lipgloss.Height(prompt.Footer())
 	reserved := headerHeight + inputHeight + footerHeight + 3
@@ -317,7 +337,8 @@ func (m Model) View() string {
 		return "Loading..."
 	}
 
-	headerView := header.View(m.cwd)
+	nobbyView := nobby.Render(m.nobbyPose, m.nobbyStep)
+	headerView := header.View(m.cwd, nobbyView)
 	inputView := prompt.InputBar(m.input.View(), m.width)
 	parts := []string{headerView, "", m.viewport.View(), inputView}
 
@@ -329,7 +350,14 @@ func (m Model) View() string {
 	}
 
 	parts = append(parts, prompt.Footer())
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	root := lipgloss.NewStyle().Background(theme.AppBackground).Foreground(theme.PrimaryText)
+	return root.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
+}
+
+func nobbyTickCmd(pose nobby.Pose, step int) tea.Cmd {
+	return tea.Tick(nobby.DurationFor(pose, step), func(t time.Time) tea.Msg {
+		return nobbyTickMsg(t)
+	})
 }
 
 func spinnerTickCmd(style string) tea.Cmd {
