@@ -23,7 +23,7 @@ func View(list []types.Message, width int, spinnerLine string, thinking string, 
 		case types.RoleUser:
 			lines = append(lines, userStyle.Width(max(width-2, 10)).Render("❯ "+msg.Text))
 		case types.RoleAssistant:
-			lines = append(lines, agentStyle.Render(dotStyle.Render("• ")+msg.Text))
+			lines = append(lines, agentStyle.Render(renderAssistantBlock(msg.Text, width, false)))
 		}
 		lines = append(lines, "")
 	}
@@ -35,7 +35,7 @@ func View(list []types.Message, width int, spinnerLine string, thinking string, 
 		lines = append(lines, thinkStyle.Render("thinking: "+thinking), "")
 	}
 	if streamingText != "" {
-		lines = append(lines, agentStyle.Render(dotStyle.Render("• ")+streamingText), "")
+		lines = append(lines, agentStyle.Render(renderAssistantBlock(streamingText, width, true)), "")
 	}
 
 	if len(lines) == 0 {
@@ -43,6 +43,20 @@ func View(list []types.Message, width int, spinnerLine string, thinking string, 
 	}
 
 	return panelStyle.Width(width).Render(strings.Join(lines, "\n"))
+}
+
+func renderAssistantBlock(text string, width int, streaming bool) string {
+	rendered := renderMarkdown(text, max(width-4, minMarkdownWidth), streaming)
+	if rendered == "" {
+		return dotStyle.Render("•")
+	}
+
+	rows := strings.Split(rendered, "\n")
+	rows[0] = dotStyle.Render("• ") + rows[0]
+	for i := 1; i < len(rows); i++ {
+		rows[i] = "  " + rows[i]
+	}
+	return strings.Join(rows, "\n")
 }
 
 func max(a, b int) int {
