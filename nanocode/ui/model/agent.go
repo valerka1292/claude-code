@@ -84,7 +84,15 @@ func startAgentStreamCmd(provider config.Provider, history []types.Message) tea.
 
 func runAgentLoop(provider config.Provider, history []types.Message, out chan<- streamEvent) {
 	defer close(out)
+<<<<<<< 979ixv-codex/implement-streaming-agent-cycle-with-provider-settings
+	apiHistory := make([]apiMessage, 0, len(history)+1)
+	apiHistory = append(apiHistory, apiMessage{
+		Role:    "system",
+		Content: buildSystemPrompt(),
+	})
+=======
 	apiHistory := make([]apiMessage, 0, len(history))
+>>>>>>> main
 	for _, msg := range history {
 		apiHistory = append(apiHistory, apiMessage{Role: string(msg.Role), Content: msg.Text})
 	}
