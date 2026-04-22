@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	panelStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, true, false).BorderForeground(lipgloss.Color("238"))
+	panelStyle = lipgloss.NewStyle().Padding(0, 0, 1, 0)
 	userStyle  = lipgloss.NewStyle().Background(lipgloss.Color("238")).Foreground(lipgloss.Color("255")).Padding(0, 1)
 	agentStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).PaddingLeft(1)
 	dotStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
@@ -23,10 +23,12 @@ func View(list []types.Message, width, height int, spinnerLine string) string {
 		case types.RoleAssistant:
 			lines = append(lines, agentStyle.Render(dotStyle.Render("• ")+msg.Text))
 		}
+		// extra breathing room between turns/messages
+		lines = append(lines, "")
 	}
 
 	if spinnerLine != "" {
-		lines = append(lines, agentStyle.Render(spinnerLine))
+		lines = append(lines, agentStyle.Render(spinnerLine), "")
 	}
 
 	if len(lines) == 0 {

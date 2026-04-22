@@ -37,7 +37,7 @@ func New() Model {
 	in := textinput.New()
 	in.Focus()
 	in.Prompt = ""
-	in.Placeholder = "Напишите сообщение..."
+	in.Placeholder = "Type a message..."
 	in.CharLimit = 1000
 	in.Width = 80
 
@@ -104,7 +104,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.messages = append(m.messages, types.Message{
 			Role:      types.RoleAssistant,
-			Text:      fmt.Sprintf("Принял: %q. Это мок-ответ nanocode после 2 секунд ожидания.", userText),
+			Text:      fmt.Sprintf("Got it: %q. This is a mock nanocode response after a 2-second wait.", userText),
 			Timestamp: time.Now(),
 		})
 		m.thinking = false
