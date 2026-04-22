@@ -14,7 +14,7 @@ var (
 	dotStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 )
 
-func View(list []types.Message, width, height int, spinnerLine string) string {
+func View(list []types.Message, width int, spinnerLine string) string {
 	var lines []string
 	for _, msg := range list {
 		switch msg.Role {
@@ -23,7 +23,6 @@ func View(list []types.Message, width, height int, spinnerLine string) string {
 		case types.RoleAssistant:
 			lines = append(lines, agentStyle.Render(dotStyle.Render("• ")+msg.Text))
 		}
-		// extra breathing room between turns/messages
 		lines = append(lines, "")
 	}
 
@@ -33,10 +32,6 @@ func View(list []types.Message, width, height int, spinnerLine string) string {
 
 	if len(lines) == 0 {
 		lines = append(lines, "")
-	}
-
-	if height > 0 && len(lines) > height {
-		lines = lines[len(lines)-height:]
 	}
 
 	return panelStyle.Width(width).Render(strings.Join(lines, "\n"))

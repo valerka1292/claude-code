@@ -3,10 +3,11 @@ package spinner
 import (
 	"fmt"
 	"math/rand"
-	"strings"
+	"time"
+
+	"nanocode/ui/config"
 )
 
-// Nano-themed status verbs.
 var verbs = []string{
 	"Assembling nanoblocks",
 	"Growing lattice",
@@ -15,29 +16,39 @@ var verbs = []string{
 	"Aligning bits",
 }
 
-// Materialization animation: empty -> dense.
-var blockFrames = []rune{'░', '▒', '▓', '█'}
+var hexFrames = []string{
+	"⬢ ⬡ ⬡",
+	"⬡ ⬢ ⬡",
+	"⬡ ⬡ ⬢",
+	"⬡ ⬢ ⬡",
+}
+
+var circleFrames = []string{
+	"·",
+	"◦",
+	"○",
+	"◦",
+}
 
 func RandomVerb() string {
 	return verbs[rand.Intn(len(verbs))]
 }
 
-func Status(frame int, verb string) string {
-	phase := frame % len(blockFrames)
-	barWidth := 6
-	filled := (frame % (barWidth + 1))
-	if filled == 0 {
-		filled = 1
+func Frame(style string, i int) string {
+	frames := circleFrames
+	if style == config.SpinnerHexagons {
+		frames = hexFrames
 	}
-
-	bar := strings.Repeat(string(blockFrames[phase]), filled)
-	pad := strings.Repeat(" ", max(0, barWidth-filled))
-	return fmt.Sprintf("[%s%s] %s...", bar, pad, verb)
+	return frames[i%len(frames)]
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
+func Interval(style string) time.Duration {
+	if style == config.SpinnerHexagons {
+		return 250 * time.Millisecond
 	}
-	return b
+	return 200 * time.Millisecond
+}
+
+func Status(frame int, verb string, style string) string {
+	return fmt.Sprintf("%s %s...", Frame(style, frame), verb)
 }
