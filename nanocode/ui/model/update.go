@@ -41,7 +41,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.settings.open {
 			return m.handleSettingsKeys(msg)
 		}
-		return m.handleKeyMsg(msg)
+		if nextModel, cmd, handled := m.handleKeyMsg(msg); handled {
+			return nextModel, cmd
+		}
 
 	case spinnerTickMsg:
 		if !m.chat.thinking {
@@ -82,57 +84,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	if len(m.commands.suggestions) > 0 {
 		switch msg.String() {
 		case "up":
 			m.commands.selected = clamp(m.commands.selected-1, 0, len(m.commands.suggestions)-1)
-			return m, nil
+			return m, nil, true
 		case "down":
 			m.commands.selected = clamp(m.commands.selected+1, 0, len(m.commands.suggestions)-1)
-			return m, nil
+			return m, nil, true
 		case "tab":
 			m.input.SetValue(m.commands.suggestions[m.commands.selected] + " ")
 			m.clearCommandSuggestions()
 			m.resizeViewport()
-			return m, nil
+			return m, nil, true
 		}
 	}
 
 	switch msg.String() {
 	case "ctrl+c", "esc":
-		return m, tea.Quit
+		return m, tea.Quit, true
 	case "pgup":
 		m.viewport.HalfViewUp()
-		return m, nil
+		return m, nil, true
 	case "pgdown":
 		m.viewport.HalfViewDown()
-		return m, nil
+		return m, nil, true
 	case "up":
 		if len(m.commands.suggestions) == 0 {
 			m.viewport.LineUp(1)
-			return m, nil
+			return m, nil, true
 		}
 	case "down":
 		if len(m.commands.suggestions) == 0 {
 			m.viewport.LineDown(1)
-			return m, nil
+			return m, nil, true
 		}
 	case "enter":
 		if m.chat.thinking {
-			return m, nil
+			return m, nil, true
 		}
 		if len(m.commands.suggestions) > 0 {
 			selected := m.commands.suggestions[m.commands.selected]
 			m.input.SetValue(selected)
 			m.clearCommandSuggestions()
 			m.resizeViewport()
-			return m.executeInput()
+			nextModel, cmd := m.executeInput()
+			return nextModel, cmd, true
 		}
-		return m.executeInput()
+		nextModel, cmd := m.executeInput()
+		return nextModel, cmd, true
 	}
 
-	return m, nil
+	return m, nil, false
 }
 
 func (m Model) executeInput() (tea.Model, tea.Cmd) {
