@@ -18,6 +18,18 @@ func InputBar(text string, width int) string {
 	return boxStyle.Width(width).Render("❯ " + text)
 }
 
-func Footer() string {
-	return footerStyle.Render("⏵⏵ accept edits on (shift+tab to cycle)")
+func Footer(width int, usage string) string {
+	left := footerStyle.Render("⏵⏵ accept edits on (shift+tab to cycle)")
+	right := footerStyle.Foreground(theme.MutedText).Render(usage)
+	if usage == "" {
+		return left
+	}
+	return lipgloss.NewStyle().Width(width).Render(lipgloss.JoinHorizontal(lipgloss.Top, left, lipgloss.NewStyle().Width(max(0, width-lipgloss.Width(left)-lipgloss.Width(right))).Render(""), right))
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

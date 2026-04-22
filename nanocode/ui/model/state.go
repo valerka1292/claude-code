@@ -14,18 +14,24 @@ import (
 )
 
 type spinnerTickMsg time.Time
-
-type assistantReplyMsg struct{}
-
 type spinnerChangedMsg struct{ saved bool }
-
+type providerSavedMsg struct {
+	saved   bool
+	message string
+}
 type nobbyTickMsg time.Time
+
+type streamStartedMsg struct{ ch <-chan streamEvent }
+type streamEventMsg struct {
+	event streamEvent
+	done  bool
+}
 
 type command struct {
 	Name string
 }
 
-var availableCommands = []command{{Name: "/settings"}}
+var availableCommands = []command{{Name: "/settings"}, {Name: "/provider"}}
 
 type LayoutState struct {
 	width             int
@@ -35,11 +41,21 @@ type LayoutState struct {
 	scrollbarDragging bool
 }
 
+type UsageState struct {
+	PromptTokens     int
+	CompletionTokens int
+	ReasoningTokens  int
+	TotalTokens      int
+}
+
 type ChatState struct {
-	messages    []types.Message
-	thinking    bool
-	spinnerVerb string
-	spinnerStep int
+	messages         []types.Message
+	thinking         bool
+	spinnerVerb      string
+	spinnerStep      int
+	streamingText    string
+	streamingThought string
+	usage            UsageState
 }
 
 type CommandState struct {
@@ -53,6 +69,44 @@ type SettingsState struct {
 	values        config.Settings
 }
 
+type providerMode string
+
+const (
+	providerModeMenu       providerMode = "menu"
+	providerModeCreate     providerMode = "create"
+	providerModeSelect     providerMode = "select"
+	providerModeEditPick   providerMode = "edit_pick"
+	providerModeEditField  providerMode = "edit_field"
+	providerModeEditInput  providerMode = "edit_input"
+	providerModeDelete     providerMode = "delete"
+	providerModeInputValue providerMode = "input_value"
+)
+
+type ProviderState struct {
+	open               bool
+	mode               providerMode
+	menuIndex          int
+	selectedProvider   int
+	selectedField      int
+	input              textinput.Model
+	data               config.ProvidersFile
+	names              []string
+	formName           string
+	formBaseURL        string
+	formModel          string
+	formAPIKey         string
+	formContextSize    string
+	inputPrompt        string
+	inputField         string
+	inputProviderName  string
+	inputValuePrefill  string
+	currentProviderRef string
+}
+
+type StreamState struct {
+	ch <-chan streamEvent
+}
+
 type Model struct {
 	cwd       string
 	input     textinput.Model
@@ -60,10 +114,12 @@ type Model struct {
 	nobbyPose nobby.Pose
 	nobbyStep int
 
-	layout   LayoutState
-	chat     ChatState
-	commands CommandState
-	settings SettingsState
+	layout    LayoutState
+	chat      ChatState
+	commands  CommandState
+	settings  SettingsState
+	providers ProviderState
+	stream    StreamState
 }
 
 func New() Model {
@@ -85,14 +141,22 @@ func New() Model {
 		cfg = config.DefaultSettings()
 	}
 
-	vp := viewport.New(80, 10)
+	providers, err := config.LoadProviders()
+	if err != nil {
+		providers = config.ProvidersFile{Providers: map[string]config.Provider{}}
+	}
 
+	panelInput := textinput.New()
+	panelInput.Prompt = ""
+	panelInput.CharLimit = 2048
+	panelInput.Width = 48
+
+	vp := viewport.New(80, 10)
 	m := Model{
 		cwd:       cwd,
 		input:     in,
 		viewport:  vp,
 		nobbyPose: nobby.PoseIdle,
-		nobbyStep: 0,
 		layout:    LayoutState{},
 		chat:      ChatState{},
 		commands:  CommandState{},
@@ -100,7 +164,13 @@ func New() Model {
 			values:        cfg,
 			selectedStyle: spinnerIndexFor(cfg.SpinnerStyle),
 		},
+		providers: ProviderState{
+			mode:  providerModeMenu,
+			input: panelInput,
+			data:  providers,
+		},
 	}
+	m.providers.names = config.ProviderNames(m.providers.data)
 	m.refreshViewport(true)
 	return m
 }
