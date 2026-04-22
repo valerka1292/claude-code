@@ -1,0 +1,34 @@
+package model
+
+import (
+	"github.com/charmbracelet/lipgloss"
+	"nanocode/ui/components/header"
+	"nanocode/ui/components/nobby"
+	"nanocode/ui/components/prompt"
+	"nanocode/ui/components/settings"
+	"nanocode/ui/components/suggestions"
+)
+
+func (m *Model) resizeViewport() {
+	if m.layout.width == 0 || m.layout.height == 0 {
+		return
+	}
+	headerHeight := lipgloss.Height(header.View(m.cwd, nobby.Render(m.nobbyPose, m.nobbyStep)))
+	inputHeight := lipgloss.Height(prompt.InputBar(m.input.View(), m.layout.width))
+	footerHeight := lipgloss.Height(prompt.Footer())
+	reserved := headerHeight + inputHeight + footerHeight + 3
+	if len(m.commands.suggestions) > 0 {
+		reserved += lipgloss.Height(suggestions.CommandList(m.layout.width, m.commands.suggestions, m.commands.selected))
+	}
+	if m.settings.open {
+		reserved += lipgloss.Height(settings.Panel(m.layout.width, m.settings.selectedStyle, m.settings.values.SpinnerStyle))
+	}
+	vHeight := m.layout.height - reserved
+	if vHeight < 6 {
+		vHeight = 6
+	}
+	m.layout.viewportTop = headerHeight + 1
+	m.layout.viewportMaxHeight = vHeight
+	m.viewport.Width = max(10, m.layout.width-1)
+	m.viewport.Height = vHeight
+}
