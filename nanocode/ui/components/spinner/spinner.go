@@ -52,3 +52,10 @@ func Interval(style string) time.Duration {
 func Status(frame int, verb string, style string) string {
 	return fmt.Sprintf("%s %s...", Frame(style, frame), verb)
 }
+
+func Indicator(style string, frame int) string {
+	if style == config.SpinnerHexagons {
+		return "⬢"
+	}
+	return circleFrames[frame%len(circleFrames)]
+}

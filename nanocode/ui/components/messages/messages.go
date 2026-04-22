@@ -12,10 +12,11 @@ var (
 	panelStyle = lipgloss.NewStyle().Padding(0, 0, 1, 0).Background(theme.AppBackground)
 	userStyle  = lipgloss.NewStyle().Background(theme.SurfaceBackground).Foreground(theme.PrimaryText).Padding(0, 1)
 	agentStyle = lipgloss.NewStyle().Foreground(theme.PrimaryText).PaddingLeft(1)
+	thinkStyle = lipgloss.NewStyle().Foreground(theme.MutedText).PaddingLeft(3)
 	dotStyle   = lipgloss.NewStyle().Foreground(theme.PrimaryAccent)
 )
 
-func View(list []types.Message, width int, spinnerLine string) string {
+func View(list []types.Message, width int, spinnerLine string, thinking string, streamingText string) string {
 	var lines []string
 	for _, msg := range list {
 		switch msg.Role {
@@ -29,6 +30,12 @@ func View(list []types.Message, width int, spinnerLine string) string {
 
 	if spinnerLine != "" {
 		lines = append(lines, agentStyle.Render(spinnerLine), "")
+	}
+	if thinking != "" {
+		lines = append(lines, thinkStyle.Render("thinking: "+thinking), "")
+	}
+	if streamingText != "" {
+		lines = append(lines, agentStyle.Render(dotStyle.Render("• ")+streamingText), "")
 	}
 
 	if len(lines) == 0 {
