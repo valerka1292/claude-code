@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"strings"
@@ -54,6 +55,10 @@ type Model struct {
 
 	nobbyPose nobby.Pose
 	nobbyStep int
+
+	viewportMaxHeight int
+	viewportTop       int
+	scrollbarDragging bool
 }
 
 func New() Model {
@@ -107,6 +112,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resizeViewport()
 		m.refreshViewport(false)
 		return m, nil
+
+	case tea.MouseMsg:
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		if !m.hasScrollableContent() {
+			m.scrollbarDragging = false
+			return m, cmd
+		}
+		switch msg.Action {
+		case tea.MouseActionPress:
+			if msg.Button == tea.MouseButtonLeft && m.isOnScrollbar(msg.X, msg.Y) {
+				m.scrollbarDragging = true
+				m.scrollToMouseY(msg.Y)
+				return m, cmd
+			}
+		case tea.MouseActionMotion:
+			if m.scrollbarDragging {
+				m.scrollToMouseY(msg.Y)
+				return m, cmd
+			}
+		case tea.MouseActionRelease:
+			m.scrollbarDragging = false
+		}
+		return m, cmd
 
 	case nobbyTickMsg:
 		m.nobbyStep++
@@ -312,7 +341,9 @@ func (m *Model) resizeViewport() {
 	if vHeight < 6 {
 		vHeight = 6
 	}
-	m.viewport.Width = m.width
+	m.viewportTop = headerHeight + 1
+	m.viewportMaxHeight = vHeight
+	m.viewport.Width = max(10, m.width-1)
 	m.viewport.Height = vHeight
 }
 
@@ -325,8 +356,14 @@ func (m *Model) refreshViewport(forceBottom bool) {
 		spinnerLine = spinner.Status(m.spinnerStep, m.spinnerVerb, m.settings.SpinnerStyle)
 	}
 	wasBottom := m.viewport.AtBottom()
-	content := messages.View(m.messages, m.width, spinnerLine)
+	content := messages.View(m.messages, m.viewport.Width, spinnerLine)
 	m.viewport.SetContent(content)
+	targetHeight := min(max(1, m.viewport.TotalLineCount()), m.viewportMaxHeight)
+	if targetHeight < 1 {
+		targetHeight = 1
+	}
+	m.viewport.Height = targetHeight
+	m.viewport.SetYOffset(m.viewport.YOffset)
 	if forceBottom || wasBottom {
 		m.viewport.GotoBottom()
 	}
@@ -340,7 +377,7 @@ func (m Model) View() string {
 	nobbyView := nobby.Render(m.nobbyPose, m.nobbyStep)
 	headerView := header.View(m.cwd, nobbyView)
 	inputView := prompt.InputBar(m.input.View(), m.width)
-	parts := []string{headerView, "", m.viewport.View(), inputView}
+	parts := []string{headerView, "", m.viewportWithScrollbar(), inputView}
 
 	if len(m.commandSuggestions) > 0 {
 		parts = append(parts, prompt.CommandSuggestions(m.width, m.commandSuggestions, m.commandIndex))
@@ -379,6 +416,13 @@ func max(a, b int) int {
 	return b
 }
 
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func clamp(v, lo, hi int) int {
 	if v < lo {
 		return lo
@@ -387,6 +431,59 @@ func clamp(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+func (m Model) hasScrollableContent() bool {
+	return m.viewport.TotalLineCount() > m.viewport.Height
+}
+
+func (m Model) isOnScrollbar(x, y int) bool {
+	if !m.hasScrollableContent() {
+		return false
+	}
+	if y < m.viewportTop || y >= m.viewportTop+m.viewport.Height {
+		return false
+	}
+	return x >= m.width-1
+}
+
+func (m *Model) scrollToMouseY(y int) {
+	if !m.hasScrollableContent() || m.viewport.Height <= 1 {
+		return
+	}
+	trackY := clamp(y-m.viewportTop, 0, m.viewport.Height-1)
+	maxOffset := max(0, m.viewport.TotalLineCount()-m.viewport.Height)
+	target := int(math.Round(float64(trackY) / float64(m.viewport.Height-1) * float64(maxOffset)))
+	m.viewport.SetYOffset(target)
+}
+
+func (m Model) viewportWithScrollbar() string {
+	content := m.viewport.View()
+	if !m.hasScrollableContent() {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	if len(lines) < m.viewport.Height {
+		padding := make([]string, m.viewport.Height-len(lines))
+		lines = append(lines, padding...)
+	}
+
+	thumbSize := max(1, (m.viewport.Height*m.viewport.Height)/max(1, m.viewport.TotalLineCount()))
+	maxThumbTop := max(0, m.viewport.Height-thumbSize)
+	maxOffset := max(1, m.viewport.TotalLineCount()-m.viewport.Height)
+	thumbTop := int(math.Round(float64(m.viewport.YOffset) / float64(maxOffset) * float64(maxThumbTop)))
+
+	trackStyle := lipgloss.NewStyle().Foreground(theme.MutedText)
+	thumbStyle := lipgloss.NewStyle().Foreground(theme.PrimaryAccent)
+	rendered := make([]string, 0, len(lines))
+	for i, line := range lines {
+		bar := trackStyle.Render("│")
+		if i >= thumbTop && i < thumbTop+thumbSize {
+			bar = thumbStyle.Render("█")
+		}
+		rendered = append(rendered, line+bar)
+	}
+	return strings.Join(rendered, "\n")
 }
 
 func spinnerStyleFor(index int) string {
