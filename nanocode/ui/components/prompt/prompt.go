@@ -4,7 +4,7 @@ import (
 	"nanocode/internal/mathutil"
 	"nanocode/ui/theme"
 
-	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/lipgloss"
 )
 
 var (

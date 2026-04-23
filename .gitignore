@@ -3,16 +3,14 @@
 *.o
 *.a
 *.so
-*.exe
+*.dylib
 *.dll
-*.out
+*.exe
 
 # Go cache and tools
-go/pkg/mod/
-.gocache/
-.gopath/
-
-# Dependencies
+go.sum
+*.mod
+*.sum
 vendor/
 
 # Build directories
@@ -20,20 +18,26 @@ bin/
 pkg/
 target/
 
-# Logs
+# Dependencies
+node_modules/
+vendor/
+
+# Logs and temp files
 *.log
+*.tmp
 
 # Environment
 .env
 .env.local
 *.env.*
 
-# Editor/IDE
+# Editors
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
+
+# OS
 .DS_Store
 Thumbs.db
 
@@ -42,11 +46,28 @@ coverage/
 htmlcov/
 .coverage
 
-# Testing
-*.test
-*.prof
+# Python (if mixed project)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.mypy_cache/
 
-# Distribution
-dist/
-build/
+# Node.js (if mixed project)
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+node_modules/
+jspm_packages/
+*.tsbuildinfo
+.nyc_output
+coverage/
+.nyc_output/
+istanbul.yml
 ```

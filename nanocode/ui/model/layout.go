@@ -3,7 +3,7 @@ package model
 import (
 	"nanocode/internal/mathutil"
 
-	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/lipgloss"
 	"nanocode/ui/components/header"
 	"nanocode/ui/components/nobby"
 	"nanocode/ui/components/prompt"
