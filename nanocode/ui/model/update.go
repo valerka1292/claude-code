@@ -151,12 +151,12 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 
 	switch msg.String() {
 	case "ctrl+c":
-		// Double-press Ctrl+C to quit
-		if m.chat.escapePending {
-			// Second press - quit immediately
+		// Double-press Ctrl+C to quit (800ms timeout like Claude Code)
+		if m.chat.escapePending && time.Since(m.chat.escapePressTime) <= 800*time.Millisecond {
+			// Second press within timeout - quit immediately
 			return m, tea.Quit, true
 		}
-		// First press - set pending state and show warning
+		// First press or timeout expired - set pending state and show warning
 		m.chat.escapePending = true
 		m.chat.escapePressTime = time.Now()
 		return m, nil, true
