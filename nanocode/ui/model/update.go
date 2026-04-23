@@ -200,12 +200,10 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			m.setPendingConfirmation("esc")
 			return m, nil, true
 		}
-		// Not thinking - quit with double-press confirmation.
-		if m.isPendingConfirmationFor("esc") {
+		// Outside generation ESC should do nothing (reserved for canceling generation only).
+		if m.chat.confirmKey == "esc" {
 			m.clearPendingConfirmation()
-			return m, tea.Quit, true
 		}
-		m.setPendingConfirmation("esc")
 		return m, nil, true
 	case "pgup":
 		m.viewport.HalfViewUp()

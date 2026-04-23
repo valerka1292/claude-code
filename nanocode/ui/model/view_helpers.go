@@ -47,23 +47,42 @@ func (m Model) usageLine() string {
 		return ""
 	}
 
-	// Если есть точные данные от API - используем их
-	if m.chat.usage.TotalTokens > 0 {
-		percent := (float64(m.chat.usage.TotalTokens) / float64(active.ContextSize)) * 100
+	exactTotal := m.chat.usage.TotalTokens
+	estimatedTotal := m.chat.usage.PromptTokens + m.chat.estimatedTokensStream
+
+	// Во время генерации всегда показываем "живой" счетчик:
+	// берем максимум между серверным total и локальной оценкой по дельтам.
+	if m.chat.thinking {
+		liveTotal := exactTotal
+		if estimatedTotal > liveTotal {
+			liveTotal = estimatedTotal
+		}
+		if liveTotal <= 0 {
+			liveTotal = estimatedTotal
+		}
+		percent := (float64(liveTotal) / float64(active.ContextSize)) * 100
+		return fmt.Sprintf("~%s / %s (%.2f%% ctx)",
+			formatCompact(liveTotal),
+			formatCompact(active.ContextSize),
+			percent)
+	}
+
+	// После генерации — показываем точные данные от API, если они есть.
+	if exactTotal > 0 {
+		percent := (float64(exactTotal) / float64(active.ContextSize)) * 100
 		return fmt.Sprintf("%s / %s (%.2f%% ctx)",
-			formatCompact(m.chat.usage.TotalTokens),
+			formatCompact(exactTotal),
 			formatCompact(active.ContextSize),
 			percent)
 	}
 
 	// До получения usage показываем оценку
-	estimated := m.chat.usage.PromptTokens + m.chat.estimatedTokensStream
-	if estimated == 0 {
+	if estimatedTotal == 0 {
 		return fmt.Sprintf("0 / %s (0.00%% ctx)", formatCompact(active.ContextSize))
 	}
-	percent := (float64(estimated) / float64(active.ContextSize)) * 100
+	percent := (float64(estimatedTotal) / float64(active.ContextSize)) * 100
 	return fmt.Sprintf("~%s / %s (%.2f%% ctx)",
-		formatCompact(estimated),
+		formatCompact(estimatedTotal),
 		formatCompact(active.ContextSize),
 		percent)
 }
@@ -129,10 +148,10 @@ func (m Model) confirmationHint() string {
 	case "ctrl+c":
 		return "Press Ctrl+C again to exit"
 	case "esc":
-		if m.chat.thinking {
-			return "Press Esc again to interrupt"
+		if !m.chat.thinking {
+			return ""
 		}
-		return "Press Esc again to exit"
+		return "Press Esc again to interrupt"
 	default:
 		return ""
 	}
