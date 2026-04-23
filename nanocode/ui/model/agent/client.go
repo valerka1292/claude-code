@@ -96,6 +96,7 @@ func (c *Client) Stream(cfg StreamConfig, out chan<- StreamEvent) ([]APIToolCall
 				ReasoningTokens:  chunk.Usage.CompletionTokenDetails.ReasoningTokens,
 				TotalTokens:      chunk.Usage.TotalTokens,
 			}
+			out <- StreamEvent{Usage: usage}
 		}
 		if len(chunk.Choices) == 0 {
 			continue

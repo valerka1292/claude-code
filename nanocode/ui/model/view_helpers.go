@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"nanocode/ui/components/providers"
 	"nanocode/ui/components/spinner"
 	"nanocode/ui/config"
@@ -47,7 +48,7 @@ func (m Model) usageLine() string {
 	}
 
 	// Если есть точные данные от API - используем их
-	if m.chat.usage.TotalTokens > 0 && m.chat.usage.CompletionTokens > 0 {
+	if m.chat.usage.TotalTokens > 0 {
 		percent := (float64(m.chat.usage.TotalTokens) / float64(active.ContextSize)) * 100
 		return fmt.Sprintf("%s / %s (%.2f%% ctx)",
 			formatCompact(m.chat.usage.TotalTokens),
@@ -87,16 +88,16 @@ func (m Model) agentStatusLine() string {
 		if thinkingTokens > 0 {
 			// Есть точные reasoning токены от API
 			thinkingLabel = fmt.Sprintf(" · ↓ %d tokens · thinking", thinkingTokens)
-		} else if m.chat.estimatedTokensStream > 0 {
+		} else if m.chat.estimatedReasoningTokens > 0 {
 			// Пока нет точных данных - показываем оценку
-			thinkingLabel = fmt.Sprintf(" · ↓ %d tokens · thinking", m.chat.estimatedTokensStream)
+			thinkingLabel = fmt.Sprintf(" · ↓ %d tokens · thinking", m.chat.estimatedReasoningTokens)
 		}
 
 		durationStr := formatDuration(int(time.Since(m.chat.cycleStartedAt).Milliseconds()))
 
 		// Формат как в оригинальном Claude Code: (esc to interrupt · time · tokens · thinking)
-		interruptText := "esc to interrupt"
-		
+		interruptText := lipgloss.NewStyle().Bold(true).Render("esc to interrupt")
+
 		return fmt.Sprintf(
 			"%s %s... (%s · %s%s)",
 			spinner.Indicator(m.settings.values.SpinnerStyle, m.chat.spinnerStep),
@@ -114,6 +115,27 @@ func (m Model) agentStatusLine() string {
 		)
 	}
 	return ""
+}
+
+func (m Model) confirmationHint() string {
+	if !m.chat.confirmPending {
+		return ""
+	}
+	if time.Since(m.chat.confirmPressTime) > confirmWindow {
+		return ""
+	}
+
+	switch m.chat.confirmKey {
+	case "ctrl+c":
+		return "Press Ctrl+C again to exit"
+	case "esc":
+		if m.chat.thinking {
+			return "Press Esc again to interrupt"
+		}
+		return "Press Esc again to exit"
+	default:
+		return ""
+	}
 }
 
 func (m Model) providerPanelViewData() (string, string, []string, int, string) {

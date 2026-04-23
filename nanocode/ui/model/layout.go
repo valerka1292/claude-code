@@ -18,7 +18,7 @@ func (m *Model) resizeViewport() {
 	}
 	headerHeight := lipgloss.Height(header.View(m.cwd, nobby.Render(m.nobbyPose, m.nobbyStep), m.activeProviderName(), m.activeModelName()))
 	inputHeight := lipgloss.Height(prompt.InputBar(m.input.View(), m.layout.width))
-	footerHeight := lipgloss.Height(prompt.Footer(m.layout.width, m.usageLine()))
+	footerHeight := lipgloss.Height(prompt.Footer(m.layout.width, m.usageLine(), m.confirmationHint()))
 	reserved := headerHeight + inputHeight + footerHeight + 3
 	if len(m.commands.suggestions) > 0 {
 		reserved += lipgloss.Height(suggestions.CommandList(m.layout.width, m.commands.suggestions, m.commands.selected))
