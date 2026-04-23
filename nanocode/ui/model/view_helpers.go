@@ -45,12 +45,26 @@ func (m Model) usageLine() string {
 	if !ok || active.ContextSize <= 0 {
 		return ""
 	}
-	used := m.chat.usage.PromptTokens + m.chat.liveDownTokens
-	if used < m.chat.usage.TotalTokens {
-		used = m.chat.usage.TotalTokens
+
+	// Если есть точные данные от API - используем их
+	if m.chat.usage.TotalTokens > 0 && m.chat.usage.CompletionTokens > 0 {
+		percent := (float64(m.chat.usage.TotalTokens) / float64(active.ContextSize)) * 100
+		return fmt.Sprintf("%s / %s (%.2f%% ctx)",
+			formatCompact(m.chat.usage.TotalTokens),
+			formatCompact(active.ContextSize),
+			percent)
 	}
-	percent := (float64(used) / float64(active.ContextSize)) * 100
-	return fmt.Sprintf("%s / %s (%.2f%% ctx)", formatCompact(used), formatCompact(active.ContextSize), percent)
+
+	// До получения usage показываем оценку
+	estimated := m.chat.usage.PromptTokens + m.chat.estimatedTokensStream
+	if estimated == 0 {
+		return fmt.Sprintf("0 / %s (0.00%% ctx)", formatCompact(active.ContextSize))
+	}
+	percent := (float64(estimated) / float64(active.ContextSize)) * 100
+	return fmt.Sprintf("~%s / %s (%.2f%% ctx)",
+		formatCompact(estimated),
+		formatCompact(active.ContextSize),
+		percent)
 }
 
 func (m Model) agentStatusLine() string {
@@ -59,11 +73,24 @@ func (m Model) agentStatusLine() string {
 		if elapsed < 0 {
 			elapsed = 0
 		}
+
+		// Показываем reasoning токены если доступны
+		thinkingTokens := m.chat.usage.ReasoningTokens
+		thinkingLabel := ""
+
+		if thinkingTokens > 0 {
+			// Есть точные reasoning токены от API
+			thinkingLabel = fmt.Sprintf(" · thinking: %s", formatCompact(thinkingTokens))
+		} else if m.chat.estimatedTokensStream > 0 {
+			// Пока нет точных данных - показываем оценку
+			thinkingLabel = fmt.Sprintf(" · ~%s tokens", formatCompact(m.chat.estimatedTokensStream))
+		}
+
 		return fmt.Sprintf(
-			"%s Inferring… (%ds · ↓ %s tokens · thinking)",
+			"%s Inferring… (%ds%s)",
 			spinner.Indicator(m.settings.values.SpinnerStyle, m.chat.spinnerStep),
 			elapsed,
-			formatCompact(m.chat.liveDownTokens),
+			thinkingLabel,
 		)
 	}
 	if m.chat.lastWorkedForSec > 0 {

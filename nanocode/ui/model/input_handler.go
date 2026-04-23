@@ -51,7 +51,7 @@ func (m Model) executeInput() (tea.Model, tea.Cmd) {
 	m.chat.streamingText = ""
 	m.chat.streamingThought = ""
 	m.chat.cycleStartedAt = time.Now()
-	m.chat.liveDownTokens = 0
+	m.chat.estimatedTokensStream = 0
 	m.chat.showInferring = true
 	m.chat.lastWorkedForSec = 0
 	promptTokens := estimatePromptTokens(m.chat.messages)

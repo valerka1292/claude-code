@@ -86,25 +86,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.event.ReasoningDelta != "" {
 			m.setNobbyPose(nobby.PoseThinking)
 			m.chat.streamingThought += msg.event.ReasoningDelta
-			m.chat.liveDownTokens += estimateTokens(msg.event.ReasoningDelta)
+			m.chat.estimatedTokensStream++
 		}
 		if msg.event.ContentDelta != "" {
 			m.setNobbyPose(nobby.PoseWriting)
 			m.chat.showInferring = false
 			m.chat.streamingText += msg.event.ContentDelta
-			m.chat.liveDownTokens += estimateTokens(msg.event.ContentDelta)
+			m.chat.estimatedTokensStream++
 		}
 		if msg.event.RefusalDelta != "" {
-			m.chat.liveDownTokens += estimateTokens(msg.event.RefusalDelta)
+			m.chat.estimatedTokensStream++
 		}
 		if msg.event.ToolDelta != "" {
-			m.chat.liveDownTokens += estimateTokens(msg.event.ToolDelta)
+			m.chat.estimatedTokensStream++
 		}
 		if msg.event.Usage != nil {
 			m.chat.usage = *msg.event.Usage
-			if msg.event.Usage.CompletionTokens > 0 {
-				m.chat.liveDownTokens = msg.event.Usage.CompletionTokens
-			}
 		}
 		m.refreshViewport(true)
 		return m, pollStreamCmd(m.stream.ch)
