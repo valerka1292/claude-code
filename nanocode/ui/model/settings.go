@@ -65,5 +65,10 @@ func timeoutIndexFor(seconds int) int {
 			return i
 		}
 	}
-	return 4
+	for i, option := range config.TimeoutOptions {
+		if option == config.DefaultTimeoutSeconds {
+			return i
+		}
+	}
+	return 0
 }
