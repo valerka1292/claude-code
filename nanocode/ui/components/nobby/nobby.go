@@ -12,14 +12,15 @@ import (
 type Pose string
 
 const (
-	PoseIdle      Pose = "idle"
-	PoseThinking  Pose = "thinking"
-	PoseWorking   Pose = "working"
-	PoseSearching Pose = "searching"
-	PoseSuccess   Pose = "success"
-	PoseError     Pose = "error"
-	PoseWarning   Pose = "warning"
-	PoseReading   Pose = "reading"
+	PoseIdle              Pose = "idle"
+	PoseReading           Pose = "reading"
+	PoseThinking          Pose = "thinking"
+	PoseWriting           Pose = "writing"
+	PoseToolCalling       Pose = "tool-calling"
+	PoseToolSuccess       Pose = "tool-success"
+	PoseToolError         Pose = "tool-error"
+	PoseAPIErrorReconnect Pose = "api-error-reconnect"
+	PoseAPIError          Pose = "api-error"
 )
 
 type AnimationFrame struct {
@@ -44,7 +45,16 @@ var animations = map[Pose]animation{
 			{Antenna: "    •    ", Face: "  [o o]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
 			{Antenna: "    •    ", Face: "  [- -]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
 		},
-		Per: []time.Duration{2400 * time.Millisecond, 100 * time.Millisecond},
+		Per: []time.Duration{2500 * time.Millisecond, 150 * time.Millisecond},
+	},
+	PoseReading: {
+		Frames: []AnimationFrame{
+			{Antenna: "    ▲    ", Face: "  [◉  ]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+			{Antenna: "    ▲    ", Face: "  [◉ ◉]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+			{Antenna: "    ▲    ", Face: "  [  ◉]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+			{Antenna: "    ▲    ", Face: "  [◉ ◉]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+		},
+		Speed: 250 * time.Millisecond,
 	},
 	PoseThinking: {
 		Frames: []AnimationFrame{
@@ -55,54 +65,51 @@ var animations = map[Pose]animation{
 		},
 		Speed: 200 * time.Millisecond,
 	},
-	PoseWorking: {
+	PoseWriting: {
 		Frames: []AnimationFrame{
 			{Antenna: "    •    ", Face: "  [o  ]  ", BodyL: " -", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
 			{Antenna: "    •    ", Face: "  [o o]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
 			{Antenna: "    •    ", Face: "  [  o]  ", BodyL: "  ", BodyC: "█████", BodyR: "- ", Legs: "   █ █   "},
 			{Antenna: "    •    ", Face: "  [o o]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
 		},
-		Speed: 250 * time.Millisecond,
+		Speed: 300 * time.Millisecond,
 	},
-	PoseSearching: {
+	PoseToolCalling: {
 		Frames: []AnimationFrame{
-			{Antenna: "    ●    ", Face: "  [◉ ◉]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
-			{Antenna: "    ○    ", Face: "  [o o]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
-			{Antenna: "    ●    ", Face: "  [◉  ]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
-			{Antenna: "    ○    ", Face: "  [  ◉]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+			{Antenna: "    ●    ", Face: "  [• •]  ", BodyL: " -", BodyC: "█████", BodyR: "- ", Legs: "   █ █   "},
+			{Antenna: "    ○    ", Face: "  [• •]  ", BodyL: " -", BodyC: "█████", BodyR: "- ", Legs: "   █ █   "},
 		},
 		Speed: 300 * time.Millisecond,
 	},
-	PoseSuccess: {
+	PoseToolSuccess: {
 		Frames: []AnimationFrame{
 			{Antenna: "    •    ", Face: "  [o o]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "  █   █  "},
 			{Antenna: "    •    ", Face: "  [^ ^]  ", BodyL: " \\", BodyC: "█████", BodyR: "/ ", Legs: "   █ █   "},
 			{Antenna: "    •    ", Face: "  [◡ ◡]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
 		},
-		Speed: 200 * time.Millisecond,
+		Per: []time.Duration{150 * time.Millisecond, 300 * time.Millisecond, 200 * time.Millisecond},
 	},
-	PoseError: {
+	PoseToolError: {
 		Frames: []AnimationFrame{
 			{Antenna: "    ✗    ", Face: "  [X X]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: lipgloss.Color("#ff5f5f")},
 			{Antenna: "    ✗    ", Face: "  [x x]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "  █   █  ", Color: lipgloss.Color("#ff5f5f")},
 		},
-		Speed: 300 * time.Millisecond,
+		Speed: 400 * time.Millisecond,
 	},
-	PoseWarning: {
+	PoseAPIErrorReconnect: {
 		Frames: []AnimationFrame{
-			{Antenna: "    !    ", Face: "  [○ ○]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: theme.SecondaryAccent},
-			{Antenna: "         ", Face: "  [○ ○]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: theme.SecondaryAccent},
+			{Antenna: "    ╱    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: lipgloss.Color("#ff5f5f")},
+			{Antenna: "    ✗    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: lipgloss.Color("#ff5f5f")},
+			{Antenna: "    ╲    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: lipgloss.Color("#ff5f5f")},
 		},
 		Speed: 400 * time.Millisecond,
 	},
-	PoseReading: {
+	PoseAPIError: {
 		Frames: []AnimationFrame{
-			{Antenna: "    •    ", Face: "  [´  ]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
-			{Antenna: "    •    ", Face: "  [>  ]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
-			{Antenna: "    •    ", Face: "  [.  ]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
-			{Antenna: "    •    ", Face: "  [  <]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+			{Antenna: "    ✗    ", Face: "  [x x]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: lipgloss.Color("#ff5f5f")},
+			{Antenna: "    ·    ", Face: "  [. .]  ", BodyL: "  ", BodyC: "░░░░░", BodyR: "  ", Legs: "   █ █   ", Color: theme.MutedText},
 		},
-		Speed: 350 * time.Millisecond,
+		Speed: 600 * time.Millisecond,
 	},
 }
 

@@ -1,9 +1,11 @@
 package settings
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"nanocode/ui/config"
 	"nanocode/ui/theme"
 )
 
@@ -18,27 +20,35 @@ var (
 	selected   = lipgloss.NewStyle().Foreground(theme.AccentContrast).Background(theme.PrimaryAccent)
 )
 
-func Panel(width int, selectedIndex int, current string) string {
-	options := []string{"Hexagons", "Circles"}
-	keys := []string{"hexagons", "circles"}
+func Panel(width int, selectedRow int, spinnerStyle string, timeoutSeconds int) string {
+	spinnerLabel := "Hexagons"
+	if spinnerStyle == config.SpinnerCircles {
+		spinnerLabel = "Circles"
+	}
+
 	rows := []string{
 		titleStyle.Render("Settings"),
-		mutedText.Render("Choose spinner animation style for thinking state:"),
+		mutedText.Render("↑/↓ select setting • ←/→ change value • Enter save • Esc close"),
 		"",
 	}
-	for i, name := range options {
-		prefix := "  "
-		if keys[i] == current {
-			prefix = "✓ "
-		}
-		line := prefix + name
-		if i == selectedIndex {
-			line = selected.Render(line)
+
+	items := []string{
+		"Spinner style:   < " + spinnerLabel + " >",
+		"API timeout:     < " + formatTimeout(timeoutSeconds) + " >",
+	}
+	for i, line := range items {
+		if i == selectedRow {
+			rows = append(rows, selected.Render(line))
+			continue
 		}
 		rows = append(rows, line)
 	}
-	rows = append(rows, "", mutedText.Render("↑/↓ move • Enter save • Esc close"))
-	return boxStyle.Width(max(48, width*2/3)).Render(strings.Join(rows, "\n"))
+
+	return boxStyle.Width(max(56, width*2/3)).Render(strings.Join(rows, "\n"))
+}
+
+func formatTimeout(seconds int) string {
+	return fmt.Sprintf("%ds", seconds)
 }
 
 func max(a, b int) int {

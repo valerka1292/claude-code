@@ -13,11 +13,15 @@ const (
 )
 
 type Settings struct {
-	SpinnerStyle string `json:"spinner_style"`
+	SpinnerStyle      string `json:"spinner_style"`
+	APITimeoutSeconds int    `json:"api_timeout_seconds"`
 }
 
 func DefaultSettings() Settings {
-	return Settings{SpinnerStyle: SpinnerHexagons}
+	return Settings{
+		SpinnerStyle:      SpinnerHexagons,
+		APITimeoutSeconds: 180,
+	}
 }
 
 func LoadSettings() (Settings, error) {
@@ -40,6 +44,11 @@ func LoadSettings() (Settings, error) {
 	}
 	if cfg.SpinnerStyle != SpinnerHexagons && cfg.SpinnerStyle != SpinnerCircles {
 		cfg.SpinnerStyle = SpinnerHexagons
+	}
+	switch cfg.APITimeoutSeconds {
+	case 30, 60, 90, 120, 180, 240, 300:
+	default:
+		cfg.APITimeoutSeconds = 180
 	}
 	return cfg, nil
 }

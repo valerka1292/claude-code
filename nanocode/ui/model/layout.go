@@ -22,7 +22,12 @@ func (m *Model) resizeViewport() {
 		reserved += lipgloss.Height(suggestions.CommandList(m.layout.width, m.commands.suggestions, m.commands.selected))
 	}
 	if m.settings.open {
-		reserved += lipgloss.Height(settings.Panel(m.layout.width, m.settings.selectedStyle, m.settings.values.SpinnerStyle))
+		reserved += lipgloss.Height(settings.Panel(
+			m.layout.width,
+			m.settings.selectedRow,
+			m.settings.values.SpinnerStyle,
+			m.settings.values.APITimeoutSeconds,
+		))
 	}
 	if m.providers.open {
 		title, desc, options, selected, inputView := m.providerPanelViewData()

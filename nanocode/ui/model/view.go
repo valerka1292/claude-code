@@ -49,7 +49,12 @@ func (m Model) View() string {
 		parts = append(parts, suggestions.CommandList(m.layout.width, m.commands.suggestions, m.commands.selected))
 	}
 	if m.settings.open {
-		parts = append(parts, settings.Panel(m.layout.width, m.settings.selectedStyle, m.settings.values.SpinnerStyle))
+		parts = append(parts, settings.Panel(
+			m.layout.width,
+			m.settings.selectedRow,
+			m.settings.values.SpinnerStyle,
+			m.settings.values.APITimeoutSeconds,
+		))
 	}
 	if m.providers.open {
 		title, desc, options, selected, inputView := m.providerPanelViewData()
