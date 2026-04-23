@@ -3,6 +3,7 @@ package messages
 import (
 	"strings"
 
+	"nanocode/internal/mathutil"
 	"nanocode/ui/theme"
 	"nanocode/ui/types"
 
@@ -22,7 +23,7 @@ func View(list []types.Message, width int, spinnerLine string, thinking string, 
 	for _, msg := range list {
 		switch msg.Role {
 		case types.RoleUser:
-			lines = append(lines, userStyle.Width(max(width-2, 10)).Render("❯ "+msg.Text))
+			lines = append(lines, userStyle.Width(mathutil.Max(width-2, 10)).Render("❯ "+msg.Text))
 		case types.RoleAssistant:
 			lines = append(lines, agentStyle.Render(renderAssistantBlock(msg.Text, width, false)))
 		}
@@ -47,7 +48,7 @@ func View(list []types.Message, width int, spinnerLine string, thinking string, 
 }
 
 func renderAssistantBlock(text string, width int, streaming bool) string {
-	rendered := renderMarkdown(text, max(width-4, minMarkdownWidth), streaming)
+	rendered := renderMarkdown(text, mathutil.Max(width-4, minMarkdownWidth), streaming)
 	rendered = strings.Trim(rendered, "\n\r")
 
 	if rendered == "" {
@@ -60,11 +61,4 @@ func renderAssistantBlock(text string, width int, streaming bool) string {
 		rows[i] = "  " + rows[i]
 	}
 	return strings.Join(rows, "\n")
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

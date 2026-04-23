@@ -9,6 +9,7 @@ import (
 	"nanocode/ui/components/providers"
 	"nanocode/ui/components/spinner"
 	"nanocode/ui/config"
+	"nanocode/ui/model/provider"
 )
 
 func (m *Model) reloadProviderNames() {
@@ -17,7 +18,7 @@ func (m *Model) reloadProviderNames() {
 		m.providers.selectedProvider = 0
 		return
 	}
-	m.providers.selectedProvider = clamp(m.providers.selectedProvider, 0, len(m.providers.names)-1)
+	m.providers.selectedProvider = clampInt(m.providers.selectedProvider, 0, len(m.providers.names)-1)
 }
 
 func (m Model) activeProviderName() string {
@@ -95,7 +96,7 @@ func (m Model) providerPanelViewData() (string, string, []string, int, string) {
 		return "Edit Provider", "Choose provider to edit", options, m.providers.selectedProvider, ""
 	case providerModeEditField:
 		fields := []string{"Name", "Base URL", "Model", "API Key", "Context Size"}
-		return "Edit Field", "Choose field to change", fields, m.providers.selectedField, ""
+		return "Edit Field", "Choose field to change", fields, int(m.providers.selectedField), ""
 	case providerModeEditInput:
 		return "Edit Value", m.providers.inputPrompt, nil, 0, m.providers.input.View()
 	default:
@@ -122,15 +123,11 @@ func (m Model) providerOptions(withActive bool) []string {
 
 func (m *Model) beginProviderCreate() {
 	m.providers.mode = providerModeCreate
-	m.providers.formName = ""
-	m.providers.formBaseURL = ""
-	m.providers.formModel = ""
-	m.providers.formAPIKey = ""
-	m.providers.formContextSize = ""
+	m.providers.form.Reset()
 	m.providers.inputPrompt = "Enter provider name"
 	m.providers.input.SetValue("")
 	m.providers.input.Focus()
-	m.providers.inputField = "name"
+	m.providers.inputField = provider.FieldName
 }
 
 func (m *Model) openProviderPanel() {
