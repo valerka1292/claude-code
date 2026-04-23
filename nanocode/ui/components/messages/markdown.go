@@ -112,22 +112,6 @@ func splitSegments(text string) []segment {
 // ── code block renderer ──────────────────────────────────────────────────────
 
 var (
-	codeFrameBg = lipgloss.Color("#141414")
-
-	codeHeaderRowStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#1E1F22")).
-				Foreground(lipgloss.Color("#8A92A3"))
-
-	codeWindowDotMuted = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#4B5563")).
-				Background(lipgloss.Color("#1E1F22")).
-				Render("●")
-
-	codeWindowDotAccent = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FBFA56")).
-				Background(lipgloss.Color("#1E1F22")).
-				Render("●")
-
 	codeBodyBg = lipgloss.Color("#1A1A1A")
 
 	lineNumStyle = lipgloss.NewStyle().
@@ -138,36 +122,23 @@ var (
 					Foreground(lipgloss.Color("#3B3B3B")).
 					Background(codeBodyBg)
 
-	gutterSepStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#2F3640")).
-			Background(codeBodyBg)
-
 	codeLineStyle = lipgloss.NewStyle().
 			Background(codeBodyBg).
 			Foreground(lipgloss.Color("#E5E7EB"))
 
 	codeBorderStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#353B45")).
-			Background(codeFrameBg)
+			Foreground(lipgloss.Color("#3A3F4B"))
 
 	langBadgeStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#262A31")).
 			Foreground(lipgloss.Color("#FBFA56")).
-			Bold(true).
-			PaddingLeft(1).
-			PaddingRight(1)
-
-	langBarBg = lipgloss.NewStyle().
-			Background(lipgloss.Color("#1E1F22"))
+			Bold(true)
 )
 
 func renderCodeBlock(lang, body string, width int) string {
-	// Clamp width
 	if width < minMarkdownWidth {
 		width = minMarkdownWidth
 	}
 
-	// Syntax-highlight the body via glamour (renders as a standalone code block)
 	highlighted := highlightCode(lang, body, width)
 
 	rawBody := strings.TrimRight(body, "\n")
@@ -177,7 +148,7 @@ func renderCodeBlock(lang, body string, width int) string {
 	}
 	hlLines := strings.Split(strings.TrimRight(highlighted, "\n"), "\n")
 
-	// Ensure same line count (glamour may add/remove blank lines)
+	// Выравниваем количество строк после работы glamour
 	for len(hlLines) < len(rawLines) {
 		hlLines = append(hlLines, "")
 	}
@@ -187,38 +158,35 @@ func renderCodeBlock(lang, body string, width int) string {
 		digits = 2
 	}
 
-	innerWidth := width - digits - 8 // borders, spaces and separator
+	// Рассчитываем ширину (без лишних разделителей в центре)
+	innerWidth := width - digits - 5
 	if innerWidth < 8 {
 		innerWidth = 8
 	}
-	innerFrameWidth := digits + 4 + innerWidth // " NN │ " + code
+	// Ширина от левой до правой рамки
+	innerFrameWidth := digits + 3 + innerWidth
 
 	var sb strings.Builder
 
-	// ── rounded frame top ─────────────────────────────────────────────────
-	sb.WriteString(codeBorderStyle.Render("╭" + strings.Repeat("─", innerFrameWidth) + "╮"))
-	sb.WriteByte('\n')
-
-	// ── top bar: language badge + faux window controls ───────────────────
-	langLabel := lang
+	langLabel := strings.ToLower(lang)
 	if langLabel == "" {
-		langLabel = "text"
+		langLabel = "code"
 	}
-	topBarLeft := codeHeaderRowStyle.Render(" " + codeWindowDotAccent + " " + codeWindowDotMuted + " " + codeWindowDotMuted + " ")
-	badge := langBadgeStyle.Render(" " + strings.ToLower(langLabel))
-	topBarRightWidth := innerFrameWidth - lipgloss.Width(topBarLeft) - lipgloss.Width(badge)
-	if topBarRightWidth < 0 {
-		topBarRightWidth = 0
+
+	// Элегантная верхняя грань с интегрированным названием языка (например: ╭─ go ─────╮ )
+	title := " " + langLabel + " "
+	titleRendered := langBadgeStyle.Render(title)
+
+	dashCount := innerFrameWidth - lipgloss.Width(title) - 1
+	if dashCount < 0 {
+		dashCount = 0
 	}
-	barPad := langBarBg.Width(topBarRightWidth).Render("")
-	sb.WriteString(codeBorderStyle.Render("│") + topBarLeft + badge + barPad + codeBorderStyle.Render("│"))
+
+	topBorder := codeBorderStyle.Render("╭─") + titleRendered + codeBorderStyle.Render(strings.Repeat("─", dashCount)+"╮")
+	sb.WriteString(topBorder)
 	sb.WriteByte('\n')
 
-	// ── divider ───────────────────────────────────────────────────────────
-	sb.WriteString(codeBorderStyle.Render("├" + strings.Repeat("─", innerFrameWidth) + "┤"))
-	sb.WriteByte('\n')
-
-	// ── code lines ───────────────────────────────────────────────────────
+	// Вывод строк с кодом без внутренних границ
 	for i, hl := range hlLines {
 		wrapped := wrapVisibleANSI(hl, innerWidth)
 		if len(wrapped) == 0 {
@@ -231,14 +199,14 @@ func renderCodeBlock(lang, body string, width int) string {
 			} else {
 				num = lineNumContinuationStyle.Render(fmt.Sprintf(" %*s ", digits, ""))
 			}
-			sep := gutterSepStyle.Render("│")
+
 			codePart := codeLineStyle.Render(padVisibleANSI(part, innerWidth))
-			sb.WriteString(codeBorderStyle.Render("│") + num + sep + " " + codePart + codeBorderStyle.Render("│"))
+			sb.WriteString(codeBorderStyle.Render("│") + num + " " + codePart + codeBorderStyle.Render("│"))
 			sb.WriteByte('\n')
 		}
 	}
 
-	// ── bottom border ────────────────────────────────────────────────────
+	// Плавное закругление снизу
 	sb.WriteString(codeBorderStyle.Render("╰" + strings.Repeat("─", innerFrameWidth) + "╯"))
 	sb.WriteByte('\n')
 
