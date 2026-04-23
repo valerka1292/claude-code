@@ -52,11 +52,11 @@ func (m Model) executeInput() (tea.Model, tea.Cmd) {
 	m.chat.streamingThought = ""
 	m.chat.cycleStartedAt = time.Now()
 	m.chat.estimatedTokensStream = 0
+	m.chat.estimatedReasoningTokens = 0
 	m.chat.showInferring = true
 	m.chat.lastWorkedForSec = 0
 	m.chat.interrupted = false
-	m.chat.escapePending = false
-	m.chat.escapePressTime = time.Time{}
+	m.clearPendingConfirmation()
 	m.chat.abortChan = make(chan struct{})
 	promptTokens := estimatePromptTokens(m.chat.messages)
 	m.chat.usage = agent.UsageState{

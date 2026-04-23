@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"nanocode/ui/components/providers"
 	"nanocode/ui/components/spinner"
 	"nanocode/ui/config"
@@ -46,23 +47,42 @@ func (m Model) usageLine() string {
 		return ""
 	}
 
-	// Если есть точные данные от API - используем их
-	if m.chat.usage.TotalTokens > 0 && m.chat.usage.CompletionTokens > 0 {
-		percent := (float64(m.chat.usage.TotalTokens) / float64(active.ContextSize)) * 100
+	exactTotal := m.chat.usage.TotalTokens
+	estimatedTotal := m.chat.usage.PromptTokens + m.chat.estimatedTokensStream
+
+	// Во время генерации всегда показываем "живой" счетчик:
+	// берем максимум между серверным total и локальной оценкой по дельтам.
+	if m.chat.thinking {
+		liveTotal := exactTotal
+		if estimatedTotal > liveTotal {
+			liveTotal = estimatedTotal
+		}
+		if liveTotal <= 0 {
+			liveTotal = estimatedTotal
+		}
+		percent := (float64(liveTotal) / float64(active.ContextSize)) * 100
+		return fmt.Sprintf("~%s / %s (%.2f%% ctx)",
+			formatCompact(liveTotal),
+			formatCompact(active.ContextSize),
+			percent)
+	}
+
+	// После генерации — показываем точные данные от API, если они есть.
+	if exactTotal > 0 {
+		percent := (float64(exactTotal) / float64(active.ContextSize)) * 100
 		return fmt.Sprintf("%s / %s (%.2f%% ctx)",
-			formatCompact(m.chat.usage.TotalTokens),
+			formatCompact(exactTotal),
 			formatCompact(active.ContextSize),
 			percent)
 	}
 
 	// До получения usage показываем оценку
-	estimated := m.chat.usage.PromptTokens + m.chat.estimatedTokensStream
-	if estimated == 0 {
+	if estimatedTotal == 0 {
 		return fmt.Sprintf("0 / %s (0.00%% ctx)", formatCompact(active.ContextSize))
 	}
-	percent := (float64(estimated) / float64(active.ContextSize)) * 100
+	percent := (float64(estimatedTotal) / float64(active.ContextSize)) * 100
 	return fmt.Sprintf("~%s / %s (%.2f%% ctx)",
-		formatCompact(estimated),
+		formatCompact(estimatedTotal),
 		formatCompact(active.ContextSize),
 		percent)
 }
@@ -87,16 +107,16 @@ func (m Model) agentStatusLine() string {
 		if thinkingTokens > 0 {
 			// Есть точные reasoning токены от API
 			thinkingLabel = fmt.Sprintf(" · ↓ %d tokens · thinking", thinkingTokens)
-		} else if m.chat.estimatedTokensStream > 0 {
+		} else if m.chat.estimatedReasoningTokens > 0 {
 			// Пока нет точных данных - показываем оценку
-			thinkingLabel = fmt.Sprintf(" · ↓ %d tokens · thinking", m.chat.estimatedTokensStream)
+			thinkingLabel = fmt.Sprintf(" · ↓ %d tokens · thinking", m.chat.estimatedReasoningTokens)
 		}
 
 		durationStr := formatDuration(int(time.Since(m.chat.cycleStartedAt).Milliseconds()))
 
 		// Формат как в оригинальном Claude Code: (esc to interrupt · time · tokens · thinking)
-		interruptText := "esc to interrupt"
-		
+		interruptText := lipgloss.NewStyle().Bold(true).Render("esc to interrupt")
+
 		return fmt.Sprintf(
 			"%s %s... (%s · %s%s)",
 			spinner.Indicator(m.settings.values.SpinnerStyle, m.chat.spinnerStep),
@@ -114,6 +134,27 @@ func (m Model) agentStatusLine() string {
 		)
 	}
 	return ""
+}
+
+func (m Model) confirmationHint() string {
+	if !m.chat.confirmPending {
+		return ""
+	}
+	if time.Since(m.chat.confirmPressTime) > confirmWindow {
+		return ""
+	}
+
+	switch m.chat.confirmKey {
+	case "ctrl+c":
+		return "Press Ctrl+C again to exit"
+	case "esc":
+		if !m.chat.thinking {
+			return ""
+		}
+		return "Press Esc again to interrupt"
+	default:
+		return ""
+	}
 }
 
 func (m Model) providerPanelViewData() (string, string, []string, int, string) {
