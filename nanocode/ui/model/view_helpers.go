@@ -96,7 +96,7 @@ func (m Model) agentStatusLine() string {
 
 		// Формат как в оригинальном Claude Code: (esc to interrupt · time · tokens · thinking)
 		interruptText := "esc to interrupt"
-		
+
 		return fmt.Sprintf(
 			"%s %s... (%s · %s%s)",
 			spinner.Indicator(m.settings.values.SpinnerStyle, m.chat.spinnerStep),
@@ -114,6 +114,27 @@ func (m Model) agentStatusLine() string {
 		)
 	}
 	return ""
+}
+
+func (m Model) confirmationHint() string {
+	if !m.chat.confirmPending {
+		return ""
+	}
+	if time.Since(m.chat.confirmPressTime) > confirmWindow {
+		return ""
+	}
+
+	switch m.chat.confirmKey {
+	case "ctrl+c":
+		return "Press Ctrl+C again to exit"
+	case "esc":
+		if m.chat.thinking {
+			return "Press Esc again to interrupt"
+		}
+		return "Press Esc again to exit"
+	default:
+		return ""
+	}
 }
 
 func (m Model) providerPanelViewData() (string, string, []string, int, string) {

@@ -20,8 +20,12 @@ func InputBar(text string, width int) string {
 	return boxStyle.Width(width).Render("❯ " + text)
 }
 
-func Footer(width int, usage string) string {
-	left := footerStyle.Render("⏵⏵ accept edits on (shift+tab to cycle)")
+func Footer(width int, usage string, hint string) string {
+	leftText := "⏵⏵ accept edits on (shift+tab to cycle)"
+	if hint != "" {
+		leftText = hint
+	}
+	left := footerStyle.Render(leftText)
 	right := footerStyle.Foreground(theme.MutedText).Render(usage)
 	if usage == "" {
 		return left
