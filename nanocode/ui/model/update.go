@@ -1,6 +1,8 @@
 package model
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -100,9 +102,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !msg.event.ToolCallStart.ReadOnly {
 				label = "write"
 			}
+			args := formatToolCallArgs(msg.event.ToolCallStart.Arguments)
 			m.chat.messages = append(m.chat.messages, types.Message{
 				Role:      types.RoleTool,
-				Text:      "tool call → " + msg.event.ToolCallStart.Name + " [" + label + "] args: " + msg.event.ToolCallStart.Arguments,
+				Text:      fmt.Sprintf("tool call → %s [%s]\n%s", msg.event.ToolCallStart.Name, label, args),
 				Timestamp: time.Now(),
 			})
 			m.refreshViewport(true)
@@ -115,7 +118,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.chat.messages = append(m.chat.messages, types.Message{
 				Role:      types.RoleTool,
-				Text:      prefix + " ← " + msg.event.ToolCallResult.Name + "\n" + msg.event.ToolCallResult.Result,
+				Text:      fmt.Sprintf("%s ← %s\n%s", prefix, msg.event.ToolCallResult.Name, formatToolResultText(msg.event.ToolCallResult.Result)),
 				Timestamp: time.Now(),
 			})
 			m.refreshViewport(true)
@@ -186,6 +189,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.resizeViewport()
 	m.refreshViewport(false)
 	return m, cmd
+}
+
+func formatToolCallArgs(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "args: {}"
+	}
+
+	var parsed any
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+		return "args: " + trimmed
+	}
+
+	pretty, err := json.MarshalIndent(parsed, "", "  ")
+	if err != nil {
+		return "args: " + trimmed
+	}
+	return "args:\n" + string(pretty)
+}
+
+func formatToolResultText(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "(empty result)"
+	}
+
+	const maxChars = 4000
+	if len(trimmed) <= maxChars {
+		return trimmed
+	}
+	return trimmed[:maxChars] + "\n…(result truncated in UI)"
 }
 
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {

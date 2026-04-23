@@ -104,9 +104,8 @@ function isPersistentRetryEnabled(): boolean {
 }
 
 function isTransientCapacityError(error: unknown): boolean {
-  return (
-    is529Error(error) || (error instanceof APIError && error.status === 429)
-  )
+  const status = getErrorStatus(error)
+  return is529Error(error) || status === 429
 }
 
 function isStaleConnectionError(error: unknown): boolean {
@@ -374,9 +373,15 @@ export async function* withRetry<T>(
       // AWS/GCP errors aren't always APIError, but can be retried
       const handledCloudAuthError =
         handleAwsCredentialError(error) || handleGcpCredentialError(error)
+      const derivedStatus = getErrorStatus(error)
+      const shouldRetryDerivedStatus =
+        derivedStatus === 408 ||
+        derivedStatus === 409 ||
+        derivedStatus === 429 ||
+        (derivedStatus !== undefined && derivedStatus >= 500)
       if (
         !handledCloudAuthError &&
-        (!(error instanceof APIError) || !shouldRetry(error))
+        !(error instanceof APIError ? shouldRetry(error) : shouldRetryDerivedStatus)
       ) {
         throw new CannotRetryError(error, retryContext)
       }
@@ -470,14 +475,14 @@ export async function* withRetry<T>(
         delayMs: delayMs,
         error: (error as APIError)
           .message as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        status: (error as APIError).status,
+        status: (error as APIError).status ?? derivedStatus,
         provider: getAPIProviderForStatsig(),
       })
 
       if (persistent) {
         if (delayMs > 60_000) {
           logEvent('tengu_api_persistent_retry_wait', {
-            status: (error as APIError).status,
+            status: (error as APIError).status ?? derivedStatus,
             delayMs,
             attempt: reportedAttempt,
             provider: getAPIProviderForStatsig(),
@@ -517,14 +522,79 @@ export async function* withRetry<T>(
 }
 
 function getRetryAfter(error: unknown): string | null {
-  return (
-    ((error as { headers?: { 'retry-after'?: string } }).headers?.[
+  const maybeHeaders = (error as { headers?: unknown })?.headers
+  if (
+    maybeHeaders &&
+    typeof maybeHeaders === 'object' &&
+    'get' in maybeHeaders &&
+    typeof (maybeHeaders as { get?: unknown }).get === 'function'
+  ) {
+    const headerValue = (maybeHeaders as { get: (name: string) => string | null }).get(
+      'retry-after',
+    )
+    if (typeof headerValue === 'string' && headerValue.length > 0) {
+      return headerValue
+    }
+  }
+
+  if (
+    maybeHeaders &&
+    typeof maybeHeaders === 'object' &&
+    'retry-after' in maybeHeaders
+  ) {
+    const retryAfter = (maybeHeaders as { 'retry-after'?: unknown })[
       'retry-after'
-    ] ||
+    ]
+    if (typeof retryAfter === 'string' && retryAfter.length > 0) {
+      return retryAfter
+    }
+  }
+
+  // Non-SDK providers often raise plain Error with JSON payloads in message,
+  // for example: `provider error: 429 ... {"status":429}`.
+  if (error instanceof Error && error.message) {
+    const match = error.message.match(
+      /"retry[_-]?after"\s*:\s*"?(\d+)"?/i,
+    )
+    if (match?.[1]) {
+      return match[1]
+    }
+  }
+
+  return (
+    ((error as { headers?: { 'retry-after'?: string } }).headers?.['retry-after'] ||
       // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
       ((error as APIError).headers as Headers)?.get?.('retry-after')) ??
     null
   )
+}
+
+function getErrorStatus(error: unknown): number | undefined {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    typeof (error as { status?: unknown }).status === 'number'
+  ) {
+    return (error as { status: number }).status
+  }
+
+  if (error instanceof Error) {
+    const statusJson = error.message.match(/"status"\s*:\s*(\d{3})/i)
+    if (statusJson?.[1]) {
+      return parseInt(statusJson[1], 10)
+    }
+    const statusPrefix = error.message.match(/\bstatus(?:\s*code)?\s*[:=]?\s*(\d{3})\b/i)
+    if (statusPrefix?.[1]) {
+      return parseInt(statusPrefix[1], 10)
+    }
+    const fallbackHttp = error.message.match(/\b(4\d{2}|5\d{2})\b/)
+    if (fallbackHttp?.[1]) {
+      return parseInt(fallbackHttp[1], 10)
+    }
+  }
+
+  return undefined
 }
 
 export function getRetryDelay(
