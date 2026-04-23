@@ -112,6 +112,14 @@ func runFileRead(_ context.Context, raw json.RawMessage) (string, error) {
 		return "", errors.New("limit must be > 0")
 	}
 
+	info, err := os.Stat(in.FilePath)
+	if err != nil {
+		return "", fmt.Errorf("path does not exist: %w", err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("path is a directory, expected file: %s", in.FilePath)
+	}
+
 	b, err := os.ReadFile(in.FilePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %w", err)
@@ -209,10 +217,18 @@ func runGlob(_ context.Context, raw json.RawMessage) (string, error) {
 	if len(matches) == 0 {
 		return "No files found", nil
 	}
+	truncated := false
 	if len(matches) > 100 {
 		matches = matches[:100]
+		truncated = true
 	}
-	return strings.Join(matches, "\n"), nil
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Found %d files\n", len(matches)))
+	sb.WriteString(strings.Join(matches, "\n"))
+	if truncated {
+		sb.WriteString("\n(Results are truncated. Consider using a more specific path or pattern.)")
+	}
+	return sb.String(), nil
 }
 
 func globSearch(base string, pattern string) ([]string, error) {
@@ -334,6 +350,12 @@ func runGrep(_ context.Context, raw json.RawMessage) (string, error) {
 	if _, err := os.Stat(base); err != nil {
 		return "", fmt.Errorf("path does not exist: %w", err)
 	}
+	if in.HeadLimit != nil && *in.HeadLimit < 0 {
+		return "", errors.New("head_limit must be >= 0")
+	}
+	if in.Offset != nil && *in.Offset < 0 {
+		return "", errors.New("offset must be >= 0")
+	}
 
 	mode := in.OutputMode
 	if mode == "" {
@@ -370,7 +392,7 @@ func runGrep(_ context.Context, raw json.RawMessage) (string, error) {
 		args = append(args, in.Pattern)
 	}
 	if strings.TrimSpace(in.Glob) != "" {
-		for _, g := range strings.Fields(in.Glob) {
+		for _, g := range splitGlobPatterns(in.Glob) {
 			args = append(args, "--glob", g)
 		}
 	}
@@ -411,7 +433,7 @@ func runGrep(_ context.Context, raw json.RawMessage) (string, error) {
 	if len(lines) == 0 {
 		return noResultsForMode(mode), nil
 	}
-	return strings.Join(lines, "\n"), nil
+	return renderGrepToolResult(mode, lines), nil
 }
 
 func noResultsForMode(mode string) string {
@@ -419,6 +441,55 @@ func noResultsForMode(mode string) string {
 		return "No files found"
 	}
 	return "No matches found"
+}
+
+func renderGrepToolResult(mode string, lines []string) string {
+	switch mode {
+	case "content":
+		return strings.Join(lines, "\n")
+	case "count":
+		totalMatches := 0
+		for _, line := range lines {
+			idx := strings.LastIndex(line, ":")
+			if idx == -1 {
+				continue
+			}
+			count, err := strconv.Atoi(strings.TrimSpace(line[idx+1:]))
+			if err == nil {
+				totalMatches += count
+			}
+		}
+		return fmt.Sprintf(
+			"%s\n\nFound %d total occurrences across %d files.",
+			strings.Join(lines, "\n"),
+			totalMatches,
+			len(lines),
+		)
+	default:
+		return fmt.Sprintf(
+			"Found %d files\n%s",
+			len(lines),
+			strings.Join(lines, "\n"),
+		)
+	}
+}
+
+func splitGlobPatterns(globRaw string) []string {
+	fields := strings.Fields(globRaw)
+	out := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if strings.Contains(field, "{") && strings.Contains(field, "}") {
+			out = append(out, field)
+			continue
+		}
+		for _, chunk := range strings.Split(field, ",") {
+			chunk = strings.TrimSpace(chunk)
+			if chunk != "" {
+				out = append(out, chunk)
+			}
+		}
+	}
+	return out
 }
 
 func splitNonEmptyLines(raw string) []string {
