@@ -108,6 +108,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setNobbyPose(nobby.PoseThinking)
 			m.chat.streamingThought += msg.event.ReasoningDelta
 			m.chat.estimatedTokensStream++
+			m.chat.estimatedReasoningTokens++
 		}
 		if msg.event.ContentDelta != "" {
 			m.setNobbyPose(nobby.PoseWriting)

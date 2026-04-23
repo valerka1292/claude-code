@@ -52,18 +52,19 @@ type LayoutState struct {
 }
 
 type ChatState struct {
-	messages              []types.Message
-	thinking              bool
-	spinnerVerb           string
-	spinnerStep           int
-	streamingText         string
-	streamingThought      string
-	usage                 agent.UsageState
-	cycleStartedAt        time.Time
-	estimatedTokensStream int
-	showInferring         bool
-	lastWorkedForSec      int
-	interrupted           bool
+	messages                 []types.Message
+	thinking                 bool
+	spinnerVerb              string
+	spinnerStep              int
+	streamingText            string
+	streamingThought         string
+	usage                    agent.UsageState
+	cycleStartedAt           time.Time
+	estimatedTokensStream    int
+	estimatedReasoningTokens int
+	showInferring            bool
+	lastWorkedForSec         int
+	interrupted              bool
 	// Double-press exit/interrupt confirmation state
 	confirmPressTime time.Time
 	confirmPending   bool
