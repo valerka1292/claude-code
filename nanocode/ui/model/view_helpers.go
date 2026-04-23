@@ -45,10 +45,20 @@ func (m Model) usageLine() string {
 	if !ok || active.ContextSize <= 0 {
 		return ""
 	}
-	used := m.chat.usage.PromptTokens + m.chat.liveDownTokens
-	if used < m.chat.usage.TotalTokens {
-		used = m.chat.usage.TotalTokens
+	
+	// Приоритет реальным данным от API
+	if m.chat.usage.TotalTokens > 0 {
+		used := m.chat.usage.TotalTokens
+		percent := (float64(used) / float64(active.ContextSize)) * 100
+		return fmt.Sprintf("%s / %s (%.2f%% ctx)", formatCompact(used), formatCompact(active.ContextSize), percent)
 	}
+	
+	// Во время стриминга используем оценку prompt + накопленные completion токены
+	promptBase := m.chat.usage.PromptTokens
+	if promptBase == 0 {
+		promptBase = estimatePromptTokens(m.chat.messages)
+	}
+	used := promptBase + m.chat.liveDownTokens
 	percent := (float64(used) / float64(active.ContextSize)) * 100
 	return fmt.Sprintf("%s / %s (%.2f%% ctx)", formatCompact(used), formatCompact(active.ContextSize), percent)
 }
