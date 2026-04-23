@@ -30,7 +30,7 @@ type AnimationFrame struct {
 	BodyC   string
 	BodyR   string
 	Legs    string
-	Color   string
+	Color   lipgloss.Color
 }
 
 type animation struct {
