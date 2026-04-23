@@ -1,43 +1,110 @@
-// ui/components/messages/markdown.go
 package messages
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
-	"unicode/utf8"
+
+	"nanocode/internal/mathutil"
+	"nanocode/ui/theme"
 
 	"charm.land/glamour/v2"
+	"github.com/alecthomas/chroma/v2/quick"
 	"github.com/charmbracelet/lipgloss"
 )
 
 const minMarkdownWidth = 20
 
-// ── renderer cache (keyed by wrap width) ────────────────────────────────────
-
 var rendererCache sync.Map
 
-// ── public entry-points ──────────────────────────────────────────────────────
+// Фикс для LLM, которые иногда забывают ставить пробел после решеток (например: ##Заголовок)
+var headingRegex = regexp.MustCompile(`(?m)^(#{1,6})([^#\s].*)$`)
 
-func renderMarkdown(text string, width int, streaming bool) string {
-	normalized := normalizeNewlines(text)
-	if streaming {
-		normalized = stabilizeStreamingMarkdown(normalized)
-	}
-
-	// Split into prose segments and code-block segments, render each correctly.
-	segments := splitSegments(normalized)
-	var sb strings.Builder
-	for _, seg := range segments {
-		if seg.isCode {
-			sb.WriteString(renderCodeBlock(seg.lang, seg.body, width))
-		} else {
-			sb.WriteString(renderProse(seg.body, width))
-		}
-	}
-	return dedentRendered(strings.TrimRight(sb.String(), "\n"))
+type segment struct {
+	isCode   bool
+	language string
+	content  string
 }
 
+// getCustomStyle создает премиальную тему рендера.
+// - Заголовки стали более контрастными.
+// - Инлайн-код теперь использует черный текст (AccentContrast) на акцентном желтом фоне.
+func getCustomStyle() string {
+	return `{
+		"document": { "margin": 0, "color": "` + theme.PrimaryTextHex + `" },
+		"block_quote": { "indent": 1, "indent_token": "┃ ", "color": "` + theme.MutedTextHex + `" },
+		"paragraph": {},
+		"list": { "level_indent": 2 },
+		"heading": { "block_suffix": "\n", "bold": true },
+		"h1": { "color": "` + theme.AccentContrastHex + `", "background_color": "` + theme.PrimaryAccentHex + `", "bold": true, "prefix": " " },
+		"h2": { "color": "` + theme.PrimaryAccentHex + `", "bold": true },
+		"h3": { "color": "` + theme.SecondaryAccentHex + `", "bold": true },
+		"h4": { "color": "` + theme.PrimaryTextHex + `", "bold": true, "italic": true },
+		"h5": { "color": "` + theme.MutedTextHex + `", "bold": true },
+		"h6": { "color": "` + theme.MutedTextHex + `", "bold": true },
+		"strikethrough": { "crossed_out": true },
+		"emph": { "italic": true, "color": "` + theme.PrimaryTextHex + `" },
+		"strong": { "bold": true, "color": "` + theme.PrimaryAccentHex + `" },
+		"hr": { "color": "` + theme.SurfaceBackgroundHex + `", "format": "\n────────────────────────────────────────────────────────────\n" },
+		"item": { "block_prefix": "• " },
+		"enumeration": { "block_prefix": ". " },
+		"task": { "ticked": "[✓] ", "unticked": "[ ] " },
+		"link": { "color": "` + theme.SecondaryAccentHex + `", "underline": true },
+		"link_text": { "color": "` + theme.PrimaryAccentHex + `", "bold": true },
+		"image": { "color": "` + theme.PrimaryAccentHex + `", "underline": true },
+		"image_text": { "format": "🖼️ {{.text}}" },
+		"code": { "color": "` + theme.AccentContrastHex + `", "background_color": "` + theme.PrimaryAccentHex + `" },
+		"table": { "center_separator": "┼", "column_separator": "│", "row_separator": "─" }
+	}`
+}
+
+func renderMarkdown(text string, width int, streaming bool) string {
+	text = preprocessMarkdown(text, streaming)
+	segments := parseSegments(text)
+	var result strings.Builder
+
+	renderer, _ := getRenderer(width)
+
+	for i, seg := range segments {
+		if seg.isCode {
+			ui := renderCodeUI(seg.language, seg.content, width)
+			result.WriteString(ui)
+		} else {
+			textSeg := strings.TrimSpace(seg.content)
+			if textSeg == "" {
+				continue
+			}
+
+			rendered, err := renderer.Render(textSeg)
+			if err != nil {
+				result.WriteString(textSeg)
+			} else {
+				result.WriteString(strings.TrimRight(rendered, "\n"))
+			}
+		}
+		if i < len(segments)-1 {
+			result.WriteString("\n\n") // Отступ между блоками
+		}
+	}
+
+	return strings.TrimSpace(result.String())
+}
+
+func preprocessMarkdown(text string, streaming bool) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	text = headingRegex.ReplaceAllString(text, "$1 $2") // Лечим слипшиеся заголовки
+
+	if streaming {
+		text = stabilizeStreamingMarkdown(text)
+	}
+
+	return text
+}
+
+// Закрывает парные блоки, если нейросеть оборвала генерацию на середине
 func stabilizeStreamingMarkdown(text string) string {
 	if strings.Count(text, "```")%2 == 1 {
 		if !strings.HasSuffix(text, "\n") {
@@ -48,497 +115,75 @@ func stabilizeStreamingMarkdown(text string) string {
 	return text
 }
 
-// ── segment splitting ────────────────────────────────────────────────────────
-
-type segment struct {
-	isCode bool
-	lang   string
-	body   string
-}
-
-// splitSegments splits markdown into alternating prose / fenced-code segments.
-func splitSegments(text string) []segment {
+func parseSegments(text string) []segment {
+	var segments []segment
 	lines := strings.Split(text, "\n")
-	var segs []segment
-	var cur strings.Builder
+	var current strings.Builder
 	inFence := false
 	fenceToken := ""
-	lang := ""
-
-	flush := func(code bool, l string) {
-		body := cur.String()
-		cur.Reset()
-		if body == "" && !code {
-			return
-		}
-		segs = append(segs, segment{isCode: code, lang: l, body: body})
-	}
+	language := ""
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
+
 		if !inFence {
-			tok := fenceTokenFromStart(trimmed)
-			if tok != "" {
-				flush(false, "")
+			if token := fenceTokenFromStart(trimmed); token != "" {
+				if current.Len() > 0 {
+					segments = append(segments, segment{isCode: false, content: current.String()})
+					current.Reset()
+				}
 				inFence = true
-				fenceToken = tok
-				lang = strings.TrimSpace(strings.TrimPrefix(trimmed, tok))
+				fenceToken = token
+				language = strings.TrimSpace(trimmed[len(token):])
 				continue
 			}
-			cur.WriteString(line)
-			cur.WriteByte('\n')
-			continue
-		}
-		// inside fence
-		if isFenceEnd(trimmed, fenceToken, len(fenceToken)) {
-			flush(true, lang)
-			inFence = false
-			fenceToken = ""
-			lang = ""
-			continue
-		}
-		cur.WriteString(line)
-		cur.WriteByte('\n')
-	}
-	// leftover
-	if inFence {
-		flush(true, lang)
-	} else {
-		flush(false, "")
-	}
-	return segs
-}
+			if strings.HasPrefix(trimmed, "$$") {
+				if current.Len() > 0 {
+					segments = append(segments, segment{isCode: false, content: current.String()})
+					current.Reset()
+				}
+				inFence = true
+				fenceToken = "$$"
+				language = "math"
 
-// ── code block renderer ──────────────────────────────────────────────────────
-
-var (
-	codeBodyBg = lipgloss.Color("#1A1A1A")
-
-	lineNumStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#5A6473")).
-			Background(codeBodyBg)
-
-	lineNumContinuationStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#3B3B3B")).
-					Background(codeBodyBg)
-
-	codeLineStyle = lipgloss.NewStyle().
-			Background(codeBodyBg).
-			Foreground(lipgloss.Color("#E5E7EB"))
-
-	codeBorderStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#3A3F4B"))
-
-	langBadgeStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FBFA56")).
-			Bold(true)
-)
-
-func renderCodeBlock(lang, body string, width int) string {
-	if width < minMarkdownWidth {
-		width = minMarkdownWidth
-	}
-
-	highlighted := highlightCode(lang, body, width)
-
-	rawBody := strings.TrimRight(body, "\n")
-	rawLines := strings.Split(rawBody, "\n")
-	if rawBody == "" {
-		rawLines = []string{""}
-	}
-	hlLines := strings.Split(strings.TrimRight(highlighted, "\n"), "\n")
-
-	// Выравниваем количество строк после работы glamour
-	for len(hlLines) < len(rawLines) {
-		hlLines = append(hlLines, "")
-	}
-
-	digits := len(fmt.Sprintf("%d", len(rawLines)))
-	if digits < 2 {
-		digits = 2
-	}
-
-	// Рассчитываем ширину (без лишних разделителей в центре)
-	innerWidth := width - digits - 5
-	if innerWidth < 8 {
-		innerWidth = 8
-	}
-	// Ширина от левой до правой рамки
-	innerFrameWidth := digits + 3 + innerWidth
-
-	var sb strings.Builder
-
-	langLabel := strings.ToLower(lang)
-	if langLabel == "" {
-		langLabel = "code"
-	}
-
-	// Элегантная верхняя грань с интегрированным названием языка (например: ╭─ go ─────╮ )
-	title := " " + langLabel + " "
-	titleRendered := langBadgeStyle.Render(title)
-
-	dashCount := innerFrameWidth - lipgloss.Width(title) - 1
-	if dashCount < 0 {
-		dashCount = 0
-	}
-
-	topBorder := codeBorderStyle.Render("╭─") + titleRendered + codeBorderStyle.Render(strings.Repeat("─", dashCount)+"╮")
-	sb.WriteString(topBorder)
-	sb.WriteByte('\n')
-
-	// Вывод строк с кодом без внутренних границ
-	for i, hl := range hlLines {
-		wrapped := wrapVisibleANSI(hl, innerWidth)
-		if len(wrapped) == 0 {
-			wrapped = []string{""}
-		}
-		for j, part := range wrapped {
-			var num string
-			if j == 0 {
-				num = lineNumStyle.Render(fmt.Sprintf(" %*d ", digits, i+1))
-			} else {
-				num = lineNumContinuationStyle.Render(fmt.Sprintf(" %*s ", digits, ""))
+				if len(trimmed) > 2 && strings.HasSuffix(trimmed, "$$") {
+					content := trimmed[2 : len(trimmed)-2]
+					segments = append(segments, segment{isCode: true, language: "math", content: content + "\n"})
+					inFence = false
+					fenceToken = ""
+					language = ""
+				} else {
+					content := trimmed[2:]
+					if content != "" {
+						current.WriteString(content + "\n")
+					}
+				}
+				continue
 			}
-
-			codePart := codeLineStyle.Render(padVisibleANSI(part, innerWidth))
-			sb.WriteString(codeBorderStyle.Render("│") + num + " " + codePart + codeBorderStyle.Render("│"))
-			sb.WriteByte('\n')
-		}
-	}
-
-	// Плавное закругление снизу
-	sb.WriteString(codeBorderStyle.Render("╰" + strings.Repeat("─", innerFrameWidth) + "╯"))
-	sb.WriteByte('\n')
-
-	return sb.String() + "\n"
-}
-
-// highlightCode renders only the code body through glamour so chroma applies
-// syntax colouring, then strips the surrounding box glamour adds.
-func highlightCode(lang, body string, width int) string {
-	// Wrap in a fenced block and render
-	md := "```" + lang + "\n" + strings.TrimRight(body, "\n") + "\n```\n"
-
-	renderer, err := getRenderer(width)
-	if err != nil {
-		return body
-	}
-	rendered, err := renderer.Render(md)
-	if err != nil {
-		return body
-	}
-
-	// glamour wraps code blocks – extract just the inner lines
-	lines := strings.Split(rendered, "\n")
-	// Drop leading/trailing empty lines, find the code content lines
-	var inner []string
-	started := false
-	for _, l := range lines {
-		plain := stripANSI(l)
-		trimmed := strings.TrimSpace(plain)
-		// Skip the decorative lines glamour adds around the block
-		if !started && trimmed == "" {
-			continue
-		}
-		started = true
-		inner = append(inner, l)
-	}
-	// Remove trailing blank lines
-	for len(inner) > 0 && strings.TrimSpace(stripANSI(inner[len(inner)-1])) == "" {
-		inner = inner[:len(inner)-1]
-	}
-	return strings.Join(inner, "\n")
-}
-
-// ── prose renderer ───────────────────────────────────────────────────────────
-
-func renderProse(text string, width int) string {
-	if strings.TrimSpace(text) == "" {
-		return ""
-	}
-	renderer, err := getRenderer(width)
-	if err != nil {
-		return text
-	}
-	rendered, err := renderer.Render(text)
-	if err != nil {
-		return text
-	}
-	return strings.TrimRight(rendered, "\n") + "\n"
-}
-
-// ── glamour renderer (prose-only style, no code-block chrome) ───────────────
-
-func getRenderer(width int) (*glamour.TermRenderer, error) {
-	wrap := width
-	if wrap < minMarkdownWidth {
-		wrap = minMarkdownWidth
-	}
-	if cached, ok := rendererCache.Load(wrap); ok {
-		return cached.(*glamour.TermRenderer), nil
-	}
-	renderer, err := glamour.NewTermRenderer(
-		glamour.WithWordWrap(wrap),
-		glamour.WithStylesFromJSONBytes([]byte(glamourStyle())),
-	)
-	if err != nil {
-		return nil, err
-	}
-	actual, _ := rendererCache.LoadOrStore(wrap, renderer)
-	return actual.(*glamour.TermRenderer), nil
-}
-
-// ── style JSON ───────────────────────────────────────────────────────────────
-
-func glamourStyle() string {
-	return `{
-	"document": { "block_prefix": "", "block_suffix": "" },
-
-	"block_quote": {
-		"color": "#A8B0BD",
-		"background_color": "#222222",
-		"italic": true,
-		"indent": 1,
-		"indent_token": "▍ "
-	},
-
-	"list": { "level_indent": 2 },
-
-	"heading": {
-		"bold": true,
-		"block_suffix": "\n"
-	},
-	"h1": {
-		"prefix": "󰊠  ",
-		"color": "#FBFA56",
-		"bold": true,
-		"block_suffix": "\n"
-	},
-	"h2": {
-		"prefix": "◉ ",
-		"color": "#EBDC2F",
-		"bold": true
-	},
-	"h3": {
-		"prefix": "◆ ",
-		"color": "#D4D4D4",
-		"bold": true
-	},
-	"h4": { "prefix": "   · ", "color": "#9CA3AF", "bold": true },
-	"h5": { "prefix": "     ‣ ", "color": "#6B7280" },
-	"h6": { "prefix": "       – ", "color": "#4B5563" },
-
-	"text":          { "color": "#E5E7EB", "block_suffix": "" },
-	"strong":        { "bold": true, "color": "#F9FAFB" },
-	"italic":        { "italic": true, "color": "#D6DEE8" },
-	"strikethrough": { "crossed_out": true, "color": "#6B7280" },
-
-	"code": {
-		"color": "#FBFA56",
-		"background_color": "#2E3440",
-		"prefix": " ",
-		"suffix": " "
-	},
-
-	"code_block": {
-		"color": "#E5E7EB",
-		"background_color": "#1A1A1A",
-		"margin": 0,
-		"chroma": {
-			"text":                 { "color": "#E5E7EB" },
-			"error":                { "color": "#FF5555", "bold": true },
-			"comment":              { "color": "#6A9955", "italic": true },
-			"comment_preproc":      { "color": "#C586C0" },
-			"keyword":              { "color": "#569CD6", "bold": true },
-			"keyword_reserved":     { "color": "#569CD6", "bold": true },
-			"keyword_namespace":    { "color": "#C586C0", "bold": true },
-			"keyword_type":         { "color": "#4EC9B0" },
-			"operator":             { "color": "#D4D4D4" },
-			"punctuation":          { "color": "#D4D4D4" },
-			"name":                 { "color": "#E5E7EB" },
-			"name_builtin":         { "color": "#DCDCAA" },
-			"name_tag":             { "color": "#4EC9B0" },
-			"name_attribute":       { "color": "#9CDCFE" },
-			"name_class":           { "color": "#4EC9B0", "bold": true },
-			"name_constant":        { "color": "#4FC1FF" },
-			"name_decorator":       { "color": "#DCDCAA" },
-			"name_exception":       { "color": "#F44747" },
-			"name_function":        { "color": "#DCDCAA" },
-			"name_other":           { "color": "#9CDCFE" },
-			"name_variable":        { "color": "#9CDCFE" },
-			"literal_number":       { "color": "#B5CEA8" },
-			"literal_string":       { "color": "#CE9178" },
-			"literal_string_doc":   { "color": "#6A9955", "italic": true },
-			"literal_string_escape":{ "color": "#D7BA7D" },
-			"literal_string_interpol":{ "color": "#569CD6" },
-			"generic_deleted":      { "color": "#FF5555" },
-			"generic_inserted":     { "color": "#50FA7B" },
-			"generic_heading":      { "color": "#FBFA56", "bold": true },
-			"generic_subheading":   { "color": "#EBDC2F" },
-			"generic_strong":       { "bold": true },
-			"generic_emph":         { "italic": true }
-		}
-	},
-
-	"paragraph": { "margin": 0, "block_suffix": "\n" },
-
-	"table": {
-		"center_separator": "┼",
-		"column_separator": "│",
-		"row_separator": "─"
-	},
-
-	"item":        { "block_prefix": "  • " },
-	"enumeration": { "block_prefix": ". " },
-	"task": {
-		"ticked":   "[✓] ",
-		"unticked": "[ ] "
-	},
-
-	"hr": {
-		"color": "#333333",
-		"format": "\n─────────────────────────────────────────────────────────────────\n"
-	},
-
-	"link":       { "color": "#60A5FA", "underline": true },
-	"link_text":  { "color": "#93C5FD", "bold": true, "underline": true },
-	"image":      { "color": "#60A5FA", "underline": true },
-	"image_text": { "color": "#93C5FD", "bold": true, "format": "🖼  {{.text}}" }
-}`
-}
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-func normalizeNewlines(s string) string {
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	return strings.ReplaceAll(s, "\r", "\n")
-}
-
-func stripANSI(str string) string {
-	var out strings.Builder
-	inEscape := false
-	for _, r := range str {
-		if inEscape {
-			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
-				inEscape = false
+			current.WriteString(line + "\n")
+		} else {
+			if isFenceEnd(trimmed, fenceToken, len(fenceToken)) || (fenceToken == "$$" && strings.HasSuffix(trimmed, "$$")) {
+				if fenceToken == "$$" {
+					content := trimmed[:len(trimmed)-2]
+					if content != "" {
+						current.WriteString(content + "\n")
+					}
+				}
+				segments = append(segments, segment{isCode: true, language: language, content: current.String()})
+				current.Reset()
+				inFence = false
+				fenceToken = ""
+				language = ""
+				continue
 			}
-			continue
+			current.WriteString(line + "\n")
 		}
-		if r == '\x1b' {
-			inEscape = true
-			continue
-		}
-		out.WriteRune(r)
 	}
-	return out.String()
-}
 
-// visibleWidth returns the number of visible characters (ignoring ANSI escapes).
-func visibleWidth(s string) int {
-	return utf8.RuneCountInString(stripANSI(s))
-}
-
-func removeVisibleIndent(line string, count int) string {
-	removed := 0
-	var out strings.Builder
-	inEscape := false
-	for _, r := range line {
-		if inEscape {
-			out.WriteRune(r)
-			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
-				inEscape = false
-			}
-			continue
-		}
-		if r == '\x1b' {
-			inEscape = true
-			out.WriteRune(r)
-			continue
-		}
-		if removed < count && r == ' ' {
-			removed++
-			continue
-		}
-		out.WriteRune(r)
-	}
-	return out.String()
-}
-
-func dedentRendered(text string) string {
-	lines := strings.Split(text, "\n")
-	minIndent := -1
-	for _, line := range lines {
-		plainLine := stripANSI(line)
-		if strings.TrimSpace(plainLine) == "" {
-			continue
-		}
-		indent := 0
-		for _, r := range plainLine {
-			if r != ' ' {
-				break
-			}
-			indent++
-		}
-		if minIndent == -1 || indent < minIndent {
-			minIndent = indent
-		}
-	}
-	if minIndent <= 0 {
-		return text
-	}
-	for i, line := range lines {
-		lines[i] = removeVisibleIndent(line, minIndent)
-	}
-	return strings.Join(lines, "\n")
-}
-
-func padVisibleANSI(text string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	vis := visibleWidth(text)
-	if vis >= width {
-		return text
-	}
-	return text + strings.Repeat(" ", width-vis)
-}
-
-func wrapVisibleANSI(text string, width int) []string {
-	if width <= 0 {
-		return []string{text}
-	}
-	if visibleWidth(text) <= width {
-		return []string{text}
-	}
-	var lines []string
-	current := strings.Builder{}
-	visible := 0
-	inEscape := false
-	for _, r := range text {
-		if inEscape {
-			current.WriteRune(r)
-			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
-				inEscape = false
-			}
-			continue
-		}
-		if r == '\x1b' {
-			inEscape = true
-			current.WriteRune(r)
-			continue
-		}
-		current.WriteRune(r)
-		visible++
-		if visible >= width {
-			lines = append(lines, current.String())
-			current.Reset()
-			visible = 0
-		}
-	}
 	if current.Len() > 0 {
-		lines = append(lines, current.String())
+		segments = append(segments, segment{isCode: inFence, language: language, content: current.String()})
 	}
-	return lines
+	return segments
 }
 
 func fenceTokenFromStart(line string) string {
@@ -551,7 +196,7 @@ func fenceTokenFromStart(line string) string {
 	return ""
 }
 
-func isFenceEnd(line, token string, minLen int) bool {
+func isFenceEnd(line string, token string, minLen int) bool {
 	if token == "" || len(line) < minLen {
 		return false
 	}
@@ -564,4 +209,85 @@ func isFenceEnd(line, token string, minLen int) bool {
 		}
 	}
 	return true
+}
+
+func renderCodeUI(lang, content string, width int) string {
+	content = strings.TrimSuffix(content, "\n")
+	if content == "" {
+		return ""
+	}
+
+	var buf strings.Builder
+	highlighted := content
+
+	// Подсветка синтаксиса
+	err := quick.Highlight(&buf, content, lang, "terminal256", "dracula")
+	if err == nil && buf.Len() > 0 {
+		highlighted = buf.String()
+	}
+
+	lines := strings.Split(highlighted, "\n")
+
+	// ДИНАМИЧЕСКИЙ РАЗМЕР НОМЕРОВ СТРОК: отступ равен кол-ву цифр в самой длинной строке
+	digits := len(strconv.Itoa(len(lines)))
+
+	var formatted strings.Builder
+	numStyle := lipgloss.NewStyle().Foreground(theme.MutedText) // MutedText отлично контрастирует и не сливается с рамкой
+
+	for i, line := range lines {
+		numStr := fmt.Sprintf("%*d │ ", digits, i+1)
+		formatted.WriteString(numStyle.Render(numStr) + line)
+		if i < len(lines)-1 {
+			formatted.WriteString("\n")
+		}
+	}
+
+	headerText := " " + strings.ToUpper(lang) + " "
+	if lang == "" {
+		headerText = " CODE "
+	} else if lang == "math" {
+		headerText = " MATHJAX "
+	} else if lang == "mermaid" {
+		headerText = " MERMAID "
+	}
+
+	// Элегантная "вкладка"
+	header := lipgloss.NewStyle().
+		Background(theme.PrimaryAccent).
+		Foreground(theme.AccentContrast).
+		Bold(true).
+		Padding(0, 1).
+		MarginLeft(2).
+		Render(headerText)
+
+	// Рамка вокруг кода
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.SurfaceBackground).
+		Width(mathutil.Max(20, width-2)).
+		Render(formatted.String())
+
+	return header + "\n" + box
+}
+
+func getRenderer(width int) (*glamour.TermRenderer, error) {
+	wrap := width
+	if wrap < minMarkdownWidth {
+		wrap = minMarkdownWidth
+	}
+
+	if cached, ok := rendererCache.Load(wrap); ok {
+		return cached.(*glamour.TermRenderer), nil
+	}
+
+	renderer, err := glamour.NewTermRenderer(
+		glamour.WithWordWrap(wrap),
+		glamour.WithStylesFromJSONBytes([]byte(getCustomStyle())),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	actual, _ := rendererCache.LoadOrStore(wrap, renderer)
+	return actual.(*glamour.TermRenderer), nil
 }
