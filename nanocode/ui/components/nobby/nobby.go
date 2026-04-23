@@ -98,11 +98,12 @@ var animations = map[Pose]animation{
 	},
 	PoseAPIErrorReconnect: {
 		Frames: []AnimationFrame{
+			{Antenna: "    │    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: lipgloss.Color("#ff5f5f")},
 			{Antenna: "    ╱    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: lipgloss.Color("#ff5f5f")},
-			{Antenna: "    ✗    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: lipgloss.Color("#ff5f5f")},
+			{Antenna: "    ─    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: lipgloss.Color("#ff5f5f")},
 			{Antenna: "    ╲    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: lipgloss.Color("#ff5f5f")},
 		},
-		Speed: 400 * time.Millisecond,
+		Speed: 200 * time.Millisecond,
 	},
 	PoseAPIError: {
 		Frames: []AnimationFrame{
