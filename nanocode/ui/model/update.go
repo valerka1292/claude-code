@@ -6,9 +6,11 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"nanocode/internal/mathutil"
 	"nanocode/ui/components/nobby"
 	"nanocode/ui/components/spinner"
 	"nanocode/ui/config"
+	"nanocode/ui/model/provider"
 	"nanocode/ui/types"
 )
 
@@ -17,8 +19,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.layout.width = msg.Width
 		m.layout.height = msg.Height
-		m.input.Width = max(10, msg.Width-6)
-		m.providers.input.Width = max(30, msg.Width/2)
+		m.input.Width = mathutil.Max(10, msg.Width-6)
+		m.providers.input.Width = mathutil.Max(30, msg.Width/2)
 		m.resizeViewport()
 		m.refreshViewport(false)
 		return m, nil
@@ -135,10 +137,10 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	if len(m.commands.suggestions) > 0 {
 		switch msg.String() {
 		case "up":
-			m.commands.selected = clamp(m.commands.selected-1, 0, len(m.commands.suggestions)-1)
+			m.commands.selected = mathutil.Clamp(m.commands.selected-1, 0, len(m.commands.suggestions)-1)
 			return m, nil, true
 		case "down":
-			m.commands.selected = clamp(m.commands.selected+1, 0, len(m.commands.suggestions)-1)
+			m.commands.selected = mathutil.Clamp(m.commands.selected+1, 0, len(m.commands.suggestions)-1)
 			return m, nil, true
 		case "tab":
 			m.input.SetValue(m.commands.suggestions[m.commands.selected] + " ")
@@ -268,21 +270,21 @@ func (m Model) handleProviderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up":
 		switch m.providers.mode {
 		case providerModeMenu:
-			m.providers.menuIndex = clamp(m.providers.menuIndex-1, 0, 3)
+			m.providers.menuIndex = clampInt(m.providers.menuIndex-1, 0, 3)
 		case providerModeSelect, providerModeEditPick, providerModeDelete:
-			m.providers.selectedProvider = clamp(m.providers.selectedProvider-1, 0, len(m.providers.names)-1)
+			m.providers.selectedProvider = clampInt(m.providers.selectedProvider-1, 0, len(m.providers.names)-1)
 		case providerModeEditField:
-			m.providers.selectedField = clamp(m.providers.selectedField-1, 0, 4)
+			m.providers.selectedField = provider.Field(clampInt(int(m.providers.selectedField)-1, 0, 4))
 		}
 		return m, nil
 	case "down":
 		switch m.providers.mode {
 		case providerModeMenu:
-			m.providers.menuIndex = clamp(m.providers.menuIndex+1, 0, 3)
+			m.providers.menuIndex = clampInt(m.providers.menuIndex+1, 0, 3)
 		case providerModeSelect, providerModeEditPick, providerModeDelete:
-			m.providers.selectedProvider = clamp(m.providers.selectedProvider+1, 0, len(m.providers.names)-1)
+			m.providers.selectedProvider = clampInt(m.providers.selectedProvider+1, 0, len(m.providers.names)-1)
 		case providerModeEditField:
-			m.providers.selectedField = clamp(m.providers.selectedField+1, 0, 4)
+			m.providers.selectedField = provider.Field(clampInt(int(m.providers.selectedField)+1, 0, 4))
 		}
 		return m, nil
 	case "enter":
@@ -341,25 +343,25 @@ func (m Model) startEditFieldInput() (tea.Model, tea.Cmd) {
 	m.providers.mode = providerModeEditInput
 	m.providers.input.Focus()
 	switch m.providers.selectedField {
-	case 0:
+	case provider.FieldName:
 		m.providers.inputPrompt = "Edit name"
-		m.providers.inputField = "name"
+		m.providers.inputField = provider.FieldName
 		m.providers.input.SetValue(p.Name)
-	case 1:
+	case provider.FieldBaseURL:
 		m.providers.inputPrompt = "Edit base URL"
-		m.providers.inputField = "base_url"
+		m.providers.inputField = provider.FieldBaseURL
 		m.providers.input.SetValue(p.BaseURL)
-	case 2:
+	case provider.FieldModel:
 		m.providers.inputPrompt = "Edit model"
-		m.providers.inputField = "model"
+		m.providers.inputField = provider.FieldModel
 		m.providers.input.SetValue(p.Model)
-	case 3:
+	case provider.FieldAPIKey:
 		m.providers.inputPrompt = "Edit API key"
-		m.providers.inputField = "api_key"
+		m.providers.inputField = provider.FieldAPIKey
 		m.providers.input.SetValue(p.APIKey)
-	case 4:
+	case provider.FieldContextSize:
 		m.providers.inputPrompt = "Edit context size"
-		m.providers.inputField = "context_size"
+		m.providers.inputField = provider.FieldContextSize
 		m.providers.input.SetValue(fmt.Sprintf("%d", p.ContextSize))
 	}
 	return m, nil
@@ -368,7 +370,7 @@ func (m Model) startEditFieldInput() (tea.Model, tea.Cmd) {
 func (m Model) submitProviderInput() (tea.Model, tea.Cmd) {
 	value := strings.TrimSpace(m.providers.input.Value())
 	switch m.providers.inputField {
-	case "name":
+	case provider.FieldName:
 		if value == "" {
 			return m, nil
 		}
@@ -380,12 +382,12 @@ func (m Model) submitProviderInput() (tea.Model, tea.Cmd) {
 			m.providers.currentProviderRef = value
 			return m, m.saveProvidersCmd("Provider name updated.")
 		}
-		m.providers.formName = value
-		m.providers.inputField = "base_url"
+		m.providers.form.Name = value
+		m.providers.inputField = provider.FieldBaseURL
 		m.providers.inputPrompt = "Enter base URL"
 		m.providers.input.SetValue("")
 		return m, nil
-	case "base_url":
+	case provider.FieldBaseURL:
 		if value == "" {
 			return m, nil
 		}
@@ -395,12 +397,12 @@ func (m Model) submitProviderInput() (tea.Model, tea.Cmd) {
 			m.providers.data.Providers[m.providers.currentProviderRef] = p
 			return m, m.saveProvidersCmd("Provider base URL updated.")
 		}
-		m.providers.formBaseURL = config.NormalizeBaseURL(value)
-		m.providers.inputField = "model"
+		m.providers.form.BaseURL = config.NormalizeBaseURL(value)
+		m.providers.inputField = provider.FieldModel
 		m.providers.inputPrompt = "Enter model"
 		m.providers.input.SetValue("")
 		return m, nil
-	case "model":
+	case provider.FieldModel:
 		if value == "" {
 			return m, nil
 		}
@@ -410,12 +412,12 @@ func (m Model) submitProviderInput() (tea.Model, tea.Cmd) {
 			m.providers.data.Providers[m.providers.currentProviderRef] = p
 			return m, m.saveProvidersCmd("Provider model updated.")
 		}
-		m.providers.formModel = value
-		m.providers.inputField = "api_key"
+		m.providers.form.Model = value
+		m.providers.inputField = provider.FieldAPIKey
 		m.providers.inputPrompt = "Enter API key"
 		m.providers.input.SetValue("")
 		return m, nil
-	case "api_key":
+	case provider.FieldAPIKey:
 		if value == "" {
 			return m, nil
 		}
@@ -425,12 +427,12 @@ func (m Model) submitProviderInput() (tea.Model, tea.Cmd) {
 			m.providers.data.Providers[m.providers.currentProviderRef] = p
 			return m, m.saveProvidersCmd("Provider API key updated.")
 		}
-		m.providers.formAPIKey = value
-		m.providers.inputField = "context_size"
+		m.providers.form.APIKey = value
+		m.providers.inputField = provider.FieldContextSize
 		m.providers.inputPrompt = "Enter context size"
 		m.providers.input.SetValue("")
 		return m, nil
-	case "context_size":
+	case provider.FieldContextSize:
 		size, err := parseContextSize(value)
 		if err != nil || size <= 0 {
 			return m, nil
@@ -441,20 +443,20 @@ func (m Model) submitProviderInput() (tea.Model, tea.Cmd) {
 			m.providers.data.Providers[m.providers.currentProviderRef] = p
 			return m, m.saveProvidersCmd("Provider context size updated.")
 		}
-		m.providers.formContextSize = value
+		m.providers.form.ContextSize = value
 		for name, provider := range m.providers.data.Providers {
 			provider.Active = false
 			m.providers.data.Providers[name] = provider
 		}
-		m.providers.data.Providers[m.providers.formName] = config.Provider{
-			Name:        m.providers.formName,
-			BaseURL:     m.providers.formBaseURL,
-			Model:       m.providers.formModel,
-			APIKey:      m.providers.formAPIKey,
+		m.providers.data.Providers[m.providers.form.Name] = config.Provider{
+			Name:        m.providers.form.Name,
+			BaseURL:     m.providers.form.BaseURL,
+			Model:       m.providers.form.Model,
+			APIKey:      m.providers.form.APIKey,
 			ContextSize: size,
 			Active:      true,
 		}
-		return m, m.saveProvidersCmd(fmt.Sprintf("Provider %s created and activated.", m.providers.formName))
+		return m, m.saveProvidersCmd(fmt.Sprintf("Provider %s created and activated.", m.providers.form.Name))
 	}
 	return m, nil
 }

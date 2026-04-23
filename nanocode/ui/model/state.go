@@ -1,7 +1,6 @@
 package model
 
 import (
-	"math/rand"
 	"os"
 	"time"
 
@@ -10,7 +9,22 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"nanocode/ui/components/nobby"
 	"nanocode/ui/config"
+	"nanocode/ui/model/agent"
+	"nanocode/ui/model/provider"
 	"nanocode/ui/types"
+)
+
+type providerMode string
+
+const (
+	providerModeMenu       providerMode = "menu"
+	providerModeCreate     providerMode = "create"
+	providerModeSelect     providerMode = "select"
+	providerModeEditPick   providerMode = "edit_pick"
+	providerModeEditField  providerMode = "edit_field"
+	providerModeEditInput  providerMode = "edit_input"
+	providerModeDelete     providerMode = "delete"
+	providerModeInputValue providerMode = "input_value"
 )
 
 type spinnerTickMsg time.Time
@@ -21,9 +35,9 @@ type providerSavedMsg struct {
 }
 type nobbyTickMsg time.Time
 
-type streamStartedMsg struct{ ch <-chan streamEvent }
+type streamStartedMsg struct{ ch <-chan agent.StreamEvent }
 type streamEventMsg struct {
-	event streamEvent
+	event agent.StreamEvent
 	done  bool
 }
 
@@ -41,13 +55,6 @@ type LayoutState struct {
 	scrollbarDragging bool
 }
 
-type UsageState struct {
-	PromptTokens     int
-	CompletionTokens int
-	ReasoningTokens  int
-	TotalTokens      int
-}
-
 type ChatState struct {
 	messages         []types.Message
 	thinking         bool
@@ -55,7 +62,7 @@ type ChatState struct {
 	spinnerStep      int
 	streamingText    string
 	streamingThought string
-	usage            UsageState
+	usage            agent.UsageState
 	cycleStartedAt   time.Time
 	liveDownTokens   int
 	showInferring    bool
@@ -73,42 +80,23 @@ type SettingsState struct {
 	values      config.Settings
 }
 
-type providerMode string
-
-const (
-	providerModeMenu       providerMode = "menu"
-	providerModeCreate     providerMode = "create"
-	providerModeSelect     providerMode = "select"
-	providerModeEditPick   providerMode = "edit_pick"
-	providerModeEditField  providerMode = "edit_field"
-	providerModeEditInput  providerMode = "edit_input"
-	providerModeDelete     providerMode = "delete"
-	providerModeInputValue providerMode = "input_value"
-)
-
 type ProviderState struct {
 	open               bool
 	mode               providerMode
 	menuIndex          int
 	selectedProvider   int
-	selectedField      int
+	selectedField      provider.Field
 	input              textinput.Model
 	data               config.ProvidersFile
 	names              []string
-	formName           string
-	formBaseURL        string
-	formModel          string
-	formAPIKey         string
-	formContextSize    string
+	form               provider.Form
 	inputPrompt        string
-	inputField         string
-	inputProviderName  string
-	inputValuePrefill  string
+	inputField         provider.Field
 	currentProviderRef string
 }
 
 type StreamState struct {
-	ch <-chan streamEvent
+	ch <-chan agent.StreamEvent
 }
 
 type Model struct {
@@ -127,7 +115,6 @@ type Model struct {
 }
 
 func New() Model {
-	rand.Seed(time.Now().UnixNano())
 	in := textinput.New()
 	in.Focus()
 	in.Prompt = ""

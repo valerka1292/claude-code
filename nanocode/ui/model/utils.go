@@ -1,13 +1,9 @@
 package model
 
-import "unicode/utf8"
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
+import (
+	"nanocode/internal/mathutil"
+	"unicode/utf8"
+)
 
 func estimateTokens(text string) int {
 	runes := utf8.RuneCountInString(text)
@@ -21,19 +17,6 @@ func estimateTokens(text string) int {
 	return estimated
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func clamp(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
+func clampInt(v, lo, hi int) int {
+	return mathutil.Clamp(v, lo, hi)
 }
