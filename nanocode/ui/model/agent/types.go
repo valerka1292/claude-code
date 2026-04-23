@@ -10,6 +10,7 @@ type StreamEvent struct {
 	FinishReason   string
 	ErrorText      string
 	ReconnectNote  string
+	ToolDelta      string
 }
 
 // UsageState holds token usage information.

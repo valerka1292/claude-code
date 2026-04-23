@@ -17,7 +17,7 @@ func startAgentStreamCmd(provider config.Provider, history []types.Message, sett
 
 func convertProvider(provider config.Provider) agent.ProviderConfig {
 	return agent.ProviderConfig{
-		BaseURL: provider.BaseURL,
+		BaseURL: config.NormalizeBaseURL(provider.BaseURL),
 		Model:   provider.Model,
 		APIKey:  provider.APIKey,
 	}

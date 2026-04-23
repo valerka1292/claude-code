@@ -137,15 +137,13 @@ func DurationFor(pose Pose, step int) time.Duration {
 func Render(pose Pose, step int) string {
 	f := FrameFor(pose, step)
 
-	lineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(f.Color))
-
-	bodyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(f.Color))
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color(f.Color))
 
 	lines := []string{
-		lineStyle.Render(f.Antenna),
-		lineStyle.Render(f.Face),
-		lineStyle.Render(f.BodyL) + bodyStyle.Render(f.BodyC) + lineStyle.Render(f.BodyR),
-		lineStyle.Render(f.Legs),
+		style.Render(f.Antenna),
+		style.Render(f.Face),
+		style.Render(f.BodyL) + style.Render(f.BodyC) + style.Render(f.BodyR),
+		style.Render(f.Legs),
 	}
 
 	container := lipgloss.NewStyle().Padding(0, 1)

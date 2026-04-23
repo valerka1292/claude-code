@@ -94,6 +94,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.streamingText += msg.event.ContentDelta
 			m.chat.liveDownTokens += estimateTokens(msg.event.ContentDelta)
 		}
+		if msg.event.ToolDelta != "" {
+			m.chat.liveDownTokens += estimateTokens(msg.event.ToolDelta)
+		}
 		if msg.event.Usage != nil {
 			m.chat.usage = *msg.event.Usage
 			if msg.event.Usage.CompletionTokens > 0 {

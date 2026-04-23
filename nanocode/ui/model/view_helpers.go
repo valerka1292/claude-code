@@ -7,7 +7,6 @@ import (
 	"nanocode/ui/components/providers"
 	"nanocode/ui/components/spinner"
 	"nanocode/ui/config"
-	"nanocode/ui/model/provider"
 )
 
 var providerMenuOptions = []string{
@@ -46,13 +45,12 @@ func (m Model) usageLine() string {
 	if !ok || active.ContextSize <= 0 {
 		return ""
 	}
-	used := m.chat.usage.TotalTokens
+	used := m.chat.usage.PromptTokens + m.chat.liveDownTokens
+	if used < m.chat.usage.TotalTokens {
+		used = m.chat.usage.TotalTokens
+	}
 	percent := (float64(used) / float64(active.ContextSize)) * 100
-	return fmt.Sprintf("%s / %s (%.1f%% ctx)", formatCompact(used), formatCompact(active.ContextSize), percent)
-}
-
-func (m Model) footerStatusText() string {
-	return m.usageLine()
+	return fmt.Sprintf("%s / %s (%.2f%% ctx)", formatCompact(used), formatCompact(active.ContextSize), percent)
 }
 
 func (m Model) agentStatusLine() string {
@@ -114,12 +112,4 @@ func (m Model) providerOptions(withActive bool) []string {
 		out = []string{"No providers configured"}
 	}
 	return out
-}
-
-func providerFieldLabel(field provider.Field) string {
-	idx := int(field)
-	if idx < 0 || idx >= len(providerEditFieldLabels) {
-		return ""
-	}
-	return providerEditFieldLabels[idx]
 }

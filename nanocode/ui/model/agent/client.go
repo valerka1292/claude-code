@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"nanocode/ui/config"
 )
 
 // Client handles HTTP communication with the API.
@@ -45,7 +43,7 @@ func (c *Client) Stream(cfg StreamConfig, out chan<- StreamEvent) ([]APIToolCall
 	if err != nil {
 		return nil, nil, "", err
 	}
-	endpoint := config.NormalizeBaseURL(cfg.Provider.BaseURL) + "/chat/completions"
+	endpoint := cfg.Provider.BaseURL + "/chat/completions"
 	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(raw))
 	if err != nil {
 		return nil, nil, "", err
@@ -102,6 +100,12 @@ func (c *Client) Stream(cfg StreamConfig, out chan<- StreamEvent) ([]APIToolCall
 			out <- StreamEvent{ContentDelta: delta.Content}
 		}
 		for _, callDelta := range delta.ToolCalls {
+			if callDelta.Function.Name != "" {
+				out <- StreamEvent{ToolDelta: callDelta.Function.Name}
+			}
+			if callDelta.Function.Arguments != "" {
+				out <- StreamEvent{ToolDelta: callDelta.Function.Arguments}
+			}
 			buf, ok := toolCalls[callDelta.Index]
 			if !ok {
 				buf = &ToolBuffer{}

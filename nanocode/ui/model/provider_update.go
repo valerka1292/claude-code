@@ -10,7 +10,17 @@ import (
 	"nanocode/ui/model/provider"
 )
 
-const providerMenuItemCount = 4
+const (
+	providerMenuCreate = iota
+	providerMenuSelect
+	providerMenuEdit
+	providerMenuDelete
+	providerMenuItemCount
+)
+
+func providerFieldCount() int {
+	return int(provider.FieldContextSize) + 1
+}
 
 func (m Model) handleProviderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.providers.mode {
@@ -67,13 +77,13 @@ func (m Model) handleProviderSelect() (tea.Model, tea.Cmd) {
 	switch m.providers.mode {
 	case providerModeMenu:
 		switch m.providers.menuIndex {
-		case 0:
+		case providerMenuCreate:
 			m.beginProviderCreate()
-		case 1:
+		case providerMenuSelect:
 			m.providers.mode = providerModeSelect
-		case 2:
+		case providerMenuEdit:
 			m.providers.mode = providerModeEditPick
-		case 3:
+		case providerMenuDelete:
 			m.providers.mode = providerModeDelete
 		}
 		return m, nil

@@ -6,6 +6,8 @@ import (
 	"nanocode/ui/config"
 )
 
+const settingsRowCount = 2
+
 func (m Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -13,10 +15,10 @@ func (m Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.resizeViewport()
 		return m, nil
 	case "up":
-		m.settings.selectedRow = mathutil.Clamp(m.settings.selectedRow-1, 0, 1)
+		m.settings.selectedRow = mathutil.Clamp(m.settings.selectedRow-1, 0, settingsRowCount-1)
 		return m, nil
 	case "down":
-		m.settings.selectedRow = mathutil.Clamp(m.settings.selectedRow+1, 0, 1)
+		m.settings.selectedRow = mathutil.Clamp(m.settings.selectedRow+1, 0, settingsRowCount-1)
 		return m, nil
 	case "left":
 		m.shiftCurrentSetting(-1)

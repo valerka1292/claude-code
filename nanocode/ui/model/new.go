@@ -8,7 +8,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"nanocode/ui/components/nobby"
 	"nanocode/ui/config"
-	"nanocode/ui/model/provider"
 )
 
 func New() Model {
@@ -65,8 +64,4 @@ func New() Model {
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(textinput.Blink, nobbyTickCmd(m.nobbyPose, m.nobbyStep))
-}
-
-func providerFieldCount() int {
-	return int(provider.FieldContextSize) + 1
 }
