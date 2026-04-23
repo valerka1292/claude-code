@@ -1,17 +1,412 @@
+// ui/components/messages/markdown.go
 package messages
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
-	"github.com/charmbracelet/glamour"
+	"charm.land/glamour/v2"
+	"github.com/charmbracelet/lipgloss"
 )
 
 const minMarkdownWidth = 20
 
+// ── renderer cache (keyed by wrap width) ────────────────────────────────────
+
 var rendererCache sync.Map
+
+// ── public entry-points ──────────────────────────────────────────────────────
+
+func renderMarkdown(text string, width int, streaming bool) string {
+	normalized := normalizeNewlines(text)
+	if streaming {
+		normalized = stabilizeStreamingMarkdown(normalized)
+	}
+
+	// Split into prose segments and code-block segments, render each correctly.
+	segments := splitSegments(normalized)
+	var sb strings.Builder
+	for _, seg := range segments {
+		if seg.isCode {
+			sb.WriteString(renderCodeBlock(seg.lang, seg.body, width))
+		} else {
+			sb.WriteString(renderProse(seg.body, width))
+		}
+	}
+	return dedentRendered(strings.TrimRight(sb.String(), "\n"))
+}
+
+func stabilizeStreamingMarkdown(text string) string {
+	if strings.Count(text, "```")%2 == 1 {
+		if !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		text += "```"
+	}
+	return text
+}
+
+// ── segment splitting ────────────────────────────────────────────────────────
+
+type segment struct {
+	isCode bool
+	lang   string
+	body   string
+}
+
+// splitSegments splits markdown into alternating prose / fenced-code segments.
+func splitSegments(text string) []segment {
+	lines := strings.Split(text, "\n")
+	var segs []segment
+	var cur strings.Builder
+	inFence := false
+	fenceToken := ""
+	lang := ""
+
+	flush := func(code bool, l string) {
+		body := cur.String()
+		cur.Reset()
+		if body == "" && !code {
+			return
+		}
+		segs = append(segs, segment{isCode: code, lang: l, body: body})
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !inFence {
+			tok := fenceTokenFromStart(trimmed)
+			if tok != "" {
+				flush(false, "")
+				inFence = true
+				fenceToken = tok
+				lang = strings.TrimSpace(strings.TrimPrefix(trimmed, tok))
+				continue
+			}
+			cur.WriteString(line)
+			cur.WriteByte('\n')
+			continue
+		}
+		// inside fence
+		if isFenceEnd(trimmed, fenceToken, len(fenceToken)) {
+			flush(true, lang)
+			inFence = false
+			fenceToken = ""
+			lang = ""
+			continue
+		}
+		cur.WriteString(line)
+		cur.WriteByte('\n')
+	}
+	// leftover
+	if inFence {
+		flush(true, lang)
+	} else {
+		flush(false, "")
+	}
+	return segs
+}
+
+// ── code block renderer ──────────────────────────────────────────────────────
+
+var (
+	codeHeaderStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("#2A2A2A")).
+			Foreground(lipgloss.Color("#808080")).
+			PaddingLeft(1)
+
+	codeBodyBg = lipgloss.Color("#1A1A1A")
+
+	lineNumStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#4A4A4A")).
+			Background(codeBodyBg)
+
+	gutterSepStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#333333")).
+			Background(codeBodyBg)
+
+	codeLineStyle = lipgloss.NewStyle().
+			Background(codeBodyBg).
+			Foreground(lipgloss.Color("#E5E7EB"))
+
+	codeBorderStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#333333"))
+
+	langBadgeStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("#FBFA56")).
+			Foreground(lipgloss.Color("#181818")).
+			Bold(true).
+			PaddingLeft(1).
+			PaddingRight(1)
+
+	langBarBg = lipgloss.NewStyle().
+			Background(lipgloss.Color("#2A2A2A"))
+)
+
+func renderCodeBlock(lang, body string, width int) string {
+	// Clamp width
+	if width < minMarkdownWidth {
+		width = minMarkdownWidth
+	}
+
+	// Syntax-highlight the body via glamour (renders as a standalone code block)
+	highlighted := highlightCode(lang, body, width)
+
+	rawLines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	hlLines := strings.Split(strings.TrimRight(highlighted, "\n"), "\n")
+
+	// Ensure same line count (glamour may add/remove blank lines)
+	for len(hlLines) < len(rawLines) {
+		hlLines = append(hlLines, "")
+	}
+
+	digits := len(fmt.Sprintf("%d", len(rawLines)))
+	if digits < 2 {
+		digits = 2
+	}
+
+	innerWidth := width - digits - 4 // gutter: " NN │ "
+
+	var sb strings.Builder
+
+	// ── top bar: language badge ──────────────────────────────────────────
+	langLabel := lang
+	if langLabel == "" {
+		langLabel = "text"
+	}
+	badge := langBadgeStyle.Render(langLabel)
+	barPad := langBarBg.Width(width - lipgloss.Width(badge)).Render("")
+	sb.WriteString(badge + barPad)
+	sb.WriteByte('\n')
+
+	// ── top border ───────────────────────────────────────────────────────
+	sb.WriteString(codeBorderStyle.Render("┌" + strings.Repeat("─", width-2) + "┐"))
+	sb.WriteByte('\n')
+
+	// ── code lines ───────────────────────────────────────────────────────
+	for i, hl := range hlLines {
+		num := lineNumStyle.Render(fmt.Sprintf(" %*d ", digits, i+1))
+		sep := gutterSepStyle.Render("│")
+		// Pad/truncate the highlighted line to innerWidth visible chars
+		visLen := visibleWidth(hl)
+		var codePart string
+		if visLen < innerWidth {
+			codePart = codeLineStyle.Render(hl + strings.Repeat(" ", innerWidth-visLen))
+		} else {
+			codePart = codeLineStyle.Render(hl)
+		}
+		sb.WriteString(codeBorderStyle.Render("│") + num + sep + " " + codePart + codeBorderStyle.Render("│"))
+		sb.WriteByte('\n')
+	}
+
+	// ── bottom border ────────────────────────────────────────────────────
+	sb.WriteString(codeBorderStyle.Render("└" + strings.Repeat("─", width-2) + "┘"))
+	sb.WriteByte('\n')
+
+	return sb.String()
+}
+
+// highlightCode renders only the code body through glamour so chroma applies
+// syntax colouring, then strips the surrounding box glamour adds.
+func highlightCode(lang, body string, width int) string {
+	// Wrap in a fenced block and render
+	md := "```" + lang + "\n" + strings.TrimRight(body, "\n") + "\n```\n"
+
+	renderer, err := getRenderer(width)
+	if err != nil {
+		return body
+	}
+	rendered, err := renderer.Render(md)
+	if err != nil {
+		return body
+	}
+
+	// glamour wraps code blocks – extract just the inner lines
+	lines := strings.Split(rendered, "\n")
+	// Drop leading/trailing empty lines, find the code content lines
+	var inner []string
+	started := false
+	for _, l := range lines {
+		plain := stripANSI(l)
+		trimmed := strings.TrimSpace(plain)
+		// Skip the decorative lines glamour adds around the block
+		if !started && trimmed == "" {
+			continue
+		}
+		started = true
+		inner = append(inner, l)
+	}
+	// Remove trailing blank lines
+	for len(inner) > 0 && strings.TrimSpace(stripANSI(inner[len(inner)-1])) == "" {
+		inner = inner[:len(inner)-1]
+	}
+	return strings.Join(inner, "\n")
+}
+
+// ── prose renderer ───────────────────────────────────────────────────────────
+
+func renderProse(text string, width int) string {
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	renderer, err := getRenderer(width)
+	if err != nil {
+		return text
+	}
+	rendered, err := renderer.Render(text)
+	if err != nil {
+		return text
+	}
+	return strings.TrimRight(rendered, "\n") + "\n"
+}
+
+// ── glamour renderer (prose-only style, no code-block chrome) ───────────────
+
+func getRenderer(width int) (*glamour.TermRenderer, error) {
+	wrap := width
+	if wrap < minMarkdownWidth {
+		wrap = minMarkdownWidth
+	}
+	if cached, ok := rendererCache.Load(wrap); ok {
+		return cached.(*glamour.TermRenderer), nil
+	}
+	renderer, err := glamour.NewTermRenderer(
+		glamour.WithWordWrap(wrap),
+		glamour.WithStylesFromJSONBytes([]byte(glamourStyle())),
+	)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := rendererCache.LoadOrStore(wrap, renderer)
+	return actual.(*glamour.TermRenderer), nil
+}
+
+// ── style JSON ───────────────────────────────────────────────────────────────
+
+func glamourStyle() string {
+	return `{
+	"document": { "block_prefix": "", "block_suffix": "" },
+
+	"block_quote": {
+		"color": "#9CA3AF",
+		"italic": true,
+		"indent": 1,
+		"indent_token": "▎ "
+	},
+
+	"list": { "level_indent": 2 },
+
+	"heading": {
+		"bold": true,
+		"block_suffix": "\n"
+	},
+	"h1": {
+		"prefix": "󰊠  ",
+		"color": "#FBFA56",
+		"bold": true,
+		"block_suffix": "\n"
+	},
+	"h2": {
+		"prefix": "  ",
+		"color": "#EBDC2F",
+		"bold": true
+	},
+	"h3": {
+		"prefix": " ▸ ",
+		"color": "#D4D4D4",
+		"bold": true
+	},
+	"h4": { "prefix": "   · ", "color": "#9CA3AF", "bold": true },
+	"h5": { "prefix": "     ‣ ", "color": "#6B7280" },
+	"h6": { "prefix": "       – ", "color": "#4B5563" },
+
+	"text":          { "color": "#E5E7EB" },
+	"strong":        { "bold": true, "color": "#F9FAFB" },
+	"italic":        { "italic": true, "color": "#D1D5DB" },
+	"strikethrough": { "crossed_out": true, "color": "#6B7280" },
+
+	"code": {
+		"color": "#FBFA56",
+		"background_color": "#2A2A2A",
+		"prefix": " ",
+		"suffix": " "
+	},
+
+	"code_block": {
+		"color": "#E5E7EB",
+		"background_color": "#1A1A1A",
+		"margin": 0,
+		"chroma": {
+			"text":                 { "color": "#E5E7EB" },
+			"error":                { "color": "#FF5555", "bold": true },
+			"comment":              { "color": "#6A9955", "italic": true },
+			"comment_preproc":      { "color": "#C586C0" },
+			"keyword":              { "color": "#569CD6", "bold": true },
+			"keyword_reserved":     { "color": "#569CD6", "bold": true },
+			"keyword_namespace":    { "color": "#C586C0", "bold": true },
+			"keyword_type":         { "color": "#4EC9B0" },
+			"operator":             { "color": "#D4D4D4" },
+			"punctuation":          { "color": "#D4D4D4" },
+			"name":                 { "color": "#E5E7EB" },
+			"name_builtin":         { "color": "#DCDCAA" },
+			"name_tag":             { "color": "#4EC9B0" },
+			"name_attribute":       { "color": "#9CDCFE" },
+			"name_class":           { "color": "#4EC9B0", "bold": true },
+			"name_constant":        { "color": "#4FC1FF" },
+			"name_decorator":       { "color": "#DCDCAA" },
+			"name_exception":       { "color": "#F44747" },
+			"name_function":        { "color": "#DCDCAA" },
+			"name_other":           { "color": "#9CDCFE" },
+			"name_variable":        { "color": "#9CDCFE" },
+			"literal_number":       { "color": "#B5CEA8" },
+			"literal_string":       { "color": "#CE9178" },
+			"literal_string_doc":   { "color": "#6A9955", "italic": true },
+			"literal_string_escape":{ "color": "#D7BA7D" },
+			"literal_string_interpol":{ "color": "#569CD6" },
+			"generic_deleted":      { "color": "#FF5555" },
+			"generic_inserted":     { "color": "#50FA7B" },
+			"generic_heading":      { "color": "#FBFA56", "bold": true },
+			"generic_subheading":   { "color": "#EBDC2F" },
+			"generic_strong":       { "bold": true },
+			"generic_emph":         { "italic": true }
+		}
+	},
+
+	"paragraph": { "margin": 0 },
+
+	"table": {
+		"center_separator": "┼",
+		"column_separator": "│",
+		"row_separator": "─"
+	},
+
+	"item":        { "block_prefix": "  ● " },
+	"enumeration": { "block_prefix": ". " },
+	"task": {
+		"ticked":   "[✓] ",
+		"unticked": "[ ] "
+	},
+
+	"hr": {
+		"color": "#333333",
+		"format": "\n─────────────────────────────────────────────────────────────────\n"
+	},
+
+	"link":       { "color": "#60A5FA", "underline": true },
+	"link_text":  { "color": "#93C5FD", "bold": true },
+	"image":      { "color": "#60A5FA", "underline": true },
+	"image_text": { "color": "#93C5FD", "bold": true, "format": "🖼  {{.text}}" }
+}`
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+func normalizeNewlines(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.ReplaceAll(s, "\r", "\n")
+}
 
 func stripANSI(str string) string {
 	var out strings.Builder
@@ -32,11 +427,15 @@ func stripANSI(str string) string {
 	return out.String()
 }
 
+// visibleWidth returns the number of visible characters (ignoring ANSI escapes).
+func visibleWidth(s string) int {
+	return utf8.RuneCountInString(stripANSI(s))
+}
+
 func removeVisibleIndent(line string, count int) string {
 	removed := 0
 	var out strings.Builder
 	inEscape := false
-
 	for _, r := range line {
 		if inEscape {
 			out.WriteRune(r)
@@ -57,37 +456,6 @@ func removeVisibleIndent(line string, count int) string {
 		out.WriteRune(r)
 	}
 	return out.String()
-}
-
-func renderMarkdown(text string, width int, streaming bool) string {
-	normalized := strings.ReplaceAll(text, "\r\n", "\n")
-	normalized = strings.ReplaceAll(normalized, "\r", "\n")
-	if streaming {
-		normalized = stabilizeStreamingMarkdown(normalized)
-	}
-	normalized = addCodeLineNumbers(normalized)
-
-	renderer, err := getRenderer(width)
-	if err != nil {
-		return normalized
-	}
-
-	rendered, err := renderer.Render(normalized)
-	if err != nil {
-		return normalized
-	}
-
-	return dedentRendered(strings.TrimRight(rendered, "\n"))
-}
-
-func stabilizeStreamingMarkdown(text string) string {
-	if strings.Count(text, "```")%2 == 1 {
-		if !strings.HasSuffix(text, "\n") {
-			text += "\n"
-		}
-		text += "```"
-	}
-	return text
 }
 
 func dedentRendered(text string) string {
@@ -118,63 +486,6 @@ func dedentRendered(text string) string {
 	return strings.Join(lines, "\n")
 }
 
-func addCodeLineNumbers(text string) string {
-	lines := strings.Split(text, "\n")
-	var out []string
-	inFence := false
-	fenceToken := ""
-	fenceLen := 0
-	var block []string
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if !inFence {
-			token := fenceTokenFromStart(trimmed)
-			if token != "" {
-				inFence = true
-				fenceToken = token
-				fenceLen = len(token)
-				block = block[:0]
-			}
-			out = append(out, line)
-			continue
-		}
-
-		if isFenceEnd(trimmed, fenceToken, fenceLen) {
-			out = append(out, withLineNumbers(block)...)
-			out = append(out, line)
-			inFence = false
-			fenceToken = ""
-			fenceLen = 0
-			block = block[:0]
-			continue
-		}
-
-		block = append(block, line)
-	}
-
-	if inFence {
-		out = append(out, withLineNumbers(block)...)
-	}
-
-	return strings.Join(out, "\n")
-}
-
-func withLineNumbers(lines []string) []string {
-	if len(lines) == 0 {
-		return lines
-	}
-	digits := len(strconv.Itoa(len(lines)))
-	if digits < 2 {
-		digits = 2
-	}
-	result := make([]string, 0, len(lines))
-	for i, line := range lines {
-		result = append(result, fmt.Sprintf("%*d │ %s", digits, i+1, line))
-	}
-	return result
-}
-
 func fenceTokenFromStart(line string) string {
 	if strings.HasPrefix(line, "```") {
 		return "```"
@@ -185,7 +496,7 @@ func fenceTokenFromStart(line string) string {
 	return ""
 }
 
-func isFenceEnd(line string, token string, minLen int) bool {
+func isFenceEnd(line, token string, minLen int) bool {
 	if token == "" || len(line) < minLen {
 		return false
 	}
@@ -198,122 +509,4 @@ func isFenceEnd(line string, token string, minLen int) bool {
 		}
 	}
 	return true
-}
-
-func getCustomStyle() string {
-	return `{
-		"document": {
-			"block_prefix": "",
-			"block_suffix": ""
-		},
-		"block_quote": {
-			"color": "#6B7280",
-			"italic": true
-		},
-		"list": {
-			"level_indent": 2
-		},
-		"heading": {
-			"bold": true
-		},
-		"h1": {
-			"bold": true,
-			"prefix": "# "
-		},
-		"h2": {
-			"bold": true,
-			"prefix": "## "
-		},
-		"h3": {
-			"bold": true,
-			"prefix": "### "
-		},
-		"h4": {
-			"bold": true,
-			"prefix": "#### "
-		},
-		"h5": {
-			"bold": true,
-			"prefix": "##### "
-		},
-		"h6": {
-			"bold": true,
-			"prefix": "###### "
-		},
-		"text": {
-			"color": "#E5E7EB"
-		},
-		"strong": {
-			"bold": true
-		},
-		"italic": {
-			"italic": true
-		},
-		"strikethrough": {
-			"crossed_out": true
-		},
-		"code": {
-			"color": "#FBFA56",
-			"background_color": "#2D2D2D"
-		},
-		"code_block": {
-			"color": "#E5E7EB",
-			"background_color": "#1F1F1F",
-			"margin": 0
-		},
-		"blockquote": {
-			"color": "#6B7280",
-			"indent": 2
-		},
-		"paragraph": {
-			"margin": 0
-		},
-		"table": {
-			"center_separator": "┼",
-			"column_separator": "│",
-			"row_separator": "─"
-		},
-		"definition_list": {},
-		"definition_term": {},
-		"definition_description": {},
-		"hr": {
-			"format": "────────────────────────────────────────────────────────────────"
-		},
-		"link": {
-			"color": "#60A5FA",
-			"underline": true
-		},
-		"link_text": {
-			"bold": true
-		},
-		"image": {
-			"color": "#60A5FA",
-			"underline": true
-		},
-		"image_text": {
-			"bold": true
-		}
-	}`
-}
-
-func getRenderer(width int) (*glamour.TermRenderer, error) {
-	wrap := width
-	if wrap < minMarkdownWidth {
-		wrap = minMarkdownWidth
-	}
-
-	if cached, ok := rendererCache.Load(wrap); ok {
-		return cached.(*glamour.TermRenderer), nil
-	}
-
-	renderer, err := glamour.NewTermRenderer(
-		glamour.WithWordWrap(wrap),
-		glamour.WithStylesFromJSONBytes([]byte(getCustomStyle())),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	actual, _ := rendererCache.LoadOrStore(wrap, renderer)
-	return actual.(*glamour.TermRenderer), nil
 }
