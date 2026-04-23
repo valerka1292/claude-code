@@ -26,3 +26,19 @@ func TestRenderAssistantBlock_PrefixesBullet(t *testing.T) {
 		t.Fatalf("expected assistant output to include bullet prefix, got %q", out)
 	}
 }
+
+func TestAddCodeLineNumbers_NumberedFence(t *testing.T) {
+	in := "```go\nfmt.Println(\"a\")\nfmt.Println(\"b\")\n```"
+	out := addCodeLineNumbers(in)
+	if !strings.Contains(out, " 1 │ fmt.Println(\"a\")") || !strings.Contains(out, " 2 │ fmt.Println(\"b\")") {
+		t.Fatalf("expected numbered code lines, got %q", out)
+	}
+}
+
+func TestDedentRendered_RemovesSharedIndent(t *testing.T) {
+	in := "    line1\n    line2"
+	out := dedentRendered(in)
+	if out != "line1\nline2" {
+		t.Fatalf("expected common indent removed, got %q", out)
+	}
+}

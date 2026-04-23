@@ -1,6 +1,8 @@
 package messages
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -17,6 +19,7 @@ func renderMarkdown(text string, width int, streaming bool) string {
 	if streaming {
 		normalized = stabilizeStreamingMarkdown(normalized)
 	}
+	normalized = addCodeLineNumbers(normalized)
 
 	renderer, err := getRenderer(width)
 	if err != nil {
@@ -28,7 +31,7 @@ func renderMarkdown(text string, width int, streaming bool) string {
 		return normalized
 	}
 
-	return strings.TrimRight(rendered, "\n")
+	return dedentRendered(strings.TrimRight(rendered, "\n"))
 }
 
 func stabilizeStreamingMarkdown(text string) string {
@@ -39,6 +42,117 @@ func stabilizeStreamingMarkdown(text string) string {
 		text += "```"
 	}
 	return text
+}
+
+func dedentRendered(text string) string {
+	lines := strings.Split(text, "\n")
+	minIndent := -1
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		indent := 0
+		for _, r := range line {
+			if r != ' ' {
+				break
+			}
+			indent++
+		}
+		if minIndent == -1 || indent < minIndent {
+			minIndent = indent
+		}
+	}
+	if minIndent <= 0 {
+		return text
+	}
+	for i, line := range lines {
+		if len(line) >= minIndent {
+			lines[i] = line[minIndent:]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func addCodeLineNumbers(text string) string {
+	lines := strings.Split(text, "\n")
+	var out []string
+	inFence := false
+	fenceToken := ""
+	fenceLen := 0
+	var block []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !inFence {
+			token := fenceTokenFromStart(trimmed)
+			if token != "" {
+				inFence = true
+				fenceToken = token
+				fenceLen = len(token)
+				block = block[:0]
+			}
+			out = append(out, line)
+			continue
+		}
+
+		if isFenceEnd(trimmed, fenceToken, fenceLen) {
+			out = append(out, withLineNumbers(block)...)
+			out = append(out, line)
+			inFence = false
+			fenceToken = ""
+			fenceLen = 0
+			block = block[:0]
+			continue
+		}
+
+		block = append(block, line)
+	}
+
+	if inFence {
+		out = append(out, withLineNumbers(block)...)
+	}
+
+	return strings.Join(out, "\n")
+}
+
+func withLineNumbers(lines []string) []string {
+	if len(lines) == 0 {
+		return lines
+	}
+	digits := len(strconv.Itoa(len(lines)))
+	if digits < 2 {
+		digits = 2
+	}
+	result := make([]string, 0, len(lines))
+	for i, line := range lines {
+		result = append(result, fmt.Sprintf("%*d │ %s", digits, i+1, line))
+	}
+	return result
+}
+
+func fenceTokenFromStart(line string) string {
+	if strings.HasPrefix(line, "```") {
+		return "```"
+	}
+	if strings.HasPrefix(line, "~~~") {
+		return "~~~"
+	}
+	return ""
+}
+
+func isFenceEnd(line string, token string, minLen int) bool {
+	if token == "" || len(line) < minLen {
+		return false
+	}
+	if !strings.HasPrefix(line, token) {
+		return false
+	}
+	for _, r := range line {
+		if rune(token[0]) != r && r != ' ' {
+			return false
+		}
+	}
+	return true
 }
 
 func getRenderer(width int) (*glamour.TermRenderer, error) {

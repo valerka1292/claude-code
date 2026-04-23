@@ -11,7 +11,7 @@ import (
 var (
 	panelStyle = lipgloss.NewStyle().Padding(0, 0, 1, 0).Background(theme.AppBackground)
 	userStyle  = lipgloss.NewStyle().Background(theme.SurfaceBackground).Foreground(theme.PrimaryText).Padding(0, 1)
-	agentStyle = lipgloss.NewStyle().Foreground(theme.PrimaryText).PaddingLeft(1)
+	agentStyle = lipgloss.NewStyle().Foreground(theme.PrimaryText)
 	thinkStyle = lipgloss.NewStyle().Foreground(theme.MutedText).PaddingLeft(3)
 	dotStyle   = lipgloss.NewStyle().Foreground(theme.PrimaryAccent)
 )
@@ -52,7 +52,7 @@ func renderAssistantBlock(text string, width int, streaming bool) string {
 	}
 
 	rows := strings.Split(rendered, "\n")
-	rows[0] = dotStyle.Render("• ") + rows[0]
+	rows[0] = dotStyle.Render("•") + " " + rows[0]
 	for i := 1; i < len(rows); i++ {
 		rows[i] = "  " + rows[i]
 	}
