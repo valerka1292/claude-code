@@ -10,6 +10,27 @@ import (
 	"nanocode/ui/types"
 )
 
+const confirmWindow = 800 * time.Millisecond
+
+func (m *Model) isPendingConfirmationFor(key string) bool {
+	if !m.chat.confirmPending || m.chat.confirmKey != key {
+		return false
+	}
+	return time.Since(m.chat.confirmPressTime) <= confirmWindow
+}
+
+func (m *Model) setPendingConfirmation(key string) {
+	m.chat.confirmPending = true
+	m.chat.confirmKey = key
+	m.chat.confirmPressTime = time.Now()
+}
+
+func (m *Model) clearPendingConfirmation() {
+	m.chat.confirmPending = false
+	m.chat.confirmKey = ""
+	m.chat.confirmPressTime = time.Time{}
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -87,6 +108,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setNobbyPose(nobby.PoseThinking)
 			m.chat.streamingThought += msg.event.ReasoningDelta
 			m.chat.estimatedTokensStream++
+			m.chat.estimatedReasoningTokens++
 		}
 		if msg.event.ContentDelta != "" {
 			m.setNobbyPose(nobby.PoseWriting)
@@ -100,8 +122,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.event.ToolDelta != "" {
 			m.chat.estimatedTokensStream++
 		}
+		liveEstimatedTotal := m.chat.usage.PromptTokens + m.chat.estimatedTokensStream
+		if liveEstimatedTotal > m.chat.contextTokenFloor {
+			m.chat.contextTokenFloor = liveEstimatedTotal
+		}
 		if msg.event.Usage != nil {
 			m.chat.usage = *msg.event.Usage
+			if m.chat.usage.TotalTokens > m.chat.contextTokenFloor {
+				m.chat.contextTokenFloor = m.chat.usage.TotalTokens
+			}
 		}
 		m.refreshViewport(true)
 		return m, pollStreamCmd(m.stream.ch)
@@ -151,20 +180,17 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 
 	switch msg.String() {
 	case "ctrl+c":
-		// Double-press Ctrl+C to quit (800ms timeout like Claude Code)
-		if m.chat.escapePending && time.Since(m.chat.escapePressTime) <= 800*time.Millisecond {
-			// Second press within timeout - quit immediately
+		// Double-press Ctrl+C to quit.
+		if m.isPendingConfirmationFor("ctrl+c") {
+			m.clearPendingConfirmation()
 			return m, tea.Quit, true
 		}
-		// First press or timeout expired - set pending state and show warning
-		m.chat.escapePending = true
-		m.chat.escapePressTime = time.Now()
+		m.setPendingConfirmation("ctrl+c")
 		return m, nil, true
 	case "esc":
-		// During thinking mode, ESC interrupts the stream (with double-press confirmation)
+		// During thinking mode, ESC interrupts the stream with confirmation.
 		if m.chat.thinking {
-			if m.chat.escapePending {
-				// Second press - interrupt the stream
+			if m.isPendingConfirmationFor("esc") {
 				m.chat.interrupted = true
 				m.chat.thinking = false
 				m.chat.showInferring = false
@@ -174,22 +200,17 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 				if !m.chat.cycleStartedAt.IsZero() {
 					m.chat.lastWorkedForSec = int(time.Since(m.chat.cycleStartedAt).Seconds())
 				}
-				m.chat.escapePending = false
-				m.chat.escapePressTime = time.Time{}
+				m.clearPendingConfirmation()
 				m.refreshViewport(true)
 				return m, nil, true
 			}
-			// First press - set pending state
-			m.chat.escapePending = true
-			m.chat.escapePressTime = time.Now()
+			m.setPendingConfirmation("esc")
 			return m, nil, true
 		}
-		// Not thinking - quit with double-press confirmation
-		if m.chat.escapePending {
-			return m, tea.Quit, true
+		// Outside generation ESC should do nothing (reserved for canceling generation only).
+		if m.chat.confirmKey == "esc" {
+			m.clearPendingConfirmation()
 		}
-		m.chat.escapePending = true
-		m.chat.escapePressTime = time.Now()
 		return m, nil, true
 	case "pgup":
 		m.viewport.HalfViewUp()
