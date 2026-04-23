@@ -14,6 +14,7 @@ var (
 	panelStyle = lipgloss.NewStyle().Padding(0, 0, 1, 0).Background(theme.AppBackground)
 	userStyle  = lipgloss.NewStyle().Background(theme.SurfaceBackground).Foreground(theme.PrimaryText).Padding(0, 1)
 	agentStyle = lipgloss.NewStyle().Foreground(theme.PrimaryText)
+	toolStyle  = lipgloss.NewStyle().Foreground(theme.MutedText).PaddingLeft(2)
 	thinkStyle = lipgloss.NewStyle().Foreground(theme.MutedText).PaddingLeft(3)
 	dotStyle   = lipgloss.NewStyle().Foreground(theme.PrimaryAccent)
 )
@@ -26,6 +27,8 @@ func View(list []types.Message, width int, spinnerLine string, thinking string, 
 			lines = append(lines, userStyle.Width(mathutil.Max(width-2, 10)).Render("❯ "+msg.Text))
 		case types.RoleAssistant:
 			lines = append(lines, agentStyle.Render(renderAssistantBlock(msg.Text, width, false)))
+		case types.RoleTool:
+			lines = append(lines, toolStyle.Width(mathutil.Max(width-2, 10)).Render("🛠 "+msg.Text))
 		}
 		lines = append(lines, "")
 	}

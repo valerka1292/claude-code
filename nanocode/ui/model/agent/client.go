@@ -27,6 +27,7 @@ func NewClient(timeoutSeconds int) *Client {
 type StreamConfig struct {
 	Provider  ProviderConfig
 	Messages  []APIMessage
+	Tools     []map[string]any
 	AbortChan <-chan struct{}
 }
 
@@ -39,6 +40,10 @@ func (c *Client) Stream(cfg StreamConfig, out chan<- StreamEvent) ([]APIToolCall
 		"stream_options": map[string]any{
 			"include_usage": true,
 		},
+	}
+	if len(cfg.Tools) > 0 {
+		requestBody["tools"] = cfg.Tools
+		requestBody["tool_choice"] = "auto"
 	}
 	raw, err := json.Marshal(requestBody)
 	if err != nil {

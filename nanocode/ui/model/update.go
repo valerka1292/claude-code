@@ -94,6 +94,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshViewport(true)
 			return m, nil
 		}
+
+		if msg.event.ToolCallStart != nil {
+			label := "read-only"
+			if !msg.event.ToolCallStart.ReadOnly {
+				label = "write"
+			}
+			m.chat.messages = append(m.chat.messages, types.Message{
+				Role:      types.RoleTool,
+				Text:      "tool call → " + msg.event.ToolCallStart.Name + " [" + label + "] args: " + msg.event.ToolCallStart.Arguments,
+				Timestamp: time.Now(),
+			})
+			m.refreshViewport(true)
+			return m, pollStreamCmd(m.stream.ch)
+		}
+		if msg.event.ToolCallResult != nil {
+			prefix := "tool result"
+			if msg.event.ToolCallResult.IsError {
+				prefix = "tool error"
+			}
+			m.chat.messages = append(m.chat.messages, types.Message{
+				Role:      types.RoleTool,
+				Text:      prefix + " ← " + msg.event.ToolCallResult.Name + "\n" + msg.event.ToolCallResult.Result,
+				Timestamp: time.Now(),
+			})
+			m.refreshViewport(true)
+			return m, pollStreamCmd(m.stream.ch)
+		}
 		if msg.event.ReconnectNote != "" {
 			m.setNobbyPose(nobby.PoseAPIErrorReconnect)
 			m.chat.messages = append(m.chat.messages, types.Message{

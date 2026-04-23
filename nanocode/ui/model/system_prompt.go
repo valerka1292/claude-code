@@ -77,3 +77,7 @@ func shellName() string {
 	}
 	return shell
 }
+
+func buildSystemPrompt() string {
+	return strings.Join(buildSystemPrompts(), "\n\n")
+}

@@ -12,6 +12,22 @@ type StreamEvent struct {
 	ErrorText      string
 	ReconnectNote  string
 	ToolDelta      string
+	ToolCallStart  *ToolCallEvent
+	ToolCallResult *ToolResultEvent
+}
+
+type ToolCallEvent struct {
+	ID        string
+	Name      string
+	Arguments string
+	ReadOnly  bool
+}
+
+type ToolResultEvent struct {
+	ID      string
+	Name    string
+	Result  string
+	IsError bool
 }
 
 // UsageState holds token usage information.
