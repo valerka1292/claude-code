@@ -50,6 +50,23 @@ func TestRenderCodeBlock_HasBorders(t *testing.T) {
 	}
 }
 
+func TestRenderCodeBlock_WrapsLongLines(t *testing.T) {
+	out := renderCodeBlock("go", "fmt.Println(\"abcdefghijklmnopqrstuvwxyz\")\n", 32)
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "⋮") {
+		t.Fatalf("expected continuation marker for wrapped line, got %q", out)
+	}
+}
+
+func TestRenderMarkdown_StylesInlineCodeAndQuote(t *testing.T) {
+	md := "`const x = 1` \n\n> quote"
+	out := renderMarkdown(md, 80, false)
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "const x = 1") || !strings.Contains(plain, "quote") {
+		t.Fatalf("expected markdown prose styles rendered, got %q", out)
+	}
+}
+
 func TestSplitSegments_SeparatesCodeAndProse(t *testing.T) {
 	md := "hello\n```go\nfmt.Println()\n```\nworld\n"
 	segs := splitSegments(md)
