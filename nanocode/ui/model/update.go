@@ -270,21 +270,21 @@ func (m Model) handleProviderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up":
 		switch m.providers.mode {
 		case providerModeMenu:
-			m.providers.menuIndex = clampInt(m.providers.menuIndex-1, 0, 3)
+			m.providers.menuIndex = mathutil.Clamp(m.providers.menuIndex-1, 0, 3)
 		case providerModeSelect, providerModeEditPick, providerModeDelete:
-			m.providers.selectedProvider = clampInt(m.providers.selectedProvider-1, 0, len(m.providers.names)-1)
+			m.providers.selectedProvider = mathutil.Clamp(m.providers.selectedProvider-1, 0, len(m.providers.names)-1)
 		case providerModeEditField:
-			m.providers.selectedField = provider.Field(clampInt(int(m.providers.selectedField)-1, 0, 4))
+			m.providers.selectedField = provider.Field(mathutil.Clamp(int(m.providers.selectedField)-1, 0, 4))
 		}
 		return m, nil
 	case "down":
 		switch m.providers.mode {
 		case providerModeMenu:
-			m.providers.menuIndex = clampInt(m.providers.menuIndex+1, 0, 3)
+			m.providers.menuIndex = mathutil.Clamp(m.providers.menuIndex+1, 0, 3)
 		case providerModeSelect, providerModeEditPick, providerModeDelete:
-			m.providers.selectedProvider = clampInt(m.providers.selectedProvider+1, 0, len(m.providers.names)-1)
+			m.providers.selectedProvider = mathutil.Clamp(m.providers.selectedProvider+1, 0, len(m.providers.names)-1)
 		case providerModeEditField:
-			m.providers.selectedField = provider.Field(clampInt(int(m.providers.selectedField)+1, 0, 4))
+			m.providers.selectedField = provider.Field(mathutil.Clamp(int(m.providers.selectedField)+1, 0, 4))
 		}
 		return m, nil
 	case "enter":

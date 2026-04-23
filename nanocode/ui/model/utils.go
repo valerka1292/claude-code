@@ -1,7 +1,6 @@
 package model
 
 import (
-	"nanocode/internal/mathutil"
 	"unicode/utf8"
 )
 
@@ -15,8 +14,4 @@ func estimateTokens(text string) int {
 		return 1
 	}
 	return estimated
-}
-
-func clampInt(v, lo, hi int) int {
-	return mathutil.Clamp(v, lo, hi)
 }
