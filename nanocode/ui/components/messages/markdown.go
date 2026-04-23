@@ -200,6 +200,102 @@ func isFenceEnd(line string, token string, minLen int) bool {
 	return true
 }
 
+func getCustomStyle() string {
+	return `{
+		"document": {
+			"block_prefix": "",
+			"block_suffix": ""
+		},
+		"block_quote": {
+			"color": "#6B7280",
+			"italic": true
+		},
+		"list": {
+			"level_indent": 2
+		},
+		"heading": {
+			"bold": true
+		},
+		"h1": {
+			"bold": true,
+			"prefix": "# "
+		},
+		"h2": {
+			"bold": true,
+			"prefix": "## "
+		},
+		"h3": {
+			"bold": true,
+			"prefix": "### "
+		},
+		"h4": {
+			"bold": true,
+			"prefix": "#### "
+		},
+		"h5": {
+			"bold": true,
+			"prefix": "##### "
+		},
+		"h6": {
+			"bold": true,
+			"prefix": "###### "
+		},
+		"text": {
+			"color": "#E5E7EB"
+		},
+		"strong": {
+			"bold": true
+		},
+		"italic": {
+			"italic": true
+		},
+		"strikethrough": {
+			"crossed_out": true
+		},
+		"code": {
+			"color": "#FBFA56",
+			"background_color": "#2D2D2D"
+		},
+		"code_block": {
+			"color": "#E5E7EB",
+			"background_color": "#1F1F1F",
+			"margin": 0
+		},
+		"blockquote": {
+			"color": "#6B7280",
+			"indent": 2
+		},
+		"paragraph": {
+			"margin": 0
+		},
+		"table": {
+			"center_separator": "┼",
+			"column_separator": "│",
+			"row_separator": "─"
+		},
+		"definition_list": {},
+		"definition_term": {},
+		"definition_description": {},
+		"hr": {
+			"format": "────────────────────────────────────────────────────────────────"
+		},
+		"link": {
+			"color": "#60A5FA",
+			"underline": true
+		},
+		"link_text": {
+			"bold": true
+		},
+		"image": {
+			"color": "#60A5FA",
+			"underline": true
+		},
+		"image_text": {
+			"bold": true
+		}
+	}`
+}
+
 func getRenderer(width int) (*glamour.TermRenderer, error) {
 	wrap := width
 	if wrap < minMarkdownWidth {
@@ -212,7 +308,8 @@ func getRenderer(width int) (*glamour.TermRenderer, error) {
 
 	renderer, err := glamour.NewTermRenderer(
 		glamour.WithWordWrap(wrap),
-		glamour.WithStandardStyle("dark"),
+		glamour.WithTableWrap(true),
+		glamour.WithStylesFromJSONBytes([]byte(getCustomStyle())),
 	)
 	if err != nil {
 		return nil, err

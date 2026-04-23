@@ -4,7 +4,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"nanocode/internal/mathutil"
 	"nanocode/ui/components/header"
 	"nanocode/ui/components/messages"
