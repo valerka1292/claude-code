@@ -11,11 +11,13 @@ func estimateTokens(text string) int {
 	if runes <= 0 {
 		return 0
 	}
-	estimated := runes / 4
-	if estimated < 1 {
-		return 1
+	// Более точная оценка: 1 токен ≈ 4 руны, но без завышения для коротких строк
+	estimated := float64(runes) / 4.0
+	if estimated < 0.25 {
+		// Очень короткие дельты (< 1 руны) считаем как 0.25 токена
+		return 0
 	}
-	return estimated
+	return int(estimated + 0.5) // округление вместо отсечения
 }
 
 func estimatePromptTokens(history []types.Message) int {
