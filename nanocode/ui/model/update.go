@@ -150,8 +150,47 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	}
 
 	switch msg.String() {
-	case "ctrl+c", "esc":
-		return m, tea.Quit, true
+	case "ctrl+c":
+		// Double-press Ctrl+C to quit
+		if m.chat.escapePending {
+			// Second press - quit immediately
+			return m, tea.Quit, true
+		}
+		// First press - set pending state and show warning
+		m.chat.escapePending = true
+		m.chat.escapePressTime = time.Now()
+		return m, nil, true
+	case "esc":
+		// During thinking mode, ESC interrupts the stream (with double-press confirmation)
+		if m.chat.thinking {
+			if m.chat.escapePending {
+				// Second press - interrupt the stream
+				m.chat.interrupted = true
+				m.chat.thinking = false
+				m.chat.showInferring = false
+				close(m.chat.abortChan)
+				m.chat.abortChan = nil
+				m.setNobbyPose(nobby.PoseIdle)
+				if !m.chat.cycleStartedAt.IsZero() {
+					m.chat.lastWorkedForSec = int(time.Since(m.chat.cycleStartedAt).Seconds())
+				}
+				m.chat.escapePending = false
+				m.chat.escapePressTime = time.Time{}
+				m.refreshViewport(true)
+				return m, nil, true
+			}
+			// First press - set pending state
+			m.chat.escapePending = true
+			m.chat.escapePressTime = time.Now()
+			return m, nil, true
+		}
+		// Not thinking - quit with double-press confirmation
+		if m.chat.escapePending {
+			return m, tea.Quit, true
+		}
+		m.chat.escapePending = true
+		m.chat.escapePressTime = time.Now()
+		return m, nil, true
 	case "pgup":
 		m.viewport.HalfViewUp()
 		return m, nil, true

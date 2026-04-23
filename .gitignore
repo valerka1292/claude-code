@@ -1,58 +1,86 @@
 ```
-# Compiled and build artifacts
-*.o
-*.obj
+# Go-specific ignores
+*.mod
+*.sum
 *.exe
 *.dll
 *.so
-*.a
+*.dylib
 *.out
 
 # Dependencies
 vendor/
 
-# Logs and temp files
-*.log
-*.tmp
-*.swp
+# Build artifacts
+bin/
+pkg/
 
 # Environment
 .env
 .env.local
 *.env.*
 
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*~
+.DS_Store
+Thumbs.db
+
 # Editors
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # Coverage
 coverage/
 htmlcov/
 .coverage
 
-# Build directories
-dist/
-build/
-target/
-
-# Python specific
+# Python (if any Python files exist in project)
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
 *.so
-.Python
-*.egg-info/
-.eggs/
+.PyInstaller/
+venv/
+.venv/
 
-# Go specific
+# Node.js (if any JS/TS files exist in project)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Java (if any Java files exist in project)
+*.class
+*.jar
+*.war
+*.ear
+target/
+.gradle/
+build/
+
+# C/C++ (if any C/C++ files exist in project)
+*.o
+*.a
+*.obj
+*.out
 *.exe
 *.dll
 *.so
 *.dylib
 
-# Compressed files
+# Rust (if any Rust files exist in project)
+target/
+Cargo.lock
+
+# Compression
 *.zip
 *.gz
 *.tar
