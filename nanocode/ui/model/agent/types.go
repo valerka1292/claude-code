@@ -6,6 +6,7 @@ import "strings"
 type StreamEvent struct {
 	ContentDelta   string
 	ReasoningDelta string
+	RefusalDelta   string
 	Usage          *UsageState
 	FinishReason   string
 	ErrorText      string
@@ -55,7 +56,12 @@ type ChatCompletionChunk struct {
 		Delta struct {
 			Content          string `json:"content"`
 			ReasoningContent string `json:"reasoning_content"`
-			ToolCalls        []struct {
+			Refusal          string `json:"refusal"`
+			FunctionCall     struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			} `json:"function_call"`
+			ToolCalls []struct {
 				Index    int    `json:"index"`
 				ID       string `json:"id"`
 				Type     string `json:"type"`

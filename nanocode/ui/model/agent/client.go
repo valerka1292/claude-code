@@ -96,8 +96,17 @@ func (c *Client) Stream(cfg StreamConfig, out chan<- StreamEvent) ([]APIToolCall
 		if delta.ReasoningContent != "" {
 			out <- StreamEvent{ReasoningDelta: delta.ReasoningContent}
 		}
+		if delta.Refusal != "" {
+			out <- StreamEvent{RefusalDelta: delta.Refusal}
+		}
 		if delta.Content != "" {
 			out <- StreamEvent{ContentDelta: delta.Content}
+		}
+		if delta.FunctionCall.Name != "" {
+			out <- StreamEvent{ToolDelta: delta.FunctionCall.Name}
+		}
+		if delta.FunctionCall.Arguments != "" {
+			out <- StreamEvent{ToolDelta: delta.FunctionCall.Arguments}
 		}
 		for _, callDelta := range delta.ToolCalls {
 			if callDelta.Function.Name != "" {

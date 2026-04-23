@@ -8,6 +8,7 @@ import (
 	"nanocode/ui/components/nobby"
 	"nanocode/ui/components/spinner"
 	"nanocode/ui/config"
+	"nanocode/ui/model/agent"
 	"nanocode/ui/types"
 )
 
@@ -53,6 +54,11 @@ func (m Model) executeInput() (tea.Model, tea.Cmd) {
 	m.chat.liveDownTokens = 0
 	m.chat.showInferring = true
 	m.chat.lastWorkedForSec = 0
+	promptTokens := estimatePromptTokens(m.chat.messages)
+	m.chat.usage = agent.UsageState{
+		PromptTokens: promptTokens,
+		TotalTokens:  promptTokens,
+	}
 	m.setNobbyPose(nobby.PoseReading)
 	m.resizeViewport()
 	m.refreshViewport(true)
