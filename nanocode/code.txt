@@ -1,0 +1,3347 @@
+main.go
+package main
+
+import (
+	"fmt"
+	"os"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"nanocode/ui/model"
+)
+
+func main() {
+	p := tea.NewProgram(
+		model.New(),
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+	)
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "nanocode failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+
+internal/mathutil/mathutil.go
+package mathutil
+
+// Max returns the larger of two integers.
+func Max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// Min returns the smaller of two integers.
+func Min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// Clamp restricts a value between lo and hi.
+func Clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+
+ui/components/header/header.go
+package header
+
+import (
+	"nanocode/ui/theme"
+	"nanocode/version"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+var (
+	nameStyle    = lipgloss.NewStyle().Bold(true).Foreground(theme.PrimaryText)
+	versionStyle = lipgloss.NewStyle().Foreground(theme.MutedText)
+	metaStyle    = lipgloss.NewStyle().Foreground(theme.MutedText)
+	noteStyle    = lipgloss.NewStyle().Foreground(theme.SecondaryAccent).Bold(true)
+)
+
+func View(cwd string, mascot string, providerName string, modelName string) string {
+	title := lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		nameStyle.Render(version.Name),
+		" ",
+		versionStyle.Render("v"+version.Current),
+	)
+
+	infoRows := []string{
+		title,
+		metaStyle.Render(modelName + " · " + providerName),
+		metaStyle.Render(cwd),
+	}
+	info := lipgloss.NewStyle().PaddingLeft(1).Render(lipgloss.JoinVertical(lipgloss.Left, infoRows...))
+
+	topSection := lipgloss.JoinHorizontal(lipgloss.Top, mascot, info)
+
+	note := noteStyle.Render("↑ Fastest coding agent · 5x faster than other agents, 5x cheaper!")
+
+	content := lipgloss.JoinVertical(lipgloss.Left, topSection, "", note)
+
+	wrap := lipgloss.NewStyle().Background(theme.AppBackground).Padding(0, 1)
+	return wrap.Render(content)
+}
+
+
+ui/components/messages/markdown.go
+package messages
+
+import (
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+
+	"nanocode/internal/mathutil"
+	"nanocode/ui/theme"
+
+	"charm.land/glamour/v2"
+	"github.com/alecthomas/chroma/v2/quick"
+	"github.com/charmbracelet/lipgloss"
+)
+
+const minMarkdownWidth = 20
+
+type rendererCacheState struct {
+	mu       sync.Mutex
+	width    int
+	renderer *glamour.TermRenderer
+}
+
+var rendererCache rendererCacheState
+
+// Фикс для LLM, которые иногда забывают ставить пробел после решеток (например: ##Заголовок)
+var headingRegex = regexp.MustCompile(`(?m)^(#{1,6})([^#\s].*)$`)
+
+type segment struct {
+	isCode   bool
+	language string
+	content  string
+}
+
+// getCustomStyle создает премиальную тему рендера.
+// - Заголовки стали более контрастными.
+// - Инлайн-код теперь использует черный текст (AccentContrast) на акцентном желтом фоне.
+func getCustomStyle() (string, error) {
+	style := map[string]map[string]any{
+		"document":      {"margin": 0, "color": theme.PrimaryTextHex},
+		"block_quote":   {"indent": 1, "indent_token": "┃ ", "color": theme.MutedTextHex},
+		"paragraph":     {},
+		"list":          {"level_indent": 2},
+		"heading":       {"block_suffix": "\n", "bold": true},
+		"h1":            {"color": theme.AccentContrastHex, "background_color": theme.PrimaryAccentHex, "bold": true, "prefix": " "},
+		"h2":            {"color": theme.PrimaryAccentHex, "bold": true},
+		"h3":            {"color": theme.SecondaryAccentHex, "bold": true},
+		"h4":            {"color": theme.PrimaryTextHex, "bold": true, "italic": true},
+		"h5":            {"color": theme.MutedTextHex, "bold": true},
+		"h6":            {"color": theme.MutedTextHex, "bold": true},
+		"strikethrough": {"crossed_out": true},
+		"emph":          {"italic": true, "color": theme.PrimaryTextHex},
+		"strong":        {"bold": true, "color": theme.PrimaryAccentHex},
+		"hr":            {"color": theme.SurfaceBackgroundHex, "format": "\n────────────────────────────────────────────────────────────\n"},
+		"item":          {"block_prefix": "• "},
+		"enumeration":   {"block_prefix": ". "},
+		"task":          {"ticked": "[✓] ", "unticked": "[ ] "},
+		"link":          {"color": theme.SecondaryAccentHex, "underline": true},
+		"link_text":     {"color": theme.PrimaryAccentHex, "bold": true},
+		"image":         {"color": theme.PrimaryAccentHex, "underline": true},
+		"image_text":    {"format": "🖼️ {{.text}}"},
+		"code":          {"color": theme.AccentContrastHex, "background_color": theme.PrimaryAccentHex},
+		"table":         {"center_separator": "┼", "column_separator": "│", "row_separator": "─"},
+	}
+	raw, err := json.Marshal(style)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func renderMarkdown(text string, width int, streaming bool) string {
+	text = preprocessMarkdown(text, streaming)
+	segments := parseSegments(text)
+	var result strings.Builder
+
+	renderer, err := getRenderer(width)
+	if err != nil {
+		return strings.TrimSpace(text)
+	}
+
+	for i, seg := range segments {
+		if seg.isCode {
+			ui := renderCodeUI(seg.language, seg.content, width)
+			result.WriteString(ui)
+		} else {
+			textSeg := strings.TrimSpace(seg.content)
+			if textSeg == "" {
+				continue
+			}
+
+			rendered, err := renderer.Render(textSeg)
+			if err != nil {
+				result.WriteString(textSeg)
+			} else {
+				result.WriteString(strings.TrimRight(rendered, "\n"))
+			}
+		}
+		if i < len(segments)-1 {
+			result.WriteString("\n\n") // Отступ между блоками
+		}
+	}
+
+	return strings.TrimSpace(result.String())
+}
+
+func preprocessMarkdown(text string, streaming bool) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	text = headingRegex.ReplaceAllString(text, "$1 $2") // Лечим слипшиеся заголовки
+
+	if streaming {
+		text = stabilizeStreamingMarkdown(text)
+	}
+
+	return text
+}
+
+// Закрывает парные блоки, если нейросеть оборвала генерацию на середине
+func stabilizeStreamingMarkdown(text string) string {
+	if strings.Count(text, "```")%2 == 1 {
+		if !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		text += "```"
+	}
+	return text
+}
+
+func parseSegments(text string) []segment {
+	var segments []segment
+	lines := strings.Split(text, "\n")
+	var current strings.Builder
+	inFence := false
+	fenceToken := ""
+	language := ""
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if !inFence {
+			if token := fenceTokenFromStart(trimmed); token != "" {
+				if current.Len() > 0 {
+					segments = append(segments, segment{isCode: false, content: current.String()})
+					current.Reset()
+				}
+				inFence = true
+				fenceToken = token
+				language = strings.TrimSpace(trimmed[len(token):])
+				continue
+			}
+			if strings.HasPrefix(trimmed, "$$") {
+				if current.Len() > 0 {
+					segments = append(segments, segment{isCode: false, content: current.String()})
+					current.Reset()
+				}
+				inFence = true
+				fenceToken = "$$"
+				language = "math"
+
+				if len(trimmed) > 2 && strings.HasSuffix(trimmed, "$$") {
+					content := trimmed[2 : len(trimmed)-2]
+					segments = append(segments, segment{isCode: true, language: "math", content: content + "\n"})
+					inFence = false
+					fenceToken = ""
+					language = ""
+				} else {
+					content := trimmed[2:]
+					if content != "" {
+						current.WriteString(content + "\n")
+					}
+				}
+				continue
+			}
+			current.WriteString(line + "\n")
+		} else {
+			if isFenceEnd(trimmed, fenceToken, len(fenceToken)) || (fenceToken == "$$" && strings.HasSuffix(trimmed, "$$")) {
+				if fenceToken == "$$" {
+					content := trimmed[:len(trimmed)-2]
+					if content != "" {
+						current.WriteString(content + "\n")
+					}
+				}
+				segments = append(segments, segment{isCode: true, language: language, content: current.String()})
+				current.Reset()
+				inFence = false
+				fenceToken = ""
+				language = ""
+				continue
+			}
+			current.WriteString(line + "\n")
+		}
+	}
+
+	if current.Len() > 0 {
+		segments = append(segments, segment{isCode: inFence, language: language, content: current.String()})
+	}
+	return segments
+}
+
+func fenceTokenFromStart(line string) string {
+	if strings.HasPrefix(line, "```") {
+		return "```"
+	}
+	if strings.HasPrefix(line, "~~~") {
+		return "~~~"
+	}
+	return ""
+}
+
+func isFenceEnd(line string, token string, minLen int) bool {
+	if token == "" || len(line) < minLen {
+		return false
+	}
+	if !strings.HasPrefix(line, token) {
+		return false
+	}
+	for _, r := range line {
+		if rune(token[0]) != r && r != ' ' {
+			return false
+		}
+	}
+	return true
+}
+
+func renderCodeUI(lang, content string, width int) string {
+	content = strings.TrimSuffix(content, "\n")
+	if content == "" {
+		return ""
+	}
+
+	var buf strings.Builder
+	highlighted := content
+
+	// Подсветка синтаксиса
+	err := quick.Highlight(&buf, content, lang, "terminal256", "dracula")
+	if err == nil && buf.Len() > 0 {
+		highlighted = buf.String()
+	}
+
+	lines := strings.Split(highlighted, "\n")
+
+	// ДИНАМИЧЕСКИЙ РАЗМЕР НОМЕРОВ СТРОК: отступ равен кол-ву цифр в самой длинной строке
+	digits := len(strconv.Itoa(len(lines)))
+
+	var formatted strings.Builder
+	numStyle := lipgloss.NewStyle().Foreground(theme.MutedText) // MutedText отлично контрастирует и не сливается с рамкой
+
+	for i, line := range lines {
+		numStr := fmt.Sprintf("%*d │ ", digits, i+1)
+		formatted.WriteString(numStyle.Render(numStr) + line)
+		if i < len(lines)-1 {
+			formatted.WriteString("\n")
+		}
+	}
+
+	headerText := " " + strings.ToUpper(lang) + " "
+	if lang == "" {
+		headerText = " CODE "
+	} else if lang == "math" {
+		headerText = " MATHJAX "
+	} else if lang == "mermaid" {
+		headerText = " MERMAID "
+	}
+
+	// Элегантная "вкладка"
+	header := lipgloss.NewStyle().
+		Background(theme.PrimaryAccent).
+		Foreground(theme.AccentContrast).
+		Bold(true).
+		Padding(0, 1).
+		MarginLeft(2).
+		Render(headerText)
+
+	// Рамка вокруг кода
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.SurfaceBackground).
+		Width(mathutil.Max(20, width-2)).
+		Render(formatted.String())
+
+	return header + "\n" + box
+}
+
+func getRenderer(width int) (*glamour.TermRenderer, error) {
+	wrap := width
+	if wrap < minMarkdownWidth {
+		wrap = minMarkdownWidth
+	}
+
+	rendererCache.mu.Lock()
+	defer rendererCache.mu.Unlock()
+
+	if rendererCache.renderer != nil && rendererCache.width == wrap {
+		return rendererCache.renderer, nil
+	}
+
+	styleJSON, err := getCustomStyle()
+	if err != nil {
+		return nil, err
+	}
+
+	renderer, err := glamour.NewTermRenderer(
+		glamour.WithWordWrap(wrap),
+		glamour.WithStylesFromJSONBytes([]byte(styleJSON)),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	rendererCache.width = wrap
+	rendererCache.renderer = renderer
+	return renderer, nil
+}
+
+
+ui/components/messages/markdown_test.go
+package messages
+
+import (
+	"strings"
+	"testing"
+)
+
+// Локальный хелпер для тестов, чтобы очищать lipgloss/ansi стили и проверять сырой текст
+func stripANSI(str string) string {
+	var out strings.Builder
+	inEscape := false
+	for _, r := range str {
+		if inEscape {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+		if r == '\x1b' {
+			inEscape = true
+			continue
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
+}
+
+func TestStabilizeStreamingMarkdown_ClosesOpenFence(t *testing.T) {
+	in := "```python\nprint('x')"
+	out := stabilizeStreamingMarkdown(in)
+	if strings.Count(out, "```")%2 != 0 {
+		t.Fatalf("expected balanced fences, got %q", out)
+	}
+}
+
+func TestRenderMarkdown_RendersStrongText(t *testing.T) {
+	out := renderMarkdown("**bold**", 80, false)
+	if !strings.Contains(out, "bold") {
+		t.Fatalf("expected markdown rendering to preserve text, got %q", out)
+	}
+}
+
+// Тест успешно вызовет функцию из messages.go (в рамках одного пакета messages)
+func TestRenderAssistantBlock_PrefixesBullet(t *testing.T) {
+	out := renderAssistantBlock("hello", 80, false)
+	if !strings.Contains(out, "●") {
+		t.Fatalf("expected assistant output to include bullet prefix, got %q", out)
+	}
+}
+
+func TestRenderCodeUI_ContainsLineNumbers(t *testing.T) {
+	out := renderCodeUI("go", "fmt.Println(\"a\")\nfmt.Println(\"b\")\n", 80)
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "1 │") || !strings.Contains(plain, "2 │") {
+		t.Fatalf("expected line numbers in code block, got %q", plain)
+	}
+}
+
+func TestRenderCodeUI_ContainsLangBadge(t *testing.T) {
+	out := renderCodeUI("python", "x = 1\n", 80)
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "PYTHON") {
+		t.Fatalf("expected language badge in code block, got %q", plain)
+	}
+}
+
+func TestParseSegments_SeparatesCodeAndProse(t *testing.T) {
+	md := "hello\n```go\nfmt.Println()\n```\nworld\n"
+	segs := parseSegments(md)
+	var codeCount, proseCount int
+	for _, s := range segs {
+		if s.isCode {
+			codeCount++
+		} else {
+			proseCount++
+		}
+	}
+	if codeCount != 1 {
+		t.Fatalf("expected 1 code segment, got %d", codeCount)
+	}
+	if proseCount < 1 {
+		t.Fatalf("expected prose segments, got %d", proseCount)
+	}
+}
+
+
+ui/components/messages/messages.go
+package messages
+
+import (
+	"strings"
+
+	"nanocode/internal/mathutil"
+	"nanocode/ui/theme"
+	"nanocode/ui/types"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+var (
+	panelStyle = lipgloss.NewStyle().Padding(0, 0, 1, 0).Background(theme.AppBackground)
+	userStyle  = lipgloss.NewStyle().Background(theme.SurfaceBackground).Foreground(theme.PrimaryText).Padding(0, 1)
+	agentStyle = lipgloss.NewStyle().Foreground(theme.PrimaryText)
+	thinkStyle = lipgloss.NewStyle().Foreground(theme.MutedText).PaddingLeft(3)
+	dotStyle   = lipgloss.NewStyle().Foreground(theme.PrimaryAccent)
+)
+
+func View(list []types.Message, width int, spinnerLine string, thinking string, streamingText string) string {
+	var lines []string
+	for _, msg := range list {
+		switch msg.Role {
+		case types.RoleUser:
+			lines = append(lines, userStyle.Width(mathutil.Max(width-2, 10)).Render("❯ "+msg.Text))
+		case types.RoleAssistant:
+			lines = append(lines, agentStyle.Render(renderAssistantBlock(msg.Text, width, false)))
+		}
+		lines = append(lines, "")
+	}
+
+	if spinnerLine != "" {
+		lines = append(lines, agentStyle.Render(spinnerLine), "")
+	}
+	if thinking != "" {
+		lines = append(lines, thinkStyle.Render("thinking: "+thinking), "")
+	}
+	if streamingText != "" {
+		lines = append(lines, agentStyle.Render(renderAssistantBlock(streamingText, width, true)), "")
+	}
+
+	if len(lines) == 0 {
+		lines = append(lines, "")
+	}
+
+	return panelStyle.Width(width).Render(strings.Join(lines, "\n"))
+}
+
+func renderAssistantBlock(text string, width int, streaming bool) string {
+	rendered := renderMarkdown(text, mathutil.Max(width-4, minMarkdownWidth), streaming)
+	rendered = strings.Trim(rendered, "\n\r")
+
+	if rendered == "" {
+		return dotStyle.Render("●")
+	}
+
+	rows := strings.Split(rendered, "\n")
+	rows[0] = dotStyle.Render("●") + " " + rows[0]
+	for i := 1; i < len(rows); i++ {
+		rows[i] = "  " + rows[i]
+	}
+	return strings.Join(rows, "\n")
+}
+
+
+ui/components/nobby/nobby.go
+package nobby
+
+import (
+	"strings"
+	"time"
+
+	"nanocode/ui/theme"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+type Pose string
+
+const (
+	PoseIdle              Pose = "idle"
+	PoseReading           Pose = "reading"
+	PoseThinking          Pose = "thinking"
+	PoseWriting           Pose = "writing"
+	PoseToolCalling       Pose = "tool-calling"
+	PoseToolSuccess       Pose = "tool-success"
+	PoseToolError         Pose = "tool-error"
+	PoseAPIErrorReconnect Pose = "api-error-reconnect"
+	PoseAPIError          Pose = "api-error"
+)
+
+type AnimationFrame struct {
+	Antenna string
+	Face    string
+	BodyL   string
+	BodyC   string
+	BodyR   string
+	Legs    string
+	Color   string
+}
+
+type animation struct {
+	Frames []AnimationFrame
+	Speed  time.Duration
+	Per    []time.Duration
+}
+
+var animations = map[Pose]animation{
+	PoseIdle: {
+		Frames: []AnimationFrame{
+			{Antenna: "    •    ", Face: "  [o o]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+			{Antenna: "    •    ", Face: "  [- -]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+		},
+		Per: []time.Duration{2500 * time.Millisecond, 150 * time.Millisecond},
+	},
+	PoseReading: {
+		Frames: []AnimationFrame{
+			{Antenna: "    ▲    ", Face: "  [◉  ]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+			{Antenna: "    ▲    ", Face: "  [◉ ◉]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+			{Antenna: "    ▲    ", Face: "  [  ◉]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+			{Antenna: "    ▲    ", Face: "  [◉ ◉]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+		},
+		Speed: 250 * time.Millisecond,
+	},
+	PoseThinking: {
+		Frames: []AnimationFrame{
+			{Antenna: "   /     ", Face: "  [~ ~]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+			{Antenna: "    –    ", Face: "  [~ ~]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+			{Antenna: "     \\   ", Face: "  [~ ~]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+			{Antenna: "    –    ", Face: "  [~ ~]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+		},
+		Speed: 200 * time.Millisecond,
+	},
+	PoseWriting: {
+		Frames: []AnimationFrame{
+			{Antenna: "    •    ", Face: "  [o  ]  ", BodyL: " -", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+			{Antenna: "    •    ", Face: "  [o o]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+			{Antenna: "    •    ", Face: "  [  o]  ", BodyL: "  ", BodyC: "█████", BodyR: "- ", Legs: "   █ █   "},
+			{Antenna: "    •    ", Face: "  [o o]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+		},
+		Speed: 300 * time.Millisecond,
+	},
+	PoseToolCalling: {
+		Frames: []AnimationFrame{
+			{Antenna: "    ●    ", Face: "  [• •]  ", BodyL: " -", BodyC: "█████", BodyR: "- ", Legs: "   █ █   "},
+			{Antenna: "    ○    ", Face: "  [• •]  ", BodyL: " -", BodyC: "█████", BodyR: "- ", Legs: "   █ █   "},
+		},
+		Speed: 300 * time.Millisecond,
+	},
+	PoseToolSuccess: {
+		Frames: []AnimationFrame{
+			{Antenna: "    •    ", Face: "  [o o]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "  █   █  "},
+			{Antenna: "    •    ", Face: "  [^ ^]  ", BodyL: " \\", BodyC: "█████", BodyR: "/ ", Legs: "   █ █   "},
+			{Antenna: "    •    ", Face: "  [◡ ◡]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   "},
+		},
+		Per: []time.Duration{150 * time.Millisecond, 300 * time.Millisecond, 200 * time.Millisecond},
+	},
+	PoseToolError: {
+		Frames: []AnimationFrame{
+			{Antenna: "    ✗    ", Face: "  [X X]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: "#ff5f5f"},
+			{Antenna: "    ✗    ", Face: "  [x x]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "  █   █  ", Color: "#ff5f5f"},
+		},
+		Speed: 400 * time.Millisecond,
+	},
+	PoseAPIErrorReconnect: {
+		Frames: []AnimationFrame{
+			{Antenna: "    │    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: "#ff5f5f"},
+			{Antenna: "    ╱    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: "#ff5f5f"},
+			{Antenna: "    ─    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: "#ff5f5f"},
+			{Antenna: "    ╲    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: "#ff5f5f"},
+		},
+		Speed: 200 * time.Millisecond,
+	},
+	PoseAPIError: {
+		Frames: []AnimationFrame{
+			{Antenna: "    ✗    ", Face: "  [x x]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: "#ff5f5f"},
+			{Antenna: "    ·    ", Face: "  [. .]  ", BodyL: "  ", BodyC: "░░░░░", BodyR: "  ", Legs: "   █ █   ", Color: string(theme.MutedText)},
+		},
+		Speed: 600 * time.Millisecond,
+	},
+}
+
+func FrameFor(pose Pose, step int) AnimationFrame {
+	a := animations[pose]
+	f := a.Frames[step%len(a.Frames)]
+	if f.Color == "" {
+		f.Color = string(theme.PrimaryAccent)
+	}
+	return f
+}
+
+func DurationFor(pose Pose, step int) time.Duration {
+	a := animations[pose]
+	if len(a.Per) > 0 {
+		return a.Per[step%len(a.Per)]
+	}
+	if a.Speed <= 0 {
+		return 250 * time.Millisecond
+	}
+	return a.Speed
+}
+
+func Render(pose Pose, step int) string {
+	f := FrameFor(pose, step)
+
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color(f.Color))
+
+	lines := []string{
+		style.Render(f.Antenna),
+		style.Render(f.Face),
+		style.Render(f.BodyL) + style.Render(f.BodyC) + style.Render(f.BodyR),
+		style.Render(f.Legs),
+	}
+
+	container := lipgloss.NewStyle().Padding(0, 1)
+	return container.Render(strings.Join(lines, "\n"))
+}
+
+
+ui/components/prompt/prompt.go
+package prompt
+
+import (
+	"nanocode/internal/mathutil"
+	"nanocode/ui/theme"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+var (
+	boxStyle = lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder(), true, false, true, false).
+			BorderForeground(theme.MutedText).
+			Foreground(theme.PrimaryText).
+			Background(theme.AppBackground)
+	footerStyle = lipgloss.NewStyle().Foreground(theme.SecondaryAccent).PaddingLeft(1)
+)
+
+func InputBar(text string, width int) string {
+	return boxStyle.Width(width).Render("❯ " + text)
+}
+
+func Footer(width int, usage string, hint string) string {
+	leftText := "⏵⏵ accept edits on (shift+tab to cycle)"
+	if hint != "" {
+		leftText = hint
+	}
+	left := footerStyle.Render(leftText)
+	right := footerStyle.Foreground(theme.MutedText).Render(usage)
+	if usage == "" {
+		return left
+	}
+	return lipgloss.NewStyle().Width(width).Render(lipgloss.JoinHorizontal(lipgloss.Top, left, lipgloss.NewStyle().Width(mathutil.Max(0, width-lipgloss.Width(left)-lipgloss.Width(right))).Render(""), right))
+}
+
+
+ui/components/providers/panel.go
+package providers
+
+import (
+	"fmt"
+	"strings"
+
+	"nanocode/internal/mathutil"
+	"nanocode/ui/theme"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+var (
+	boxStyle = lipgloss.NewStyle().
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(theme.SecondaryAccent).
+			Padding(1, 2).
+			Background(theme.AppBackground)
+	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.PrimaryAccent)
+	mutedText  = lipgloss.NewStyle().Foreground(theme.MutedText)
+	selected   = lipgloss.NewStyle().Foreground(theme.AccentContrast).Background(theme.PrimaryAccent)
+)
+
+func Panel(width int, title string, description string, options []string, selectedIndex int, inputView string) string {
+	rows := []string{
+		titleStyle.Render(title),
+		mutedText.Render(description),
+		"",
+	}
+
+	for i, option := range options {
+		line := "  " + option
+		if i == selectedIndex {
+			line = selected.Render(line)
+		}
+		rows = append(rows, line)
+	}
+
+	if inputView != "" {
+		rows = append(rows, "", mutedText.Render("Input:"), inputView)
+	}
+
+	rows = append(rows, "", mutedText.Render("↑/↓ move • Enter select • Esc close"))
+	return boxStyle.Width(mathutil.Max(62, width*3/4)).Render(strings.Join(rows, "\n"))
+}
+
+func ProviderSummary(name string, model string, contextSize int, active bool) string {
+	activeMark := " "
+	if active {
+		activeMark = "✓"
+	}
+	return fmt.Sprintf("%s %s · %s · ctx %d", activeMark, name, model, contextSize)
+}
+
+
+ui/components/settings/panel.go
+package settings
+
+import (
+	"fmt"
+	"strings"
+
+	"nanocode/internal/mathutil"
+	"nanocode/ui/config"
+	"nanocode/ui/theme"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+var (
+	boxStyle = lipgloss.NewStyle().
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(theme.SecondaryAccent).
+			Padding(1, 2).
+			Background(theme.AppBackground)
+	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.PrimaryAccent)
+	mutedText  = lipgloss.NewStyle().Foreground(theme.MutedText)
+	selected   = lipgloss.NewStyle().Foreground(theme.AccentContrast).Background(theme.PrimaryAccent)
+)
+
+func Panel(width int, selectedRow int, spinnerStyle string, timeoutSeconds int) string {
+	spinnerLabel := "Hexagons"
+	if spinnerStyle == config.SpinnerCircles {
+		spinnerLabel = "Circles"
+	}
+
+	rows := []string{
+		titleStyle.Render("Settings"),
+		mutedText.Render("↑/↓ select setting • ←/→ change value • Enter save • Esc close"),
+		"",
+	}
+
+	items := []string{
+		"Spinner style:   < " + spinnerLabel + " >",
+		"API timeout:     < " + formatTimeout(timeoutSeconds) + " >",
+	}
+	for i, line := range items {
+		if i == selectedRow {
+			rows = append(rows, selected.Render(line))
+			continue
+		}
+		rows = append(rows, line)
+	}
+
+	return boxStyle.Width(mathutil.Max(56, width*2/3)).Render(strings.Join(rows, "\n"))
+}
+
+func formatTimeout(seconds int) string {
+	return fmt.Sprintf("%ds", seconds)
+}
+
+
+ui/components/spinner/spinner.go
+package spinner
+
+import (
+	"fmt"
+	"math/rand"
+	"time"
+
+	"nanocode/ui/config"
+)
+
+// NanoCode-themed spinner verbs - organized by category
+// Keeping brand identity while matching Claude's spirit (alliteration, playful terms)
+var verbs = []string{
+	// Nano-Tech (Micro-world & Physics)
+	"Assembling",
+	"Atomizing",
+	"Bonding",
+	"Colliding",
+	"Condensing",
+	"Crystallizing",
+	"Etching",
+	"Ionizing",
+	"Layering",
+	"Magnetizing",
+	"Nanifying",
+	"Nucleating",
+	"Polarizing",
+	"Quantumizing",
+	"Synthesizing",
+
+	// Nerd/Hacker Culture
+	"Baffling",
+	"Bit-flipping",
+	"Bootstrapping",
+	"Compiling",
+	"Debugging",
+	"Deploying",
+	"Gitifying",
+	"Hashing",
+	"Hydrating",
+	"Indexing",
+	"Linting",
+	"Optimizing",
+	"Parsing",
+	"Refactoring",
+	"Reticulating",
+	"Transpiling",
+
+	// Absurd & Playful
+	"Bamboozling",
+	"Blooping",
+	"Brainstorming",
+	"Caffeinating",
+	"Chai-sipping",
+	"Deep-frying",
+	"Hallucinating",
+	"Meditating",
+	"Napping",
+	"Overthinking",
+	"Pondering",
+	"Rubber-ducking",
+	"Shrugging",
+	"Vibing",
+
+	// Nano-Action (Dynamic verbs)
+	"Accelerating",
+	"Beaming",
+	"Blasting",
+	"Cascading",
+	"Igniting",
+	"Orbiting",
+	"Sprinting",
+	"Warping",
+}
+
+var hexFrames = []string{
+	"⬢ ⬡ ⬡",
+	"⬡ ⬢ ⬡",
+	"⬡ ⬡ ⬢",
+	"⬡ ⬢ ⬡",
+}
+
+var circleFrames = []string{
+	"·",
+	"◦",
+	"○",
+	"◦",
+}
+
+func RandomVerb() string {
+	return verbs[rand.Intn(len(verbs))]
+}
+
+func Frame(style string, i int) string {
+	frames := circleFrames
+	if style == config.SpinnerHexagons {
+		frames = hexFrames
+	}
+	return frames[i%len(frames)]
+}
+
+func Interval(style string) time.Duration {
+	if style == config.SpinnerHexagons {
+		return 250 * time.Millisecond
+	}
+	return 200 * time.Millisecond
+}
+
+func Status(frame int, verb string, style string) string {
+	return fmt.Sprintf("%s %s...", Frame(style, frame), verb)
+}
+
+func Indicator(style string, frame int) string {
+	return Frame(style, frame)
+}
+
+func StaticIndicator(style string) string {
+	if style == config.SpinnerHexagons {
+		return "⬢"
+	}
+	return "○"
+}
+
+
+ui/components/suggestions/commands.go
+package suggestions
+
+import (
+	"fmt"
+	"strings"
+
+	"nanocode/internal/mathutil"
+	"nanocode/ui/theme"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+var (
+	boxStyle = lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder(), true, true, true, true).
+			BorderForeground(theme.MutedText).
+			Padding(0, 1).
+			Background(theme.AppBackground)
+	selectedStyle = lipgloss.NewStyle().Foreground(theme.AccentContrast).Background(theme.PrimaryAccent)
+)
+
+func CommandList(width int, items []string, selected int) string {
+	if len(items) == 0 {
+		return ""
+	}
+	rows := make([]string, 0, len(items))
+	for i, item := range items {
+		line := fmt.Sprintf(" %s", item)
+		if i == selected {
+			line = selectedStyle.Render(line)
+		}
+		rows = append(rows, line)
+	}
+	contentWidth := mathutil.Max(18, mathutil.Min(width-4, maxItemWidth(items)+4))
+	return boxStyle.Width(contentWidth).Render(strings.Join(rows, "\n"))
+}
+
+func maxItemWidth(items []string) int {
+	w := 0
+	for _, item := range items {
+		if len(item) > w {
+			w = len(item)
+		}
+	}
+	return w
+}
+
+
+ui/config/providers.go
+package config
+
+import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+type Provider struct {
+	Name        string `json:"name"`
+	BaseURL     string `json:"base_url"`
+	Model       string `json:"model"`
+	APIKey      string `json:"api_key"`
+	ContextSize int    `json:"context_size"`
+	Active      bool   `json:"active"`
+}
+
+type ProvidersFile struct {
+	Providers map[string]Provider `json:"providers"`
+}
+
+func LoadProviders() (ProvidersFile, error) {
+	path, err := providersPath()
+	if err != nil {
+		return ProvidersFile{Providers: map[string]Provider{}}, err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ProvidersFile{Providers: map[string]Provider{}}, nil
+		}
+		return ProvidersFile{Providers: map[string]Provider{}}, err
+	}
+
+	cfg := ProvidersFile{Providers: map[string]Provider{}}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return ProvidersFile{Providers: map[string]Provider{}}, err
+	}
+	if cfg.Providers == nil {
+		cfg.Providers = map[string]Provider{}
+	}
+	return cfg, nil
+}
+
+func SaveProviders(cfg ProvidersFile) error {
+	path, err := providersPath()
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+func ActiveProvider(cfg ProvidersFile) (Provider, bool) {
+	for _, provider := range cfg.Providers {
+		if provider.Active {
+			return provider, true
+		}
+	}
+	return Provider{}, false
+}
+
+func ProviderNames(cfg ProvidersFile) []string {
+	names := make([]string, 0, len(cfg.Providers))
+	for name := range cfg.Providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func NormalizeBaseURL(raw string) string {
+	value := strings.TrimSpace(raw)
+	return strings.TrimRight(value, "/")
+}
+
+func providersPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".nanocode", "providers.json"), nil
+}
+
+
+ui/config/settings.go
+package config
+
+import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+)
+
+const (
+	SpinnerHexagons = "hexagons"
+	SpinnerCircles  = "circles"
+)
+
+var TimeoutOptions = []int{30, 60, 90, 120, 180, 240, 300}
+
+const DefaultTimeoutSeconds = 180
+
+type Settings struct {
+	SpinnerStyle      string `json:"spinner_style"`
+	APITimeoutSeconds int    `json:"api_timeout_seconds"`
+}
+
+func DefaultSettings() Settings {
+	return Settings{
+		SpinnerStyle:      SpinnerHexagons,
+		APITimeoutSeconds: DefaultTimeoutSeconds,
+	}
+}
+
+func LoadSettings() (Settings, error) {
+	path, err := settingsPath()
+	if err != nil {
+		return DefaultSettings(), err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return DefaultSettings(), nil
+		}
+		return DefaultSettings(), err
+	}
+
+	cfg := DefaultSettings()
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return DefaultSettings(), err
+	}
+	if cfg.SpinnerStyle != SpinnerHexagons && cfg.SpinnerStyle != SpinnerCircles {
+		cfg.SpinnerStyle = SpinnerHexagons
+	}
+	validTimeout := false
+	for _, t := range TimeoutOptions {
+		if cfg.APITimeoutSeconds == t {
+			validTimeout = true
+			break
+		}
+	}
+	if !validTimeout {
+		cfg.APITimeoutSeconds = DefaultTimeoutSeconds
+	}
+	return cfg, nil
+}
+
+func SaveSettings(cfg Settings) error {
+	path, err := settingsPath()
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func settingsPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".nanocode", "settings.json"), nil
+}
+
+
+ui/model/commands.go
+package model
+
+import (
+	"nanocode/internal/mathutil"
+	"strings"
+)
+
+func (m *Model) updateCommandSuggestions() {
+	value := strings.TrimSpace(m.input.Value())
+	if strings.HasPrefix(value, "/") && !strings.Contains(value, " ") {
+		m.commands.suggestions = m.commands.suggestions[:0]
+		for _, cmd := range availableCommands {
+			if strings.HasPrefix(cmd.Name, value) {
+				m.commands.suggestions = append(m.commands.suggestions, cmd.Name)
+			}
+		}
+		if len(m.commands.suggestions) == 0 {
+			m.commands.suggestions = nil
+			m.commands.selected = 0
+			return
+		}
+		m.commands.selected = mathutil.Clamp(m.commands.selected, 0, len(m.commands.suggestions)-1)
+		return
+	}
+	m.clearCommandSuggestions()
+}
+
+func (m *Model) clearCommandSuggestions() {
+	m.commands.suggestions = nil
+	m.commands.selected = 0
+}
+
+
+ui/model/new.go
+package model
+
+import (
+	"os"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"nanocode/ui/components/nobby"
+	"nanocode/ui/config"
+)
+
+func New() Model {
+	in := textinput.New()
+	in.Focus()
+	in.Prompt = ""
+	in.Placeholder = "Type a message..."
+	in.CharLimit = 1000
+	in.Width = 80
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "./"
+	}
+
+	cfg, err := config.LoadSettings()
+	if err != nil {
+		cfg = config.DefaultSettings()
+	}
+
+	providers, err := config.LoadProviders()
+	if err != nil {
+		providers = config.ProvidersFile{Providers: map[string]config.Provider{}}
+	}
+
+	panelInput := textinput.New()
+	panelInput.Prompt = ""
+	panelInput.CharLimit = 2048
+	panelInput.Width = 48
+
+	vp := viewport.New(80, 10)
+	m := Model{
+		cwd:       cwd,
+		input:     in,
+		viewport:  vp,
+		nobbyPose: nobby.PoseIdle,
+		layout:    LayoutState{},
+		chat:      ChatState{},
+		commands:  CommandState{},
+		settings: SettingsState{
+			values:      cfg,
+			selectedRow: 0,
+		},
+		providers: ProviderState{
+			mode:  providerModeMenu,
+			input: panelInput,
+			data:  providers,
+		},
+	}
+	m.providers.names = config.ProviderNames(m.providers.data)
+	m.refreshViewport(true)
+	return m
+}
+
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(textinput.Blink, nobbyTickCmd(m.nobbyPose, m.nobbyStep))
+}
+
+
+ui/model/provider_helpers.go
+package model
+
+import (
+	"nanocode/internal/mathutil"
+	"nanocode/ui/config"
+	"nanocode/ui/model/provider"
+)
+
+func (m *Model) reloadProviderNames() {
+	m.providers.names = config.ProviderNames(m.providers.data)
+	if len(m.providers.names) == 0 {
+		m.providers.selectedProvider = 0
+		return
+	}
+	m.providers.selectedProvider = mathutil.Clamp(m.providers.selectedProvider, 0, len(m.providers.names)-1)
+}
+
+func (m *Model) beginProviderCreate() {
+	m.providers.mode = providerModeCreate
+	m.providers.form.Reset()
+	m.providers.inputPrompt = "Enter provider name"
+	m.providers.input.SetValue("")
+	m.providers.input.Focus()
+	m.providers.inputField = provider.FieldName
+}
+
+func (m *Model) openProviderPanel() {
+	m.providers.open = true
+	m.providers.mode = providerModeMenu
+	m.providers.menuIndex = 0
+	m.reloadProviderNames()
+}
+
+
+ui/model/provider_update.go
+package model
+
+import (
+	"fmt"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"nanocode/internal/mathutil"
+	"nanocode/ui/config"
+	"nanocode/ui/model/provider"
+)
+
+const (
+	providerMenuCreate = iota
+	providerMenuSelect
+	providerMenuEdit
+	providerMenuDelete
+	providerMenuItemCount
+)
+
+func providerFieldCount() int {
+	return int(provider.FieldContextSize) + 1
+}
+
+func (m Model) handleProviderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.providers.mode {
+	case providerModeInputValue, providerModeCreate, providerModeEditInput:
+		if msg.String() == "esc" {
+			m.providers.open = false
+			m.providers.mode = providerModeMenu
+			m.providers.input.Blur()
+			m.resizeViewport()
+			return m, nil
+		}
+		if msg.String() == "enter" {
+			return m.submitProviderInput()
+		}
+		var cmd tea.Cmd
+		m.providers.input, cmd = m.providers.input.Update(msg)
+		return m, cmd
+	}
+
+	switch msg.String() {
+	case "esc":
+		m.providers.open = false
+		m.providers.mode = providerModeMenu
+		m.providers.input.Blur()
+		m.resizeViewport()
+		return m, nil
+	case "up":
+		switch m.providers.mode {
+		case providerModeMenu:
+			m.providers.menuIndex = mathutil.Clamp(m.providers.menuIndex-1, 0, providerMenuItemCount-1)
+		case providerModeSelect, providerModeEditPick, providerModeDelete:
+			m.providers.selectedProvider = mathutil.Clamp(m.providers.selectedProvider-1, 0, len(m.providers.names)-1)
+		case providerModeEditField:
+			m.providers.selectedField = provider.Field(mathutil.Clamp(int(m.providers.selectedField)-1, 0, providerFieldCount()-1))
+		}
+		return m, nil
+	case "down":
+		switch m.providers.mode {
+		case providerModeMenu:
+			m.providers.menuIndex = mathutil.Clamp(m.providers.menuIndex+1, 0, providerMenuItemCount-1)
+		case providerModeSelect, providerModeEditPick, providerModeDelete:
+			m.providers.selectedProvider = mathutil.Clamp(m.providers.selectedProvider+1, 0, len(m.providers.names)-1)
+		case providerModeEditField:
+			m.providers.selectedField = provider.Field(mathutil.Clamp(int(m.providers.selectedField)+1, 0, providerFieldCount()-1))
+		}
+		return m, nil
+	case "enter":
+		return m.handleProviderSelect()
+	}
+	return m, nil
+}
+
+func (m Model) handleProviderSelect() (tea.Model, tea.Cmd) {
+	switch m.providers.mode {
+	case providerModeMenu:
+		switch m.providers.menuIndex {
+		case providerMenuCreate:
+			m.beginProviderCreate()
+		case providerMenuSelect:
+			m.providers.mode = providerModeSelect
+		case providerMenuEdit:
+			m.providers.mode = providerModeEditPick
+		case providerMenuDelete:
+			m.providers.mode = providerModeDelete
+		}
+		return m, nil
+	case providerModeSelect:
+		if len(m.providers.names) == 0 {
+			return m, nil
+		}
+		selected := m.providers.names[m.providers.selectedProvider]
+		for name, p := range m.providers.data.Providers {
+			p.Active = name == selected
+			m.providers.data.Providers[name] = p
+		}
+		return m, m.saveProvidersCmd(fmt.Sprintf("Active provider set to %s.", selected))
+	case providerModeDelete:
+		if len(m.providers.names) == 0 {
+			return m, nil
+		}
+		selected := m.providers.names[m.providers.selectedProvider]
+		delete(m.providers.data.Providers, selected)
+		return m, m.saveProvidersCmd(fmt.Sprintf("Provider %s deleted.", selected))
+	case providerModeEditPick:
+		if len(m.providers.names) == 0 {
+			return m, nil
+		}
+		m.providers.currentProviderRef = m.providers.names[m.providers.selectedProvider]
+		m.providers.mode = providerModeEditField
+		m.providers.selectedField = 0
+		return m, nil
+	case providerModeEditField:
+		return m.startEditFieldInput()
+	}
+	return m, nil
+}
+
+func (m Model) startEditFieldInput() (tea.Model, tea.Cmd) {
+	p := m.providers.data.Providers[m.providers.currentProviderRef]
+	m.providers.mode = providerModeEditInput
+	m.providers.input.Focus()
+	switch m.providers.selectedField {
+	case provider.FieldName:
+		m.providers.inputPrompt = "Edit name"
+		m.providers.inputField = provider.FieldName
+		m.providers.input.SetValue(p.Name)
+	case provider.FieldBaseURL:
+		m.providers.inputPrompt = "Edit base URL"
+		m.providers.inputField = provider.FieldBaseURL
+		m.providers.input.SetValue(p.BaseURL)
+	case provider.FieldModel:
+		m.providers.inputPrompt = "Edit model"
+		m.providers.inputField = provider.FieldModel
+		m.providers.input.SetValue(p.Model)
+	case provider.FieldAPIKey:
+		m.providers.inputPrompt = "Edit API key"
+		m.providers.inputField = provider.FieldAPIKey
+		m.providers.input.SetValue(p.APIKey)
+	case provider.FieldContextSize:
+		m.providers.inputPrompt = "Edit context size"
+		m.providers.inputField = provider.FieldContextSize
+		m.providers.input.SetValue(fmt.Sprintf("%d", p.ContextSize))
+	}
+	return m, nil
+}
+
+func (m Model) submitProviderInput() (tea.Model, tea.Cmd) {
+	value := strings.TrimSpace(m.providers.input.Value())
+	switch m.providers.inputField {
+	case provider.FieldName:
+		if value == "" {
+			return m, nil
+		}
+		if m.providers.mode == providerModeEditInput {
+			p := m.providers.data.Providers[m.providers.currentProviderRef]
+			delete(m.providers.data.Providers, m.providers.currentProviderRef)
+			p.Name = value
+			m.providers.data.Providers[value] = p
+			m.providers.currentProviderRef = value
+			return m, m.saveProvidersCmd("Provider name updated.")
+		}
+		m.providers.form.Name = value
+		m.providers.inputField = provider.FieldBaseURL
+		m.providers.inputPrompt = "Enter base URL"
+		m.providers.input.SetValue("")
+		return m, nil
+	case provider.FieldBaseURL:
+		if value == "" {
+			return m, nil
+		}
+		if m.providers.mode == providerModeEditInput {
+			p := m.providers.data.Providers[m.providers.currentProviderRef]
+			p.BaseURL = config.NormalizeBaseURL(value)
+			m.providers.data.Providers[m.providers.currentProviderRef] = p
+			return m, m.saveProvidersCmd("Provider base URL updated.")
+		}
+		m.providers.form.BaseURL = config.NormalizeBaseURL(value)
+		m.providers.inputField = provider.FieldModel
+		m.providers.inputPrompt = "Enter model"
+		m.providers.input.SetValue("")
+		return m, nil
+	case provider.FieldModel:
+		if value == "" {
+			return m, nil
+		}
+		if m.providers.mode == providerModeEditInput {
+			p := m.providers.data.Providers[m.providers.currentProviderRef]
+			p.Model = value
+			m.providers.data.Providers[m.providers.currentProviderRef] = p
+			return m, m.saveProvidersCmd("Provider model updated.")
+		}
+		m.providers.form.Model = value
+		m.providers.inputField = provider.FieldAPIKey
+		m.providers.inputPrompt = "Enter API key"
+		m.providers.input.SetValue("")
+		return m, nil
+	case provider.FieldAPIKey:
+		if value == "" {
+			return m, nil
+		}
+		if m.providers.mode == providerModeEditInput {
+			p := m.providers.data.Providers[m.providers.currentProviderRef]
+			p.APIKey = value
+			m.providers.data.Providers[m.providers.currentProviderRef] = p
+			return m, m.saveProvidersCmd("Provider API key updated.")
+		}
+		m.providers.form.APIKey = value
+		m.providers.inputField = provider.FieldContextSize
+		m.providers.inputPrompt = "Enter context size"
+		m.providers.input.SetValue("")
+		return m, nil
+	case provider.FieldContextSize:
+		size, err := parseContextSize(value)
+		if err != nil || size <= 0 {
+			return m, nil
+		}
+		if m.providers.mode == providerModeEditInput {
+			p := m.providers.data.Providers[m.providers.currentProviderRef]
+			p.ContextSize = size
+			m.providers.data.Providers[m.providers.currentProviderRef] = p
+			return m, m.saveProvidersCmd("Provider context size updated.")
+		}
+		m.providers.form.ContextSize = value
+		for name, p := range m.providers.data.Providers {
+			p.Active = false
+			m.providers.data.Providers[name] = p
+		}
+		m.providers.data.Providers[m.providers.form.Name] = config.Provider{
+			Name:        m.providers.form.Name,
+			BaseURL:     m.providers.form.BaseURL,
+			Model:       m.providers.form.Model,
+			APIKey:      m.providers.form.APIKey,
+			ContextSize: size,
+			Active:      true,
+		}
+		return m, m.saveProvidersCmd(fmt.Sprintf("Provider %s created and activated.", m.providers.form.Name))
+	}
+	return m, nil
+}
+
+func (m Model) saveProvidersCmd(success string) tea.Cmd {
+	return func() tea.Msg {
+		if err := config.SaveProviders(m.providers.data); err != nil {
+			return providerSavedMsg{saved: false, message: err.Error()}
+		}
+		return providerSavedMsg{saved: true, message: success}
+	}
+}
+
+
+ui/model/scroll.go
+package model
+
+import (
+	"math"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"nanocode/internal/mathutil"
+	"nanocode/ui/theme"
+)
+
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	if !m.hasScrollableContent() {
+		m.layout.scrollbarDragging = false
+		return m, cmd
+	}
+	switch msg.Action {
+	case tea.MouseActionPress:
+		if msg.Button == tea.MouseButtonLeft && m.isOnScrollbar(msg.X, msg.Y) {
+			m.layout.scrollbarDragging = true
+			m.scrollToMouseY(msg.Y)
+			return m, cmd
+		}
+	case tea.MouseActionMotion:
+		if m.layout.scrollbarDragging {
+			m.scrollToMouseY(msg.Y)
+			return m, cmd
+		}
+	case tea.MouseActionRelease:
+		m.layout.scrollbarDragging = false
+	}
+	return m, cmd
+}
+
+func (m Model) hasScrollableContent() bool {
+	return m.viewport.TotalLineCount() > m.viewport.Height
+}
+
+const scrollbarRightOffset = 1
+
+func (m Model) isOnScrollbar(x, y int) bool {
+	if !m.hasScrollableContent() {
+		return false
+	}
+	if y < m.layout.viewportTop || y >= m.layout.viewportTop+m.viewport.Height {
+		return false
+	}
+	return x >= m.scrollbarColumn()
+}
+
+func (m *Model) scrollToMouseY(y int) {
+	if !m.hasScrollableContent() || m.viewport.Height <= 1 {
+		return
+	}
+	trackY := mathutil.Clamp(y-m.layout.viewportTop, 0, m.viewport.Height-1)
+	maxOffset := mathutil.Max(0, m.viewport.TotalLineCount()-m.viewport.Height)
+	target := int(math.Round(float64(trackY) / float64(m.viewport.Height-1) * float64(maxOffset)))
+	m.viewport.SetYOffset(target)
+}
+
+func (m Model) viewportWithScrollbar() string {
+	content := m.viewport.View()
+	if !m.hasScrollableContent() {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	if len(lines) < m.viewport.Height {
+		padding := make([]string, m.viewport.Height-len(lines))
+		lines = append(lines, padding...)
+	}
+
+	thumbSize := mathutil.Max(1, (m.viewport.Height*m.viewport.Height)/mathutil.Max(1, m.viewport.TotalLineCount()))
+	maxThumbTop := mathutil.Max(0, m.viewport.Height-thumbSize)
+	maxOffset := mathutil.Max(1, m.viewport.TotalLineCount()-m.viewport.Height)
+	thumbTop := int(math.Round(float64(m.viewport.YOffset) / float64(maxOffset) * float64(maxThumbTop)))
+
+	trackStyle := lipgloss.NewStyle().Foreground(theme.MutedText)
+	thumbStyle := lipgloss.NewStyle().Foreground(theme.PrimaryAccent)
+	rendered := make([]string, 0, len(lines))
+	for i, line := range lines {
+		bar := trackStyle.Render("│")
+		if i >= thumbTop && i < thumbTop+thumbSize {
+			bar = thumbStyle.Render("█")
+		}
+		rendered = append(rendered, line+bar)
+	}
+	return strings.Join(rendered, "\n")
+}
+
+func (m Model) scrollbarColumn() int {
+	return m.layout.width - scrollbarRightOffset
+}
+
+
+ui/model/settings.go
+package model
+
+import (
+	tea "github.com/charmbracelet/bubbletea"
+	"nanocode/internal/mathutil"
+	"nanocode/ui/config"
+)
+
+const settingsRowCount = 2
+
+func (m Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.settings.open = false
+		m.resizeViewport()
+		return m, nil
+	case "up":
+		m.settings.selectedRow = mathutil.Clamp(m.settings.selectedRow-1, 0, settingsRowCount-1)
+		return m, nil
+	case "down":
+		m.settings.selectedRow = mathutil.Clamp(m.settings.selectedRow+1, 0, settingsRowCount-1)
+		return m, nil
+	case "left":
+		m.shiftCurrentSetting(-1)
+		return m, nil
+	case "right":
+		m.shiftCurrentSetting(1)
+		return m, nil
+	case "enter":
+		m.settings.open = false
+		m.resizeViewport()
+		m.refreshViewport(false)
+		return m, func() tea.Msg {
+			if err := config.SaveSettings(m.settings.values); err != nil {
+				return spinnerChangedMsg{saved: false}
+			}
+			return spinnerChangedMsg{saved: true}
+		}
+	}
+	return m, nil
+}
+
+func (m *Model) shiftCurrentSetting(delta int) {
+	switch m.settings.selectedRow {
+	case 0:
+		styles := []string{config.SpinnerHexagons, config.SpinnerCircles}
+		idx := spinnerIndexFor(m.settings.values.SpinnerStyle)
+		idx = mathutil.Clamp(idx+delta, 0, len(styles)-1)
+		m.settings.values.SpinnerStyle = styles[idx]
+	case 1:
+		idx := timeoutIndexFor(m.settings.values.APITimeoutSeconds)
+		idx = mathutil.Clamp(idx+delta, 0, len(config.TimeoutOptions)-1)
+		m.settings.values.APITimeoutSeconds = config.TimeoutOptions[idx]
+	}
+}
+
+func spinnerIndexFor(style string) int {
+	if style == config.SpinnerCircles {
+		return 1
+	}
+	return 0
+}
+
+func timeoutIndexFor(seconds int) int {
+	for i, option := range config.TimeoutOptions {
+		if option == seconds {
+			return i
+		}
+	}
+	for i, option := range config.TimeoutOptions {
+		if option == config.DefaultTimeoutSeconds {
+			return i
+		}
+	}
+	return 0
+}
+
+
+ui/model/state.go
+package model
+
+import (
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	"nanocode/ui/components/nobby"
+)
+
+type Model struct {
+	cwd       string
+	input     textinput.Model
+	viewport  viewport.Model
+	nobbyPose nobby.Pose
+	nobbyStep int
+
+	layout    LayoutState
+	chat      ChatState
+	commands  CommandState
+	settings  SettingsState
+	providers ProviderState
+	stream    StreamState
+}
+
+
+ui/model/utils.go
+package model
+
+import (
+	"strings"
+	"unicode/utf8"
+
+	"nanocode/ui/types"
+)
+
+func estimateTokens(text string) int {
+	runes := utf8.RuneCountInString(text)
+	if runes <= 0 {
+		return 0
+	}
+	estimated := runes / 4
+	if estimated < 1 {
+		return 1
+	}
+	return estimated
+}
+
+func estimatePromptTokens(history []types.Message) int {
+	total := estimateTokens(strings.Join(buildSystemPrompts(), "\n"))
+	for _, msg := range history {
+		total += estimateTokens(msg.Text)
+	}
+	return total
+}
+
+
+ui/model/format.go
+package model
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+func formatCompact(value int) string {
+	if value < 1000 {
+		return fmt.Sprintf("%d", value)
+	}
+	return fmt.Sprintf("%.1fk", float64(value)/1000.0)
+}
+
+// formatDuration formats milliseconds into human-readable duration
+// Matches Claude Code format: Xm Ys for minutes, Xs for seconds
+func formatDuration(ms int) string {
+	if ms < 60000 {
+		seconds := ms / 1000
+		if seconds == 0 {
+			return "0s"
+		}
+		return fmt.Sprintf("%ds", seconds)
+	}
+
+	minutes := ms / 60000
+	seconds := (ms % 60000) / 1000
+
+	if seconds == 0 {
+		return fmt.Sprintf("%dm", minutes)
+	}
+	return fmt.Sprintf("%dm %ds", minutes, seconds)
+}
+
+func parseContextSize(raw string) (int, error) {
+	value := strings.TrimSpace(raw)
+	return strconv.Atoi(value)
+}
+
+
+ui/model/view.go
+package model
+
+import (
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"nanocode/internal/mathutil"
+	"nanocode/ui/components/header"
+	"nanocode/ui/components/messages"
+	"nanocode/ui/components/nobby"
+	"nanocode/ui/components/prompt"
+	"nanocode/ui/components/providers"
+	"nanocode/ui/components/settings"
+	"nanocode/ui/components/spinner"
+	"nanocode/ui/components/suggestions"
+	"nanocode/ui/theme"
+)
+
+func (m *Model) refreshViewport(forceBottom bool) {
+	if m.layout.width == 0 {
+		return
+	}
+	spinnerLine := m.agentStatusLine()
+	wasBottom := m.viewport.AtBottom()
+	content := messages.View(m.chat.messages, m.viewport.Width, spinnerLine, "", m.chat.streamingText)
+	m.viewport.SetContent(content)
+	targetHeight := mathutil.Min(mathutil.Max(1, m.viewport.TotalLineCount()), m.layout.viewportMaxHeight)
+	if targetHeight < 1 {
+		targetHeight = 1
+	}
+	m.viewport.Height = targetHeight
+	m.viewport.SetYOffset(m.viewport.YOffset)
+	if forceBottom || wasBottom {
+		m.viewport.GotoBottom()
+	}
+}
+
+func (m Model) View() string {
+	if m.layout.width == 0 || m.layout.height == 0 {
+		return "Loading..."
+	}
+
+	nobbyView := nobby.Render(m.nobbyPose, m.nobbyStep)
+	headerView := header.View(m.cwd, nobbyView, m.activeProviderName(), m.activeModelName())
+	inputView := prompt.InputBar(m.input.View(), m.layout.width)
+	parts := []string{headerView, "", m.viewportWithScrollbar(), inputView}
+
+	if len(m.commands.suggestions) > 0 {
+		parts = append(parts, suggestions.CommandList(m.layout.width, m.commands.suggestions, m.commands.selected))
+	}
+	if m.settings.open {
+		parts = append(parts, settings.Panel(
+			m.layout.width,
+			m.settings.selectedRow,
+			m.settings.values.SpinnerStyle,
+			m.settings.values.APITimeoutSeconds,
+		))
+	}
+	if m.providers.open {
+		title, desc, options, selected, inputView := m.providerPanelViewData()
+		parts = append(parts, providers.Panel(m.layout.width, title, desc, options, selected, inputView))
+	}
+
+	parts = append(parts, prompt.Footer(m.layout.width, m.usageLine(), m.confirmationHint()))
+	root := lipgloss.NewStyle().Background(theme.AppBackground).Foreground(theme.PrimaryText)
+	return root.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
+}
+
+func nobbyTickCmd(pose nobby.Pose, step int) tea.Cmd {
+	return tea.Tick(nobby.DurationFor(pose, step), func(t time.Time) tea.Msg {
+		return nobbyTickMsg(t)
+	})
+}
+
+func spinnerTickCmd(style string) tea.Cmd {
+	return tea.Tick(spinner.Interval(style), func(t time.Time) tea.Msg {
+		return spinnerTickMsg(t)
+	})
+}
+
+
+ui/model/layout.go
+package model
+
+import (
+	"nanocode/internal/mathutil"
+
+	"github.com/charmbracelet/lipgloss"
+	"nanocode/ui/components/header"
+	"nanocode/ui/components/nobby"
+	"nanocode/ui/components/prompt"
+	"nanocode/ui/components/providers"
+	"nanocode/ui/components/settings"
+	"nanocode/ui/components/suggestions"
+)
+
+func (m *Model) resizeViewport() {
+	if m.layout.width == 0 || m.layout.height == 0 {
+		return
+	}
+	headerHeight := lipgloss.Height(header.View(m.cwd, nobby.Render(m.nobbyPose, m.nobbyStep), m.activeProviderName(), m.activeModelName()))
+	inputHeight := lipgloss.Height(prompt.InputBar(m.input.View(), m.layout.width))
+	footerHeight := lipgloss.Height(prompt.Footer(m.layout.width, m.usageLine(), m.confirmationHint()))
+	reserved := headerHeight + inputHeight + footerHeight + 3
+	if len(m.commands.suggestions) > 0 {
+		reserved += lipgloss.Height(suggestions.CommandList(m.layout.width, m.commands.suggestions, m.commands.selected))
+	}
+	if m.settings.open {
+		reserved += lipgloss.Height(settings.Panel(
+			m.layout.width,
+			m.settings.selectedRow,
+			m.settings.values.SpinnerStyle,
+			m.settings.values.APITimeoutSeconds,
+		))
+	}
+	if m.providers.open {
+		title, desc, options, selected, inputView := m.providerPanelViewData()
+		reserved += lipgloss.Height(providers.Panel(m.layout.width, title, desc, options, selected, inputView))
+	}
+	vHeight := m.layout.height - reserved
+	if vHeight < 6 {
+		vHeight = 6
+	}
+	m.layout.viewportTop = headerHeight + 1
+	m.layout.viewportMaxHeight = vHeight
+	m.viewport.Width = mathutil.Max(10, m.layout.width-1)
+	m.viewport.Height = vHeight
+}
+
+
+ui/model/input_handler.go
+package model
+
+import (
+	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"nanocode/ui/components/nobby"
+	"nanocode/ui/components/spinner"
+	"nanocode/ui/config"
+	"nanocode/ui/model/agent"
+	"nanocode/ui/types"
+)
+
+func (m Model) executeInput() (tea.Model, tea.Cmd) {
+	text := strings.TrimSpace(m.input.Value())
+	if text == "" {
+		return m, nil
+	}
+	if text == "/settings" {
+		m.settings.open = true
+		m.settings.selectedRow = 0
+		m.input.SetValue("")
+		m.clearCommandSuggestions()
+		m.resizeViewport()
+		return m, nil
+	}
+	if text == "/provider" {
+		m.openProviderPanel()
+		m.input.SetValue("")
+		m.clearCommandSuggestions()
+		m.resizeViewport()
+		return m, nil
+	}
+
+	active, ok := config.ActiveProvider(m.providers.data)
+	if !ok {
+		m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: "No active provider. Run /provider and create one first."})
+		m.input.SetValue("")
+		m.clearCommandSuggestions()
+		m.refreshViewport(true)
+		return m, nil
+	}
+
+	m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleUser, Text: text, Timestamp: time.Now()})
+	m.input.SetValue("")
+	m.clearCommandSuggestions()
+	m.chat.thinking = true
+	m.chat.spinnerStep = 0
+	m.chat.spinnerVerb = spinner.RandomVerb()
+	m.chat.streamingText = ""
+	m.chat.streamingThought = ""
+	m.chat.cycleStartedAt = time.Now()
+	m.chat.estimatedTokensStream = 0
+	m.chat.estimatedReasoningTokens = 0
+	m.chat.showInferring = true
+	m.chat.lastWorkedForSec = 0
+	m.chat.interrupted = false
+	m.clearPendingConfirmation()
+	m.chat.abortChan = make(chan struct{})
+	promptTokens := estimatePromptTokens(m.chat.messages)
+	if promptTokens < m.chat.contextTokenFloor {
+		promptTokens = m.chat.contextTokenFloor
+	}
+	if promptTokens > m.chat.contextTokenFloor {
+		m.chat.contextTokenFloor = promptTokens
+	}
+	m.chat.usage = agent.UsageState{
+		PromptTokens: promptTokens,
+		TotalTokens:  promptTokens,
+	}
+	m.setNobbyPose(nobby.PoseReading)
+	m.resizeViewport()
+	m.refreshViewport(true)
+	return m, tea.Batch(
+		spinnerTickCmd(m.settings.values.SpinnerStyle),
+		startAgentStreamCmd(active, m.chat.messages, m.chat.toolHistory, m.settings.values, m.chat.abortChan),
+	)
+}
+
+func (m *Model) setNobbyPose(pose nobby.Pose) {
+	if m.nobbyPose == pose {
+		return
+	}
+	m.nobbyPose = pose
+	m.nobbyStep = 0
+}
+
+
+ui/model/types.go
+package model
+
+import (
+	"time"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	"nanocode/ui/config"
+	"nanocode/ui/model/agent"
+	"nanocode/ui/model/provider"
+	"nanocode/ui/types"
+)
+
+type providerMode string
+
+const (
+	providerModeMenu       providerMode = "menu"
+	providerModeCreate     providerMode = "create"
+	providerModeSelect     providerMode = "select"
+	providerModeEditPick   providerMode = "edit_pick"
+	providerModeEditField  providerMode = "edit_field"
+	providerModeEditInput  providerMode = "edit_input"
+	providerModeDelete     providerMode = "delete"
+	providerModeInputValue providerMode = "input_value"
+)
+
+type spinnerTickMsg time.Time
+type spinnerChangedMsg struct{ saved bool }
+type providerSavedMsg struct {
+	saved   bool
+	message string
+}
+type nobbyTickMsg time.Time
+
+type streamStartedMsg struct{ ch <-chan agent.StreamEvent }
+type streamEventMsg struct {
+	event agent.StreamEvent
+	done  bool
+}
+
+type command struct {
+	Name string
+}
+
+var availableCommands = []command{{Name: "/settings"}, {Name: "/provider"}}
+
+type LayoutState struct {
+	width             int
+	height            int
+	viewportMaxHeight int
+	viewportTop       int
+	scrollbarDragging bool
+}
+
+type ChatState struct {
+	messages                 []types.Message
+	toolHistory              []agent.APIMessage
+	thinking                 bool
+	spinnerVerb              string
+	spinnerStep              int
+	streamingText            string
+	streamingThought         string
+	usage                    agent.UsageState
+	cycleStartedAt           time.Time
+	estimatedTokensStream    int
+	estimatedReasoningTokens int
+	contextTokenFloor        int
+	showInferring            bool
+	lastWorkedForSec         int
+	interrupted              bool
+	// Double-press exit/interrupt confirmation state
+	confirmPressTime time.Time
+	confirmPending   bool
+	confirmKey       string
+	abortChan        chan struct{}
+}
+
+type CommandState struct {
+	suggestions []string
+	selected    int
+}
+
+type SettingsState struct {
+	open        bool
+	selectedRow int
+	values      config.Settings
+}
+
+type ProviderState struct {
+	open               bool
+	mode               providerMode
+	menuIndex          int
+	selectedProvider   int
+	selectedField      provider.Field
+	input              textinput.Model
+	data               config.ProvidersFile
+	names              []string
+	form               provider.Form
+	inputPrompt        string
+	inputField         provider.Field
+	currentProviderRef string
+}
+
+type StreamState struct {
+	ch <-chan agent.StreamEvent
+}
+
+
+ui/model/update.go
+package model
+
+import (
+	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"nanocode/internal/mathutil"
+	"nanocode/ui/components/nobby"
+	"nanocode/ui/types"
+)
+
+const confirmWindow = 800 * time.Millisecond
+
+func (m *Model) isPendingConfirmationFor(key string) bool {
+	if !m.chat.confirmPending || m.chat.confirmKey != key {
+		return false
+	}
+	return time.Since(m.chat.confirmPressTime) <= confirmWindow
+}
+
+func (m *Model) setPendingConfirmation(key string) {
+	m.chat.confirmPending = true
+	m.chat.confirmKey = key
+	m.chat.confirmPressTime = time.Now()
+}
+
+func (m *Model) clearPendingConfirmation() {
+	m.chat.confirmPending = false
+	m.chat.confirmKey = ""
+	m.chat.confirmPressTime = time.Time{}
+}
+
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.layout.width = msg.Width
+		m.layout.height = msg.Height
+		m.input.Width = mathutil.Max(10, msg.Width-6)
+		m.providers.input.Width = mathutil.Max(30, msg.Width/2)
+		m.resizeViewport()
+		m.refreshViewport(false)
+		return m, nil
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+	case nobbyTickMsg:
+		m.nobbyStep++
+		return m, nobbyTickCmd(m.nobbyPose, m.nobbyStep)
+	case spinnerChangedMsg:
+		if msg.saved {
+			m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: "Settings saved: spinner style updated."})
+			m.refreshViewport(true)
+		}
+		return m, nil
+	case providerSavedMsg:
+		if msg.saved {
+			m.providers.open = false
+			m.providers.mode = providerModeMenu
+			m.providers.input.Blur()
+			m.reloadProviderNames()
+			m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: msg.message, Timestamp: time.Now()})
+			m.refreshViewport(true)
+		}
+		return m, nil
+	case streamStartedMsg:
+		m.stream.ch = msg.ch
+		m.setNobbyPose(nobby.PoseReading)
+		return m, pollStreamCmd(m.stream.ch)
+	case streamEventMsg:
+		if msg.done {
+			m.setNobbyPose(nobby.PoseIdle)
+			m.chat.thinking = false
+			m.chat.spinnerVerb = ""
+			m.chat.spinnerStep = 0
+			m.chat.showInferring = false
+			if !m.chat.cycleStartedAt.IsZero() {
+				m.chat.lastWorkedForSec = int(time.Since(m.chat.cycleStartedAt).Seconds())
+			}
+			if strings.TrimSpace(m.chat.streamingText) != "" {
+				m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: m.chat.streamingText, Timestamp: time.Now()})
+			}
+			m.chat.streamingText = ""
+			m.chat.streamingThought = ""
+			m.refreshViewport(true)
+			return m, nil
+		}
+		if msg.event.ErrorText != "" {
+			m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: "Error: " + msg.event.ErrorText, Timestamp: time.Now()})
+			m.setNobbyPose(nobby.PoseAPIError)
+			m.chat.thinking = false
+			m.chat.showInferring = false
+			m.chat.streamingText = ""
+			m.chat.streamingThought = ""
+			m.refreshViewport(true)
+			return m, nil
+		}
+		if msg.event.ReconnectNote != "" {
+			m.setNobbyPose(nobby.PoseAPIErrorReconnect)
+			m.chat.messages = append(m.chat.messages, types.Message{
+				Role:      types.RoleAssistant,
+				Text:      msg.event.ReconnectNote,
+				Timestamp: time.Now(),
+			})
+			m.refreshViewport(true)
+			return m, pollStreamCmd(m.stream.ch)
+		}
+		if msg.event.ReasoningDelta != "" {
+			m.setNobbyPose(nobby.PoseThinking)
+			m.chat.streamingThought += msg.event.ReasoningDelta
+			m.chat.estimatedTokensStream++
+			m.chat.estimatedReasoningTokens++
+		}
+		if msg.event.ContentDelta != "" {
+			m.setNobbyPose(nobby.PoseWriting)
+			m.chat.showInferring = false
+			m.chat.streamingText += msg.event.ContentDelta
+			m.chat.estimatedTokensStream++
+		}
+		if msg.event.RefusalDelta != "" {
+			m.chat.estimatedTokensStream++
+		}
+		if msg.event.ToolDelta != "" {
+			m.setNobbyPose(nobby.PoseToolCalling)
+			m.chat.estimatedTokensStream++
+		}
+		if msg.event.ToolName != "" {
+			m.setNobbyPose(nobby.PoseToolCalling)
+		}
+		if msg.event.FinalHistory != nil {
+			m.chat.toolHistory = msg.event.FinalHistory
+		}
+		liveEstimatedTotal := m.chat.usage.PromptTokens + m.chat.estimatedTokensStream
+		if liveEstimatedTotal > m.chat.contextTokenFloor {
+			m.chat.contextTokenFloor = liveEstimatedTotal
+		}
+		if msg.event.Usage != nil {
+			m.chat.usage = *msg.event.Usage
+			if m.chat.usage.TotalTokens > m.chat.contextTokenFloor {
+				m.chat.contextTokenFloor = m.chat.usage.TotalTokens
+			}
+		}
+		m.refreshViewport(true)
+		return m, pollStreamCmd(m.stream.ch)
+	case tea.KeyMsg:
+		if m.settings.open {
+			return m.handleSettingsKeys(msg)
+		}
+		if m.providers.open {
+			return m.handleProviderKeys(msg)
+		}
+		if nextModel, cmd, handled := m.handleKeyMsg(msg); handled {
+			return nextModel, cmd
+		}
+	case spinnerTickMsg:
+		if !m.chat.thinking || !m.chat.showInferring {
+			return m, nil
+		}
+		m.chat.spinnerStep++
+		m.refreshViewport(true)
+		return m, spinnerTickCmd(m.settings.values.SpinnerStyle)
+	}
+
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	m.updateCommandSuggestions()
+	m.resizeViewport()
+	m.refreshViewport(false)
+	return m, cmd
+}
+
+func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	if len(m.commands.suggestions) > 0 {
+		switch msg.String() {
+		case "up":
+			m.commands.selected = mathutil.Clamp(m.commands.selected-1, 0, len(m.commands.suggestions)-1)
+			return m, nil, true
+		case "down":
+			m.commands.selected = mathutil.Clamp(m.commands.selected+1, 0, len(m.commands.suggestions)-1)
+			return m, nil, true
+		case "tab":
+			m.input.SetValue(m.commands.suggestions[m.commands.selected] + " ")
+			m.clearCommandSuggestions()
+			m.resizeViewport()
+			return m, nil, true
+		}
+	}
+
+	switch msg.String() {
+	case "ctrl+c":
+		// Double-press Ctrl+C to quit.
+		if m.isPendingConfirmationFor("ctrl+c") {
+			m.clearPendingConfirmation()
+			return m, tea.Quit, true
+		}
+		m.setPendingConfirmation("ctrl+c")
+		return m, nil, true
+	case "esc":
+		// During thinking mode, ESC interrupts the stream with confirmation.
+		if m.chat.thinking {
+			if m.isPendingConfirmationFor("esc") {
+				m.chat.interrupted = true
+				m.chat.thinking = false
+				m.chat.showInferring = false
+				close(m.chat.abortChan)
+				m.chat.abortChan = nil
+				m.setNobbyPose(nobby.PoseIdle)
+				if !m.chat.cycleStartedAt.IsZero() {
+					m.chat.lastWorkedForSec = int(time.Since(m.chat.cycleStartedAt).Seconds())
+				}
+				m.clearPendingConfirmation()
+				m.refreshViewport(true)
+				return m, nil, true
+			}
+			m.setPendingConfirmation("esc")
+			return m, nil, true
+		}
+		// Outside generation ESC should do nothing (reserved for canceling generation only).
+		if m.chat.confirmKey == "esc" {
+			m.clearPendingConfirmation()
+		}
+		return m, nil, true
+	case "pgup":
+		m.viewport.HalfViewUp()
+		return m, nil, true
+	case "pgdown":
+		m.viewport.HalfViewDown()
+		return m, nil, true
+	case "up":
+		if len(m.commands.suggestions) == 0 {
+			m.viewport.LineUp(1)
+			return m, nil, true
+		}
+	case "down":
+		if len(m.commands.suggestions) == 0 {
+			m.viewport.LineDown(1)
+			return m, nil, true
+		}
+	case "enter":
+		if m.chat.thinking {
+			return m, nil, true
+		}
+		if len(m.commands.suggestions) > 0 {
+			m.input.SetValue(m.commands.suggestions[m.commands.selected])
+			m.clearCommandSuggestions()
+		}
+		nextModel, cmd := m.executeInput()
+		return nextModel, cmd, true
+	}
+	return m, nil, false
+}
+
+
+ui/model/view_helpers.go
+package model
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/charmbracelet/lipgloss"
+	"nanocode/ui/components/providers"
+	"nanocode/ui/components/spinner"
+	"nanocode/ui/config"
+)
+
+var providerMenuOptions = []string{
+	"Create provider",
+	"Set active provider",
+	"Edit provider",
+	"Delete provider",
+}
+
+var providerEditFieldLabels = []string{
+	"Name",
+	"Base URL",
+	"Model",
+	"API Key",
+	"Context Size",
+}
+
+func (m Model) activeProviderName() string {
+	p, ok := config.ActiveProvider(m.providers.data)
+	if !ok {
+		return "No Provider"
+	}
+	return p.Name
+}
+
+func (m Model) activeModelName() string {
+	p, ok := config.ActiveProvider(m.providers.data)
+	if !ok {
+		return "No Model"
+	}
+	return p.Model
+}
+
+func (m Model) usageLine() string {
+	active, ok := config.ActiveProvider(m.providers.data)
+	if !ok || active.ContextSize <= 0 {
+		return ""
+	}
+
+	exactTotal := m.chat.usage.TotalTokens
+	estimatedTotal := m.chat.usage.PromptTokens + m.chat.estimatedTokensStream
+	displayTotal := 0
+	isEstimated := false
+
+	// Во время генерации всегда показываем "живой" счетчик:
+	// берем максимум между серверным total и локальной оценкой по дельтам.
+	if m.chat.thinking {
+		displayTotal = exactTotal
+		if estimatedTotal > displayTotal {
+			displayTotal = estimatedTotal
+		}
+		isEstimated = true
+	} else if exactTotal > 0 {
+		// После генерации — показываем точные данные от API, если они есть.
+		displayTotal = exactTotal
+	} else {
+		// До получения usage показываем оценку.
+		displayTotal = estimatedTotal
+		isEstimated = true
+	}
+
+	// Никогда не показываем уменьшение счетчика между ходами диалога.
+	if displayTotal < m.chat.contextTokenFloor {
+		displayTotal = m.chat.contextTokenFloor
+		isEstimated = true
+	}
+
+	if displayTotal == 0 {
+		return fmt.Sprintf("0 / %s (0.00%% ctx)", formatCompact(active.ContextSize))
+	}
+
+	prefix := ""
+	if isEstimated {
+		prefix = "~"
+	}
+	percent := (float64(displayTotal) / float64(active.ContextSize)) * 100
+	return fmt.Sprintf("%s%s / %s (%.2f%% ctx)",
+		prefix,
+		formatCompact(displayTotal),
+		formatCompact(active.ContextSize),
+		percent)
+}
+
+func (m Model) agentStatusLine() string {
+	if m.chat.interrupted {
+		return fmt.Sprintf(
+			"%s Interrupted",
+			spinner.StaticIndicator(m.settings.values.SpinnerStyle),
+		)
+	}
+	if m.chat.showInferring && !m.chat.cycleStartedAt.IsZero() {
+		elapsed := int(time.Since(m.chat.cycleStartedAt).Seconds())
+		if elapsed < 0 {
+			elapsed = 0
+		}
+
+		// Показываем reasoning токены если доступны
+		thinkingTokens := m.chat.usage.ReasoningTokens
+		thinkingLabel := ""
+
+		if thinkingTokens > 0 {
+			// Есть точные reasoning токены от API
+			thinkingLabel = fmt.Sprintf(" · ↓ %d tokens · thinking", thinkingTokens)
+		} else if m.chat.estimatedReasoningTokens > 0 {
+			// Пока нет точных данных - показываем оценку
+			thinkingLabel = fmt.Sprintf(" · ↓ %d tokens · thinking", m.chat.estimatedReasoningTokens)
+		}
+
+		durationStr := formatDuration(int(time.Since(m.chat.cycleStartedAt).Milliseconds()))
+
+		// Формат как в оригинальном Claude Code: (esc to interrupt · time · tokens · thinking)
+		interruptText := lipgloss.NewStyle().Bold(true).Render("esc to interrupt")
+
+		return fmt.Sprintf(
+			"%s %s... (%s · %s%s)",
+			spinner.Indicator(m.settings.values.SpinnerStyle, m.chat.spinnerStep),
+			m.chat.spinnerVerb,
+			interruptText,
+			durationStr,
+			thinkingLabel,
+		)
+	}
+	if m.chat.lastWorkedForSec > 0 {
+		return fmt.Sprintf(
+			"%s Worked for %ds",
+			spinner.StaticIndicator(m.settings.values.SpinnerStyle),
+			m.chat.lastWorkedForSec,
+		)
+	}
+	return ""
+}
+
+func (m Model) confirmationHint() string {
+	if !m.chat.confirmPending {
+		return ""
+	}
+	if time.Since(m.chat.confirmPressTime) > confirmWindow {
+		return ""
+	}
+
+	switch m.chat.confirmKey {
+	case "ctrl+c":
+		return "Press Ctrl+C again to exit"
+	case "esc":
+		if !m.chat.thinking {
+			return ""
+		}
+		return "Press Esc again to interrupt"
+	default:
+		return ""
+	}
+}
+
+func (m Model) providerPanelViewData() (string, string, []string, int, string) {
+	switch m.providers.mode {
+	case providerModeCreate, providerModeInputValue:
+		return "Provider Setup", m.providers.inputPrompt, nil, 0, m.providers.input.View()
+	case providerModeSelect:
+		options := m.providerOptions(true)
+		return "Set Active Provider", "Choose active provider", options, m.providers.selectedProvider, ""
+	case providerModeDelete:
+		options := m.providerOptions(false)
+		return "Delete Provider", "Choose provider to delete", options, m.providers.selectedProvider, ""
+	case providerModeEditPick:
+		options := m.providerOptions(false)
+		return "Edit Provider", "Choose provider to edit", options, m.providers.selectedProvider, ""
+	case providerModeEditField:
+		return "Edit Field", "Choose field to change", providerEditFieldLabels, int(m.providers.selectedField), ""
+	case providerModeEditInput:
+		return "Edit Value", m.providers.inputPrompt, nil, 0, m.providers.input.View()
+	default:
+		return "Providers", "OpenAI-compatible providers", providerMenuOptions, m.providers.menuIndex, ""
+	}
+}
+
+func (m Model) providerOptions(withActive bool) []string {
+	out := make([]string, 0, len(m.providers.names))
+	for _, name := range m.providers.names {
+		p := m.providers.data.Providers[name]
+		if withActive {
+			out = append(out, providers.ProviderSummary(name, p.Model, p.ContextSize, p.Active))
+		} else {
+			out = append(out, providers.ProviderSummary(name, p.Model, p.ContextSize, false))
+		}
+	}
+	if len(out) == 0 {
+		out = []string{"No providers configured"}
+	}
+	return out
+}
+
+
+ui/model/agent.go
+package model
+
+import (
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"nanocode/ui/config"
+	"nanocode/ui/model/agent"
+	"nanocode/ui/types"
+)
+
+func startAgentStreamCmd(provider config.Provider, history []types.Message, toolHistory []agent.APIMessage, settings config.Settings, abortChan <-chan struct{}) tea.Cmd {
+	return func() tea.Msg {
+		ch := make(chan agent.StreamEvent, 64)
+		go agent.RunLoop(convertProvider(provider), convertMessages(history, toolHistory), settings.APITimeoutSeconds, ch, abortChan)
+		return streamStartedMsg{ch: ch}
+	}
+}
+
+func convertProvider(provider config.Provider) agent.ProviderConfig {
+	return agent.ProviderConfig{
+		BaseURL: config.NormalizeBaseURL(provider.BaseURL),
+		Model:   provider.Model,
+		APIKey:  provider.APIKey,
+	}
+}
+
+func convertMessages(history []types.Message, toolHistory []agent.APIMessage) []agent.APIMessage {
+	systemPrompts := buildSystemPrompts()
+	result := make([]agent.APIMessage, 0, len(history)+len(systemPrompts)+len(toolHistory))
+	for _, prompt := range systemPrompts {
+		if strings.TrimSpace(prompt) == "" {
+			continue
+		}
+		result = append(result, agent.APIMessage{
+			Role:    "system",
+			Content: prompt,
+		})
+	}
+	for _, msg := range history {
+		if msg.Role == types.RoleTool {
+			continue
+		}
+		result = append(result, agent.APIMessage{
+			Role:    string(msg.Role),
+			Content: msg.Text,
+		})
+	}
+	result = append(result, toolHistory...)
+	return result
+}
+
+func pollStreamCmd(ch <-chan agent.StreamEvent) tea.Cmd {
+	return func() tea.Msg {
+		next, ok := <-ch
+		if !ok {
+			return streamEventMsg{done: true}
+		}
+		return streamEventMsg{event: next}
+	}
+}
+
+
+ui/model/system_prompt.go
+package model
+
+import (
+	"fmt"
+	"os"
+	"runtime"
+	"strings"
+	"sync"
+)
+
+var (
+	staticSystemPromptOnce sync.Once
+	staticSystemPromptText string
+)
+
+func buildSystemPrompts() []string {
+	return []string{
+		buildStaticSystemPrompt(),
+		buildDynamicSystemPrompt(),
+	}
+}
+
+func buildStaticSystemPrompt() string {
+	staticSystemPromptOnce.Do(func() {
+		sections := []string{
+			"# Identity",
+			"You are **nanocode - autonomous coding agent**.",
+			"",
+			"# Tool Protocol",
+			"- Solve tasks through available tool calls, not by guessing outcomes in plain text.",
+			"- Treat tool output as the single source of truth for the next step.",
+			"- Any read, write, search, or execution action must happen via tools.",
+			"",
+			"# Agentic Loop",
+			"- Continue until the user request is fully resolved or a real blocker is hit.",
+			"- After each tool result: evaluate, choose the best next tool, execute.",
+			"- Keep CLI text concise: brief progress + next action.",
+			"- Finish by returning a short completion report with outcome and key artifacts.",
+		}
+		staticSystemPromptText = strings.Join(sections, "\n")
+	})
+	return staticSystemPromptText
+}
+
+func buildDynamicSystemPrompt() string {
+	cwd := currentWorkingDirectory()
+	shell := shellName()
+	osName := runtime.GOOS
+
+	sections := []string{
+		"# Environment",
+		"Current runtime context:",
+		fmt.Sprintf("- CWD: `%s`", cwd),
+		fmt.Sprintf("- OS: `%s`", osName),
+		fmt.Sprintf("- Shell: `%s`", shell),
+	}
+	return strings.Join(sections, "\n")
+}
+
+func currentWorkingDirectory() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "unknown"
+	}
+	return cwd
+}
+
+func shellName() string {
+	shell := strings.TrimSpace(os.Getenv("SHELL"))
+	if shell == "" {
+		if runtime.GOOS == "windows" {
+			shell = strings.TrimSpace(os.Getenv("COMSPEC"))
+		}
+	}
+	if shell == "" {
+		return "unknown"
+	}
+	return shell
+}
+
+
+ui/model/agent/retry.go
+package agent
+
+import (
+	"errors"
+	"net"
+	"strings"
+	"time"
+)
+
+// IsRetryableError determines if an error is retryable.
+func IsRetryableError(err error) bool {
+	var netErr net.Error
+	if errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
+		return true
+	}
+
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "502") ||
+		strings.Contains(msg, "503") ||
+		strings.Contains(msg, "504")
+}
+
+// RetryBackoff returns the backoff duration for a given retry attempt.
+func RetryBackoff(attempt int) time.Duration {
+	steps := []time.Duration{
+		1 * time.Second,
+		2 * time.Second,
+		4 * time.Second,
+		8 * time.Second,
+	}
+	if attempt < 0 {
+		return steps[0]
+	}
+	if attempt >= len(steps) {
+		return steps[len(steps)-1]
+	}
+	return steps[attempt]
+}
+
+
+ui/model/agent/types.go
+package agent
+
+import "strings"
+
+// StreamEvent represents an event from the streaming API.
+type StreamEvent struct {
+	ContentDelta   string
+	ReasoningDelta string
+	RefusalDelta   string
+	Usage          *UsageState
+	FinishReason   string
+	ErrorText      string
+	ReconnectNote  string
+	ToolDelta      string
+	ToolName       string
+	ToolResult     string
+	FinalHistory   []APIMessage
+}
+
+// UsageState holds token usage information.
+type UsageState struct {
+	PromptTokens     int
+	CompletionTokens int
+	ReasoningTokens  int
+	TotalTokens      int
+}
+
+// ProviderConfig is a transport-level provider configuration for the agent.
+type ProviderConfig struct {
+	BaseURL string
+	Model   string
+	APIKey  string
+}
+
+// APIMessage represents a message in the API format.
+type APIMessage struct {
+	Role       string        `json:"role"`
+	Content    string        `json:"content,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"`
+	ToolCalls  []APIToolCall `json:"tool_calls,omitempty"`
+}
+
+// APIToolCall represents a tool call in the API format.
+type APIToolCall struct {
+	ID       string          `json:"id"`
+	Type     string          `json:"type"`
+	Function APIToolFunction `json:"function"`
+}
+
+// APIToolFunction represents a tool function in the API format.
+type APIToolFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+// ChatCompletionChunk represents a chunk from the streaming API.
+type ChatCompletionChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			Refusal          string `json:"refusal"`
+			FunctionCall     struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			} `json:"function_call"`
+			ToolCalls []struct {
+				Index    int    `json:"index"`
+				ID       string `json:"id"`
+				Type     string `json:"type"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+		} `json:"delta"`
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+	Usage struct {
+		PromptTokens           int `json:"prompt_tokens"`
+		CompletionTokens       int `json:"completion_tokens"`
+		TotalTokens            int `json:"total_tokens"`
+		CompletionTokenDetails struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
+	} `json:"usage"`
+}
+
+// ToolBuffer accumulates tool call data during streaming.
+type ToolBuffer struct {
+	ID        string
+	Name      string
+	Arguments strings.Builder
+}
+
+
+ui/model/agent/loop.go
+package agent
+
+import (
+	"fmt"
+	"time"
+)
+
+const (
+	MaxTurns   = 8
+	MaxRetries = 4
+)
+
+// RunLoop executes the agent loop, streaming events to the output channel.
+func RunLoop(provider ProviderConfig, messages []APIMessage, timeoutSeconds int, out chan<- StreamEvent, abortChan <-chan struct{}) {
+	defer close(out)
+
+	client := NewClient(timeoutSeconds)
+
+	apiHistory := make([]APIMessage, 0, len(messages))
+	apiHistory = append(apiHistory, messages...)
+
+	for turns := 0; turns < MaxTurns; turns++ {
+		calls, usage, finishReason, err := streamOneTurnWithRetry(client, provider, apiHistory, out, abortChan)
+		if err != nil {
+			out <- StreamEvent{ErrorText: err.Error()}
+			return
+		}
+		if usage != nil {
+			out <- StreamEvent{Usage: usage}
+		}
+		if finishReason != "tool_calls" {
+			out <- StreamEvent{FinishReason: finishReason, FinalHistory: apiHistory}
+			return
+		}
+
+		assistantMsg := APIMessage{Role: "assistant", ToolCalls: calls}
+		apiHistory = append(apiHistory, assistantMsg)
+		for _, call := range calls {
+			toolContent := fmt.Sprintf(`{"error":"tool %q not implemented yet","arguments":%q}`, call.Function.Name, call.Function.Arguments)
+			out <- StreamEvent{ToolName: call.Function.Name, ToolResult: toolContent}
+			apiHistory = append(apiHistory, APIMessage{
+				Role:       "tool",
+				ToolCallID: call.ID,
+				Content:    toolContent,
+			})
+		}
+	}
+	out <- StreamEvent{ErrorText: "agent loop stopped: maximum turns reached"}
+}
+
+func streamOneTurnWithRetry(client *Client, provider ProviderConfig, messages []APIMessage, out chan<- StreamEvent, abortChan <-chan struct{}) ([]APIToolCall, *UsageState, string, error) {
+	var (
+		calls        []APIToolCall
+		usage        *UsageState
+		finishReason string
+		err          error
+	)
+
+	for attempt := 0; attempt <= MaxRetries; attempt++ {
+		calls, usage, finishReason, err = client.Stream(StreamConfig{
+			Provider:  provider,
+			Messages:  messages,
+			AbortChan: abortChan,
+		}, out)
+		if err == nil {
+			return calls, usage, finishReason, nil
+		}
+		if !IsRetryableError(err) || attempt == MaxRetries {
+			return nil, usage, finishReason, err
+		}
+
+		backoff := RetryBackoff(attempt)
+		out <- StreamEvent{
+			ReconnectNote: fmt.Sprintf(
+				"API error/timeout. Reconnect %d/%d in %.1fs…",
+				attempt+1,
+				MaxRetries,
+				backoff.Seconds(),
+			),
+		}
+		time.Sleep(backoff)
+	}
+	return nil, usage, finishReason, err
+}
+
+
+ui/model/agent/client.go
+package agent
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+)
+
+// Client handles HTTP communication with the API.
+type Client struct {
+	httpClient *http.Client
+}
+
+// NewClient creates a new API client with the given timeout.
+func NewClient(timeoutSeconds int) *Client {
+	return &Client{
+		httpClient: &http.Client{Timeout: time.Duration(timeoutSeconds) * time.Second},
+	}
+}
+
+// StreamConfig holds configuration for a streaming request.
+type StreamConfig struct {
+	Provider  ProviderConfig
+	Messages  []APIMessage
+	AbortChan <-chan struct{}
+}
+
+// Stream performs a single streaming request and returns tool calls, usage, and finish reason.
+func (c *Client) Stream(cfg StreamConfig, out chan<- StreamEvent) ([]APIToolCall, *UsageState, string, error) {
+	requestBody := map[string]any{
+		"model":    cfg.Provider.Model,
+		"messages": cfg.Messages,
+		"stream":   true,
+		"stream_options": map[string]any{
+			"include_usage": true,
+		},
+	}
+	raw, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	endpoint := cfg.Provider.BaseURL + "/chat/completions"
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(raw))
+	if err != nil {
+		return nil, nil, "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.Provider.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
+		return nil, nil, "", fmt.Errorf("provider error: %s - %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	toolCalls := map[int]*ToolBuffer{}
+	var usage *UsageState
+	finishReason := ""
+	for scanner.Scan() {
+		// Check for abort signal
+		select {
+		case <-cfg.AbortChan:
+			return nil, usage, "interrupted", fmt.Errorf("request interrupted by user")
+		default:
+		}
+
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data: "))
+		if payload == "" {
+			continue
+		}
+		if payload == "[DONE]" {
+			break
+		}
+		var chunk ChatCompletionChunk
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			continue
+		}
+		if chunk.Usage.TotalTokens > 0 {
+			usage = &UsageState{
+				PromptTokens:     chunk.Usage.PromptTokens,
+				CompletionTokens: chunk.Usage.CompletionTokens,
+				ReasoningTokens:  chunk.Usage.CompletionTokenDetails.ReasoningTokens,
+				TotalTokens:      chunk.Usage.TotalTokens,
+			}
+			out <- StreamEvent{Usage: usage}
+		}
+		if len(chunk.Choices) == 0 {
+			continue
+		}
+		delta := chunk.Choices[0].Delta
+		if delta.ReasoningContent != "" {
+			out <- StreamEvent{ReasoningDelta: delta.ReasoningContent}
+		}
+		if delta.Refusal != "" {
+			out <- StreamEvent{RefusalDelta: delta.Refusal}
+		}
+		if delta.Content != "" {
+			out <- StreamEvent{ContentDelta: delta.Content}
+		}
+		if delta.FunctionCall.Name != "" {
+			out <- StreamEvent{ToolDelta: delta.FunctionCall.Name}
+		}
+		if delta.FunctionCall.Arguments != "" {
+			out <- StreamEvent{ToolDelta: delta.FunctionCall.Arguments}
+		}
+		for _, callDelta := range delta.ToolCalls {
+			if callDelta.Function.Name != "" {
+				out <- StreamEvent{ToolDelta: callDelta.Function.Name}
+			}
+			if callDelta.Function.Arguments != "" {
+				out <- StreamEvent{ToolDelta: callDelta.Function.Arguments}
+			}
+			buf, ok := toolCalls[callDelta.Index]
+			if !ok {
+				buf = &ToolBuffer{}
+				toolCalls[callDelta.Index] = buf
+			}
+			if callDelta.ID != "" {
+				buf.ID = callDelta.ID
+			}
+			if callDelta.Function.Name != "" {
+				buf.Name = callDelta.Function.Name
+			}
+			if callDelta.Function.Arguments != "" {
+				buf.Arguments.WriteString(callDelta.Function.Arguments)
+			}
+		}
+		if chunk.Choices[0].FinishReason != "" {
+			finishReason = chunk.Choices[0].FinishReason
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, usage, finishReason, err
+	}
+
+	resultCalls := make([]APIToolCall, 0, len(toolCalls))
+	for i := 0; i < len(toolCalls); i++ {
+		if tool, ok := toolCalls[i]; ok {
+			resultCalls = append(resultCalls, APIToolCall{
+				ID:   tool.ID,
+				Type: "function",
+				Function: APIToolFunction{
+					Name:      tool.Name,
+					Arguments: tool.Arguments.String(),
+				},
+			})
+		}
+	}
+	return resultCalls, usage, finishReason, nil
+}
+
+
+ui/model/provider/form.go
+package provider
+
+// Field represents a provider configuration field.
+type Field int
+
+const (
+	FieldName Field = iota
+	FieldBaseURL
+	FieldModel
+	FieldAPIKey
+	FieldContextSize
+)
+
+// String returns the string representation of a field.
+func (f Field) String() string {
+	switch f {
+	case FieldName:
+		return "name"
+	case FieldBaseURL:
+		return "base_url"
+	case FieldModel:
+		return "model"
+	case FieldAPIKey:
+		return "api_key"
+	case FieldContextSize:
+		return "context_size"
+	default:
+		return ""
+	}
+}
+
+// Form holds the provider form data during creation/editing.
+type Form struct {
+	Name        string
+	BaseURL     string
+	Model       string
+	APIKey      string
+	ContextSize string
+}
+
+// Reset clears all form fields.
+func (f *Form) Reset() {
+	f.Name = ""
+	f.BaseURL = ""
+	f.Model = ""
+	f.APIKey = ""
+	f.ContextSize = ""
+}
+
+
+ui/theme/theme.go
+package theme
+
+import "github.com/charmbracelet/lipgloss"
+
+const (
+	PrimaryAccentHex   = "#FBFA56"
+	SecondaryAccentHex = "#EBDC2F"
+	AccentContrastHex  = "#181818"
+
+	AppBackgroundHex     = "#181818"
+	SurfaceBackgroundHex = "#333333"
+
+	PrimaryTextHex = "#D4D4D4"
+	MutedTextHex   = "#808080"
+)
+
+var (
+	PrimaryAccent     = lipgloss.Color(PrimaryAccentHex)
+	SecondaryAccent   = lipgloss.Color(SecondaryAccentHex)
+	AccentContrast    = lipgloss.Color(AccentContrastHex)
+	AppBackground     = lipgloss.Color(AppBackgroundHex)
+	SurfaceBackground = lipgloss.Color(SurfaceBackgroundHex)
+	PrimaryText       = lipgloss.Color(PrimaryTextHex)
+	MutedText         = lipgloss.Color(MutedTextHex)
+)
+
+
+ui/types/message.go
+package types
+
+import "time"
+
+type Role string
+
+const (
+	RoleUser      Role = "user"
+	RoleAssistant Role = "assistant"
+	RoleTool      Role = "tool"
+)
+
+type Message struct {
+	Role      Role
+	Text      string
+	Timestamp time.Time
+}
+
+
+version/version.go
+package version
+
+const (
+	Name    = "nanocode"
+	Current = "0.0.2"
+)
+
+func Display() string {
+	return Name + " v" + Current
+}
+
+

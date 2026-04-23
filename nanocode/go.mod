@@ -46,3 +46,5 @@ require (
 	golang.org/x/term v0.31.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
 )
+
+replace charm.land/glamour/v2 => /home/admiin/projects/pi-mono/glamour
