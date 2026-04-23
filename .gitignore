@@ -1,34 +1,45 @@
-```
-# Compiled and build artifacts
-*.o
-*.obj
-*.out
-
-# Dependencies
-vendor/
-
-# Logs and temp files
-*.log
-*.tmp
-*.swp
-
-# Environment
+node_modules
+.DS_Store
+dist
+coverage
 .env
-.env.local
-*.env.*
+*.log
+.idea
+.vscode
+*.suo
+*.lock
+src/utils/vendor/
 
-# Editors
-.vscode/
-.idea/
+# AI tool runtime directories
+.agents/
+.claude/
+.omx/
+.docs/task/
+# Binary / screenshot files (root only)
+/*.png
+*.bmp
 
-# Coverage
-coverage/
-htmlcov/
-.coverage
+# Internal system prompt documents
+Claude-Opus-*.txt
+Claude-Sonnet-*.txt
+Claude-Haiku-*.txt
 
-# Go-specific
-*.exe
-*.dll
-*.so
-*.a
-```
+# Agent / tool state dirs
+.swarm/
+.agents/__pycache__/
+
+# Python bytecode
+__pycache__/
+*.pyc
+logs
+
+data
+.omc
+.codex/*
+!.codex/agents/
+!.codex/agents/**
+!.codex/skills/
+!.codex/skills/**
+.codex/skills/.system/**
+!.codex/prompts/
+!.codex/prompts/**

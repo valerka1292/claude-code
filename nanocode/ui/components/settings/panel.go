@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"nanocode/internal/mathutil"
+	"github.com/charmbracelet/lipgloss"
 	"nanocode/ui/config"
 	"nanocode/ui/theme"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 var (
@@ -46,9 +44,16 @@ func Panel(width int, selectedRow int, spinnerStyle string, timeoutSeconds int) 
 		rows = append(rows, line)
 	}
 
-	return boxStyle.Width(mathutil.Max(56, width*2/3)).Render(strings.Join(rows, "\n"))
+	return boxStyle.Width(max(56, width*2/3)).Render(strings.Join(rows, "\n"))
 }
 
 func formatTimeout(seconds int) string {
 	return fmt.Sprintf("%ds", seconds)
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
