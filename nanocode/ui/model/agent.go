@@ -7,10 +7,10 @@ import (
 	"nanocode/ui/types"
 )
 
-func startAgentStreamCmd(provider config.Provider, history []types.Message, settings config.Settings) tea.Cmd {
+func startAgentStreamCmd(provider config.Provider, history []types.Message, settings config.Settings, abortChan <-chan struct{}) tea.Cmd {
 	return func() tea.Msg {
 		ch := make(chan agent.StreamEvent, 64)
-		go agent.RunLoop(convertProvider(provider), convertMessages(history), settings.APITimeoutSeconds, ch)
+		go agent.RunLoop(convertProvider(provider), convertMessages(history), settings.APITimeoutSeconds, ch, abortChan)
 		return streamStartedMsg{ch: ch}
 	}
 }

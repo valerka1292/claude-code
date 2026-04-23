@@ -25,8 +25,9 @@ func NewClient(timeoutSeconds int) *Client {
 
 // StreamConfig holds configuration for a streaming request.
 type StreamConfig struct {
-	Provider ProviderConfig
-	Messages []APIMessage
+	Provider  ProviderConfig
+	Messages  []APIMessage
+	AbortChan <-chan struct{}
 }
 
 // Stream performs a single streaming request and returns tool calls, usage, and finish reason.
@@ -66,6 +67,13 @@ func (c *Client) Stream(cfg StreamConfig, out chan<- StreamEvent) ([]APIToolCall
 	var usage *UsageState
 	finishReason := ""
 	for scanner.Scan() {
+		// Check for abort signal
+		select {
+		case <-cfg.AbortChan:
+			return nil, usage, "interrupted", fmt.Errorf("request interrupted by user")
+		default:
+		}
+
 		line := strings.TrimSpace(scanner.Text())
 		if !strings.HasPrefix(line, "data: ") {
 			continue
