@@ -9,6 +9,8 @@ require (
 	github.com/charmbracelet/glamour v0.6.0
 )
 
+replace charm.land/glamour/v2 => /home/admiin/projects/pi-mono/glamour
+
 require (
 	github.com/alecthomas/chroma/v2 v2.2.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
