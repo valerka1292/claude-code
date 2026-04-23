@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -21,6 +23,7 @@ type streamEvent struct {
 	Usage          *UsageState
 	FinishReason   string
 	ErrorText      string
+	ReconnectNote  string
 }
 
 type apiMessage struct {
@@ -74,15 +77,15 @@ type toolBuffer struct {
 	Arguments strings.Builder
 }
 
-func startAgentStreamCmd(provider config.Provider, history []types.Message) tea.Cmd {
+func startAgentStreamCmd(provider config.Provider, history []types.Message, settings config.Settings) tea.Cmd {
 	return func() tea.Msg {
 		ch := make(chan streamEvent, 64)
-		go runAgentLoop(provider, history, ch)
+		go runAgentLoop(provider, history, settings, ch)
 		return streamStartedMsg{ch: ch}
 	}
 }
 
-func runAgentLoop(provider config.Provider, history []types.Message, out chan<- streamEvent) {
+func runAgentLoop(provider config.Provider, history []types.Message, settings config.Settings, out chan<- streamEvent) {
 	defer close(out)
 	apiHistory := make([]apiMessage, 0, len(history)+1)
 	apiHistory = append(apiHistory, apiMessage{
@@ -93,9 +96,10 @@ func runAgentLoop(provider config.Provider, history []types.Message, out chan<- 
 		apiHistory = append(apiHistory, apiMessage{Role: string(msg.Role), Content: msg.Text})
 	}
 
-	client := &http.Client{Timeout: 180 * time.Second}
+	client := &http.Client{Timeout: time.Duration(settings.APITimeoutSeconds) * time.Second}
+	const maxRetries = 4
 	for turns := 0; turns < 8; turns++ {
-		calls, usage, finishReason, err := streamOneTurn(client, provider, apiHistory, out)
+		calls, usage, finishReason, err := streamOneTurnWithRetry(client, provider, apiHistory, out, maxRetries)
 		if err != nil {
 			out <- streamEvent{ErrorText: err.Error()}
 			return
@@ -120,6 +124,68 @@ func runAgentLoop(provider config.Provider, history []types.Message, out chan<- 
 		}
 	}
 	out <- streamEvent{ErrorText: "agent loop stopped: maximum turns reached"}
+}
+
+func streamOneTurnWithRetry(client *http.Client, provider config.Provider, messages []apiMessage, out chan<- streamEvent, maxRetries int) ([]apiToolCall, *UsageState, string, error) {
+	var (
+		calls        []apiToolCall
+		usage        *UsageState
+		finishReason string
+		err          error
+	)
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		calls, usage, finishReason, err = streamOneTurn(client, provider, messages, out)
+		if err == nil {
+			return calls, usage, finishReason, nil
+		}
+		if !isRetryableStreamError(err) || attempt == maxRetries {
+			return nil, usage, finishReason, err
+		}
+
+		backoff := retryBackoff(attempt)
+		out <- streamEvent{
+			ReconnectNote: fmt.Sprintf(
+				"API error/timeout. Reconnect %d/%d in %.1fs…",
+				attempt+1,
+				maxRetries,
+				backoff.Seconds(),
+			),
+		}
+		time.Sleep(backoff)
+	}
+	return nil, usage, finishReason, err
+}
+
+func isRetryableStreamError(err error) bool {
+	var netErr net.Error
+	if errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
+		return true
+	}
+
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "502") ||
+		strings.Contains(msg, "503") ||
+		strings.Contains(msg, "504")
+}
+
+func retryBackoff(attempt int) time.Duration {
+	steps := []time.Duration{
+		1 * time.Second,
+		2 * time.Second,
+		4 * time.Second,
+		8 * time.Second,
+	}
+	if attempt < 0 {
+		return steps[0]
+	}
+	if attempt >= len(steps) {
+		return steps[len(steps)-1]
+	}
+	return steps[attempt]
 }
 
 func streamOneTurn(client *http.Client, provider config.Provider, messages []apiMessage, out chan<- streamEvent) ([]apiToolCall, *UsageState, string, error) {

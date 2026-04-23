@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"nanocode/ui/components/nobby"
 	"nanocode/ui/components/spinner"
 	"nanocode/ui/config"
 	"nanocode/ui/types"
@@ -44,9 +45,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case streamStartedMsg:
 		m.stream.ch = msg.ch
+		m.setNobbyPose(nobby.PoseReading)
 		return m, pollStreamCmd(m.stream.ch)
 	case streamEventMsg:
 		if msg.done {
+			m.setNobbyPose(nobby.PoseIdle)
 			m.chat.thinking = false
 			m.chat.spinnerVerb = ""
 			m.chat.spinnerStep = 0
@@ -64,6 +67,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.event.ErrorText != "" {
 			m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: "Error: " + msg.event.ErrorText, Timestamp: time.Now()})
+			m.setNobbyPose(nobby.PoseAPIError)
 			m.chat.thinking = false
 			m.chat.showInferring = false
 			m.chat.streamingText = ""
@@ -71,11 +75,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshViewport(true)
 			return m, nil
 		}
+		if msg.event.ReconnectNote != "" {
+			m.setNobbyPose(nobby.PoseAPIErrorReconnect)
+			m.chat.messages = append(m.chat.messages, types.Message{
+				Role:      types.RoleAssistant,
+				Text:      msg.event.ReconnectNote,
+				Timestamp: time.Now(),
+			})
+			m.refreshViewport(true)
+			return m, pollStreamCmd(m.stream.ch)
+		}
 		if msg.event.ReasoningDelta != "" {
+			m.setNobbyPose(nobby.PoseThinking)
 			m.chat.streamingThought += msg.event.ReasoningDelta
 			m.chat.liveDownTokens += estimateTokens(msg.event.ReasoningDelta)
 		}
 		if msg.event.ContentDelta != "" {
+			m.setNobbyPose(nobby.PoseWriting)
 			m.chat.showInferring = false
 			m.chat.streamingText += msg.event.ContentDelta
 			m.chat.liveDownTokens += estimateTokens(msg.event.ContentDelta)
@@ -172,7 +188,7 @@ func (m Model) executeInput() (tea.Model, tea.Cmd) {
 	}
 	if text == "/settings" {
 		m.settings.open = true
-		m.settings.selectedStyle = spinnerIndexFor(m.settings.values.SpinnerStyle)
+		m.settings.selectedRow = 0
 		m.input.SetValue("")
 		m.clearCommandSuggestions()
 		m.resizeViewport()
@@ -207,9 +223,21 @@ func (m Model) executeInput() (tea.Model, tea.Cmd) {
 	m.chat.liveDownTokens = 0
 	m.chat.showInferring = true
 	m.chat.lastWorkedForSec = 0
+	m.setNobbyPose(nobby.PoseReading)
 	m.resizeViewport()
 	m.refreshViewport(true)
-	return m, tea.Batch(spinnerTickCmd(m.settings.values.SpinnerStyle), startAgentStreamCmd(active, m.chat.messages))
+	return m, tea.Batch(
+		spinnerTickCmd(m.settings.values.SpinnerStyle),
+		startAgentStreamCmd(active, m.chat.messages, m.settings.values),
+	)
+}
+
+func (m *Model) setNobbyPose(pose nobby.Pose) {
+	if m.nobbyPose == pose {
+		return
+	}
+	m.nobbyPose = pose
+	m.nobbyStep = 0
 }
 
 func (m Model) handleProviderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

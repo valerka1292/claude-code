@@ -68,9 +68,9 @@ type CommandState struct {
 }
 
 type SettingsState struct {
-	open          bool
-	selectedStyle int
-	values        config.Settings
+	open        bool
+	selectedRow int
+	values      config.Settings
 }
 
 type providerMode string
@@ -165,8 +165,8 @@ func New() Model {
 		chat:      ChatState{},
 		commands:  CommandState{},
 		settings: SettingsState{
-			values:        cfg,
-			selectedStyle: spinnerIndexFor(cfg.SpinnerStyle),
+			values:      cfg,
+			selectedRow: 0,
 		},
 		providers: ProviderState{
 			mode:  providerModeMenu,
