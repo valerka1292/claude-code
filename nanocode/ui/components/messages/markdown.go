@@ -13,6 +13,52 @@ const minMarkdownWidth = 20
 
 var rendererCache sync.Map
 
+func stripANSI(str string) string {
+	var out strings.Builder
+	inEscape := false
+	for _, r := range str {
+		if inEscape {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+		if r == '\x1b' {
+			inEscape = true
+			continue
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
+}
+
+func removeVisibleIndent(line string, count int) string {
+	removed := 0
+	var out strings.Builder
+	inEscape := false
+
+	for _, r := range line {
+		if inEscape {
+			out.WriteRune(r)
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+		if r == '\x1b' {
+			inEscape = true
+			out.WriteRune(r)
+			continue
+		}
+		if removed < count && r == ' ' {
+			removed++
+			continue
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
+}
+
 func renderMarkdown(text string, width int, streaming bool) string {
 	normalized := strings.ReplaceAll(text, "\r\n", "\n")
 	normalized = strings.ReplaceAll(normalized, "\r", "\n")
@@ -48,11 +94,12 @@ func dedentRendered(text string) string {
 	lines := strings.Split(text, "\n")
 	minIndent := -1
 	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
+		plainLine := stripANSI(line)
+		if strings.TrimSpace(plainLine) == "" {
 			continue
 		}
 		indent := 0
-		for _, r := range line {
+		for _, r := range plainLine {
 			if r != ' ' {
 				break
 			}
@@ -66,9 +113,7 @@ func dedentRendered(text string) string {
 		return text
 	}
 	for i, line := range lines {
-		if len(line) >= minIndent {
-			lines[i] = line[minIndent:]
-		}
+		lines[i] = removeVisibleIndent(line, minIndent)
 	}
 	return strings.Join(lines, "\n")
 }

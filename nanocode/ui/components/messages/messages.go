@@ -3,9 +3,10 @@ package messages
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"nanocode/ui/theme"
 	"nanocode/ui/types"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 var (
@@ -47,12 +48,14 @@ func View(list []types.Message, width int, spinnerLine string, thinking string, 
 
 func renderAssistantBlock(text string, width int, streaming bool) string {
 	rendered := renderMarkdown(text, max(width-4, minMarkdownWidth), streaming)
+	rendered = strings.Trim(rendered, "\n\r")
+
 	if rendered == "" {
-		return dotStyle.Render("•")
+		return dotStyle.Render("●")
 	}
 
 	rows := strings.Split(rendered, "\n")
-	rows[0] = dotStyle.Render("•") + " " + rows[0]
+	rows[0] = dotStyle.Render("●") + " " + rows[0]
 	for i := 1; i < len(rows); i++ {
 		rows[i] = "  " + rows[i]
 	}
