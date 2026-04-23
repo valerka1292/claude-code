@@ -1,6 +1,8 @@
 package model
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"nanocode/ui/config"
 	"nanocode/ui/model/agent"
@@ -24,12 +26,21 @@ func convertProvider(provider config.Provider) agent.ProviderConfig {
 }
 
 func convertMessages(history []types.Message) []agent.APIMessage {
-	result := make([]agent.APIMessage, 0, len(history)+1)
-	result = append(result, agent.APIMessage{
-		Role:    "system",
-		Content: buildSystemPrompt(),
-	})
+	systemPrompts := buildSystemPrompts()
+	result := make([]agent.APIMessage, 0, len(history)+len(systemPrompts))
+	for _, prompt := range systemPrompts {
+		if strings.TrimSpace(prompt) == "" {
+			continue
+		}
+		result = append(result, agent.APIMessage{
+			Role:    "system",
+			Content: prompt,
+		})
+	}
 	for _, msg := range history {
+		if msg.Role == types.RoleTool {
+			continue
+		}
 		result = append(result, agent.APIMessage{
 			Role:    string(msg.Role),
 			Content: msg.Text,
