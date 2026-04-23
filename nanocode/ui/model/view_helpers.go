@@ -68,6 +68,12 @@ func (m Model) usageLine() string {
 }
 
 func (m Model) agentStatusLine() string {
+	if m.chat.interrupted {
+		return fmt.Sprintf(
+			"%s Interrupted",
+			spinner.StaticIndicator(m.settings.values.SpinnerStyle),
+		)
+	}
 	if m.chat.showInferring && !m.chat.cycleStartedAt.IsZero() {
 		elapsed := int(time.Since(m.chat.cycleStartedAt).Seconds())
 		if elapsed < 0 {
@@ -80,16 +86,19 @@ func (m Model) agentStatusLine() string {
 
 		if thinkingTokens > 0 {
 			// Есть точные reasoning токены от API
-			thinkingLabel = fmt.Sprintf(" · thinking: %s", formatCompact(thinkingTokens))
+			thinkingLabel = fmt.Sprintf(" · ↓ %s tokens · thinking", formatCompact(thinkingTokens))
 		} else if m.chat.estimatedTokensStream > 0 {
 			// Пока нет точных данных - показываем оценку
-			thinkingLabel = fmt.Sprintf(" · ~%s tokens", formatCompact(m.chat.estimatedTokensStream))
+			thinkingLabel = fmt.Sprintf(" · ↓ %s tokens · thinking", formatCompact(m.chat.estimatedTokensStream))
 		}
 
+		durationStr := formatDuration(int(time.Since(m.chat.cycleStartedAt).Milliseconds()))
+
 		return fmt.Sprintf(
-			"%s Inferring… (%ds%s)",
+			"%s %s... (**esc to interrupt** · %s%s)",
 			spinner.Indicator(m.settings.values.SpinnerStyle, m.chat.spinnerStep),
-			elapsed,
+			m.chat.spinnerVerb,
+			durationStr,
 			thinkingLabel,
 		)
 	}

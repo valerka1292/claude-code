@@ -63,6 +63,7 @@ type ChatState struct {
 	estimatedTokensStream int
 	showInferring         bool
 	lastWorkedForSec      int
+	interrupted           bool
 }
 
 type CommandState struct {
