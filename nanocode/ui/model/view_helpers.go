@@ -94,10 +94,17 @@ func (m Model) agentStatusLine() string {
 
 		durationStr := formatDuration(int(time.Since(m.chat.cycleStartedAt).Milliseconds()))
 
+		// Жирный текст для esc to interrupt
+		interruptText := "esc to interrupt"
+		if m.chat.escapePending {
+			interruptText = "press esc again to cancel"
+		}
+
 		return fmt.Sprintf(
-			"%s %s... (**esc to interrupt** · %s%s)",
+			"%s %s... (%s · %s%s)",
 			spinner.Indicator(m.settings.values.SpinnerStyle, m.chat.spinnerStep),
 			m.chat.spinnerVerb,
+			interruptText,
 			durationStr,
 			thinkingLabel,
 		)
