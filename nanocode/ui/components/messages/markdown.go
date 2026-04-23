@@ -1,6 +1,7 @@
 package messages
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -17,7 +18,13 @@ import (
 
 const minMarkdownWidth = 20
 
-var rendererCache sync.Map
+type rendererCacheState struct {
+	mu       sync.Mutex
+	width    int
+	renderer *glamour.TermRenderer
+}
+
+var rendererCache rendererCacheState
 
 // Фикс для LLM, которые иногда забывают ставить пробел после решеток (например: ##Заголовок)
 var headingRegex = regexp.MustCompile(`(?m)^(#{1,6})([^#\s].*)$`)
@@ -31,33 +38,38 @@ type segment struct {
 // getCustomStyle создает премиальную тему рендера.
 // - Заголовки стали более контрастными.
 // - Инлайн-код теперь использует черный текст (AccentContrast) на акцентном желтом фоне.
-func getCustomStyle() string {
-	return `{
-		"document": { "margin": 0, "color": "` + theme.PrimaryTextHex + `" },
-		"block_quote": { "indent": 1, "indent_token": "┃ ", "color": "` + theme.MutedTextHex + `" },
-		"paragraph": {},
-		"list": { "level_indent": 2 },
-		"heading": { "block_suffix": "\n", "bold": true },
-		"h1": { "color": "` + theme.AccentContrastHex + `", "background_color": "` + theme.PrimaryAccentHex + `", "bold": true, "prefix": " " },
-		"h2": { "color": "` + theme.PrimaryAccentHex + `", "bold": true },
-		"h3": { "color": "` + theme.SecondaryAccentHex + `", "bold": true },
-		"h4": { "color": "` + theme.PrimaryTextHex + `", "bold": true, "italic": true },
-		"h5": { "color": "` + theme.MutedTextHex + `", "bold": true },
-		"h6": { "color": "` + theme.MutedTextHex + `", "bold": true },
-		"strikethrough": { "crossed_out": true },
-		"emph": { "italic": true, "color": "` + theme.PrimaryTextHex + `" },
-		"strong": { "bold": true, "color": "` + theme.PrimaryAccentHex + `" },
-		"hr": { "color": "` + theme.SurfaceBackgroundHex + `", "format": "\n────────────────────────────────────────────────────────────\n" },
-		"item": { "block_prefix": "• " },
-		"enumeration": { "block_prefix": ". " },
-		"task": { "ticked": "[✓] ", "unticked": "[ ] " },
-		"link": { "color": "` + theme.SecondaryAccentHex + `", "underline": true },
-		"link_text": { "color": "` + theme.PrimaryAccentHex + `", "bold": true },
-		"image": { "color": "` + theme.PrimaryAccentHex + `", "underline": true },
-		"image_text": { "format": "🖼️ {{.text}}" },
-		"code": { "color": "` + theme.AccentContrastHex + `", "background_color": "` + theme.PrimaryAccentHex + `" },
-		"table": { "center_separator": "┼", "column_separator": "│", "row_separator": "─" }
-	}`
+func getCustomStyle() (string, error) {
+	style := map[string]map[string]any{
+		"document":      {"margin": 0, "color": theme.PrimaryTextHex},
+		"block_quote":   {"indent": 1, "indent_token": "┃ ", "color": theme.MutedTextHex},
+		"paragraph":     {},
+		"list":          {"level_indent": 2},
+		"heading":       {"block_suffix": "\n", "bold": true},
+		"h1":            {"color": theme.AccentContrastHex, "background_color": theme.PrimaryAccentHex, "bold": true, "prefix": " "},
+		"h2":            {"color": theme.PrimaryAccentHex, "bold": true},
+		"h3":            {"color": theme.SecondaryAccentHex, "bold": true},
+		"h4":            {"color": theme.PrimaryTextHex, "bold": true, "italic": true},
+		"h5":            {"color": theme.MutedTextHex, "bold": true},
+		"h6":            {"color": theme.MutedTextHex, "bold": true},
+		"strikethrough": {"crossed_out": true},
+		"emph":          {"italic": true, "color": theme.PrimaryTextHex},
+		"strong":        {"bold": true, "color": theme.PrimaryAccentHex},
+		"hr":            {"color": theme.SurfaceBackgroundHex, "format": "\n────────────────────────────────────────────────────────────\n"},
+		"item":          {"block_prefix": "• "},
+		"enumeration":   {"block_prefix": ". "},
+		"task":          {"ticked": "[✓] ", "unticked": "[ ] "},
+		"link":          {"color": theme.SecondaryAccentHex, "underline": true},
+		"link_text":     {"color": theme.PrimaryAccentHex, "bold": true},
+		"image":         {"color": theme.PrimaryAccentHex, "underline": true},
+		"image_text":    {"format": "🖼️ {{.text}}"},
+		"code":          {"color": theme.AccentContrastHex, "background_color": theme.PrimaryAccentHex},
+		"table":         {"center_separator": "┼", "column_separator": "│", "row_separator": "─"},
+	}
+	raw, err := json.Marshal(style)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
 }
 
 func renderMarkdown(text string, width int, streaming bool) string {
@@ -65,7 +77,10 @@ func renderMarkdown(text string, width int, streaming bool) string {
 	segments := parseSegments(text)
 	var result strings.Builder
 
-	renderer, _ := getRenderer(width)
+	renderer, err := getRenderer(width)
+	if err != nil {
+		return strings.TrimSpace(text)
+	}
 
 	for i, seg := range segments {
 		if seg.isCode {
@@ -276,18 +291,27 @@ func getRenderer(width int) (*glamour.TermRenderer, error) {
 		wrap = minMarkdownWidth
 	}
 
-	if cached, ok := rendererCache.Load(wrap); ok {
-		return cached.(*glamour.TermRenderer), nil
+	rendererCache.mu.Lock()
+	defer rendererCache.mu.Unlock()
+
+	if rendererCache.renderer != nil && rendererCache.width == wrap {
+		return rendererCache.renderer, nil
+	}
+
+	styleJSON, err := getCustomStyle()
+	if err != nil {
+		return nil, err
 	}
 
 	renderer, err := glamour.NewTermRenderer(
 		glamour.WithWordWrap(wrap),
-		glamour.WithStylesFromJSONBytes([]byte(getCustomStyle())),
+		glamour.WithStylesFromJSONBytes([]byte(styleJSON)),
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	actual, _ := rendererCache.LoadOrStore(wrap, renderer)
-	return actual.(*glamour.TermRenderer), nil
+	rendererCache.width = wrap
+	rendererCache.renderer = renderer
+	return renderer, nil
 }

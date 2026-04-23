@@ -39,6 +39,8 @@ func (m Model) hasScrollableContent() bool {
 	return m.viewport.TotalLineCount() > m.viewport.Height
 }
 
+const scrollbarRightOffset = 1
+
 func (m Model) isOnScrollbar(x, y int) bool {
 	if !m.hasScrollableContent() {
 		return false
@@ -46,7 +48,7 @@ func (m Model) isOnScrollbar(x, y int) bool {
 	if y < m.layout.viewportTop || y >= m.layout.viewportTop+m.viewport.Height {
 		return false
 	}
-	return x >= m.layout.width-1
+	return x >= m.scrollbarColumn()
 }
 
 func (m *Model) scrollToMouseY(y int) {
@@ -86,4 +88,8 @@ func (m Model) viewportWithScrollbar() string {
 		rendered = append(rendered, line+bar)
 	}
 	return strings.Join(rendered, "\n")
+}
+
+func (m Model) scrollbarColumn() int {
+	return m.layout.width - scrollbarRightOffset
 }

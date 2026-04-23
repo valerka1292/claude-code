@@ -62,7 +62,7 @@ func (m Model) View() string {
 		parts = append(parts, providers.Panel(m.layout.width, title, desc, options, selected, inputView))
 	}
 
-	parts = append(parts, prompt.Footer(m.layout.width, m.footerStatusText()))
+	parts = append(parts, prompt.Footer(m.layout.width, m.usageLine()))
 	root := lipgloss.NewStyle().Background(theme.AppBackground).Foreground(theme.PrimaryText)
 	return root.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }

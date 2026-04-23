@@ -2,6 +2,8 @@ package model
 
 import (
 	"unicode/utf8"
+
+	"nanocode/ui/types"
 )
 
 func estimateTokens(text string) int {
@@ -14,4 +16,12 @@ func estimateTokens(text string) int {
 		return 1
 	}
 	return estimated
+}
+
+func estimatePromptTokens(history []types.Message) int {
+	total := estimateTokens(buildSystemPrompt())
+	for _, msg := range history {
+		total += estimateTokens(msg.Text)
+	}
+	return total
 }
