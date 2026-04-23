@@ -86,26 +86,17 @@ func (m Model) agentStatusLine() string {
 
 		if thinkingTokens > 0 {
 			// Есть точные reasoning токены от API
-			thinkingLabel = fmt.Sprintf(" · ↓ %s tokens · thinking", formatCompact(thinkingTokens))
+			thinkingLabel = fmt.Sprintf(" · ↓ %d tokens · thinking", thinkingTokens)
 		} else if m.chat.estimatedTokensStream > 0 {
 			// Пока нет точных данных - показываем оценку
-			thinkingLabel = fmt.Sprintf(" · ↓ %s tokens · thinking", formatCompact(m.chat.estimatedTokensStream))
+			thinkingLabel = fmt.Sprintf(" · ↓ %d tokens · thinking", m.chat.estimatedTokensStream)
 		}
 
 		durationStr := formatDuration(int(time.Since(m.chat.cycleStartedAt).Milliseconds()))
 
 		// Формат как в оригинальном Claude Code: (esc to interrupt · time · tokens · thinking)
-		// Проверка таймаута для сброса escapePending (800ms как в оригинале)
-		interruptText := "**esc to interrupt**"
-		if m.chat.escapePending && time.Since(m.chat.escapePressTime) <= 800*time.Millisecond {
-			interruptText = "**press esc again to cancel**"
-		} else if m.chat.escapePending {
-			// Таймаут истек - сбрасываем pending
-			m.chat.escapePending = false
-			m.chat.escapePressTime = time.Time{}
-			interruptText = "**esc to interrupt**"
-		}
-
+		interruptText := "esc to interrupt"
+		
 		return fmt.Sprintf(
 			"%s %s... (%s · %s%s)",
 			spinner.Indicator(m.settings.values.SpinnerStyle, m.chat.spinnerStep),
