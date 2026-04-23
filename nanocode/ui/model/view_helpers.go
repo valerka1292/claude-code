@@ -94,10 +94,16 @@ func (m Model) agentStatusLine() string {
 
 		durationStr := formatDuration(int(time.Since(m.chat.cycleStartedAt).Milliseconds()))
 
-		// Жирный текст для esc to interrupt
-		interruptText := "esc to interrupt"
-		if m.chat.escapePending {
-			interruptText = "press esc again to cancel"
+		// Формат как в оригинальном Claude Code: (esc to interrupt · time · tokens · thinking)
+		// Проверка таймаута для сброса escapePending (800ms как в оригинале)
+		interruptText := "**esc to interrupt**"
+		if m.chat.escapePending && time.Since(m.chat.escapePressTime) <= 800*time.Millisecond {
+			interruptText = "**press esc again to cancel**"
+		} else if m.chat.escapePending {
+			// Таймаут истек - сбрасываем pending
+			m.chat.escapePending = false
+			m.chat.escapePressTime = time.Time{}
+			interruptText = "**esc to interrupt**"
 		}
 
 		return fmt.Sprintf(
