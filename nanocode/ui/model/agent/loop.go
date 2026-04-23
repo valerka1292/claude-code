@@ -3,8 +3,6 @@ package agent
 import (
 	"fmt"
 	"time"
-
-	"nanocode/ui/config"
 )
 
 const (
@@ -13,19 +11,13 @@ const (
 )
 
 // RunLoop executes the agent loop, streaming events to the output channel.
-func RunLoop(provider config.Provider, messages []APIMessage, timeoutSeconds int, out chan<- StreamEvent) {
+func RunLoop(provider ProviderConfig, messages []APIMessage, timeoutSeconds int, out chan<- StreamEvent) {
 	defer close(out)
 
 	client := NewClient(timeoutSeconds)
 
-	apiHistory := make([]APIMessage, 0, len(messages)+1)
-	apiHistory = append(apiHistory, APIMessage{
-		Role:    "system",
-		Content: buildSystemPrompt(),
-	})
-	for _, msg := range messages {
-		apiHistory = append(apiHistory, msg)
-	}
+	apiHistory := make([]APIMessage, 0, len(messages))
+	apiHistory = append(apiHistory, messages...)
 
 	for turns := 0; turns < MaxTurns; turns++ {
 		calls, usage, finishReason, err := streamOneTurnWithRetry(client, provider, apiHistory, out)
@@ -55,7 +47,7 @@ func RunLoop(provider config.Provider, messages []APIMessage, timeoutSeconds int
 	out <- StreamEvent{ErrorText: "agent loop stopped: maximum turns reached"}
 }
 
-func streamOneTurnWithRetry(client *Client, provider config.Provider, messages []APIMessage, out chan<- StreamEvent) ([]APIToolCall, *UsageState, string, error) {
+func streamOneTurnWithRetry(client *Client, provider ProviderConfig, messages []APIMessage, out chan<- StreamEvent) ([]APIToolCall, *UsageState, string, error) {
 	var (
 		calls        []APIToolCall
 		usage        *UsageState
@@ -87,9 +79,4 @@ func streamOneTurnWithRetry(client *Client, provider config.Provider, messages [
 		time.Sleep(backoff)
 	}
 	return nil, usage, finishReason, err
-}
-
-// buildSystemPrompt returns the system prompt for the agent.
-func buildSystemPrompt() string {
-	return "You are nanocode - autonomous coding agent."
 }

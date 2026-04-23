@@ -14,6 +14,8 @@ const (
 
 var TimeoutOptions = []int{30, 60, 90, 120, 180, 240, 300}
 
+const DefaultTimeoutSeconds = 180
+
 type Settings struct {
 	SpinnerStyle      string `json:"spinner_style"`
 	APITimeoutSeconds int    `json:"api_timeout_seconds"`
@@ -22,7 +24,7 @@ type Settings struct {
 func DefaultSettings() Settings {
 	return Settings{
 		SpinnerStyle:      SpinnerHexagons,
-		APITimeoutSeconds: 180,
+		APITimeoutSeconds: DefaultTimeoutSeconds,
 	}
 }
 
@@ -55,7 +57,7 @@ func LoadSettings() (Settings, error) {
 		}
 	}
 	if !validTimeout {
-		cfg.APITimeoutSeconds = 180
+		cfg.APITimeoutSeconds = DefaultTimeoutSeconds
 	}
 	return cfg, nil
 }
