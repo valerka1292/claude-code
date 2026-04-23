@@ -50,7 +50,6 @@ func Interval(style string) time.Duration {
 }
 
 func Status(frame int, verb string, style string) string {
-	// Примечание: функция не используется в текущей версии, оставлена для совместимости
 	return fmt.Sprintf("%s %s...", Frame(style, frame), verb)
 }
 

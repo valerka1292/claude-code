@@ -23,7 +23,7 @@ func (m *Model) refreshViewport(forceBottom bool) {
 	}
 	spinnerLine := m.agentStatusLine()
 	wasBottom := m.viewport.AtBottom()
-	content := messages.View(m.chat.messages, m.viewport.Width, spinnerLine, m.chat.streamingThought, m.chat.streamingText)
+	content := messages.View(m.chat.messages, m.viewport.Width, spinnerLine, "", m.chat.streamingText)
 	m.viewport.SetContent(content)
 	targetHeight := mathutil.Min(mathutil.Max(1, m.viewport.TotalLineCount()), m.layout.viewportMaxHeight)
 	if targetHeight < 1 {

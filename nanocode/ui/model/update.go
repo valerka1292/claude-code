@@ -49,6 +49,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.done {
 			m.setNobbyPose(nobby.PoseIdle)
 			m.chat.thinking = false
+			m.chat.spinnerVerb = ""
 			m.chat.spinnerStep = 0
 			m.chat.showInferring = false
 			if !m.chat.cycleStartedAt.IsZero() {
@@ -101,7 +102,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.event.Usage != nil {
 			m.chat.usage = *msg.event.Usage
-			// Не перезаписываем liveDownTokens — финальное значение берётся из usage.TotalTokens в usageLine
+			if msg.event.Usage.CompletionTokens > 0 {
+				m.chat.liveDownTokens = msg.event.Usage.CompletionTokens
+			}
 		}
 		m.refreshViewport(true)
 		return m, pollStreamCmd(m.stream.ch)

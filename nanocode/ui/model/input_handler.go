@@ -47,6 +47,7 @@ func (m Model) executeInput() (tea.Model, tea.Cmd) {
 	m.clearCommandSuggestions()
 	m.chat.thinking = true
 	m.chat.spinnerStep = 0
+	m.chat.spinnerVerb = spinner.RandomVerb()
 	m.chat.streamingText = ""
 	m.chat.streamingThought = ""
 	m.chat.cycleStartedAt = time.Now()
