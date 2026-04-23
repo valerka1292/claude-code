@@ -122,8 +122,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.event.ToolDelta != "" {
 			m.chat.estimatedTokensStream++
 		}
+		liveEstimatedTotal := m.chat.usage.PromptTokens + m.chat.estimatedTokensStream
+		if liveEstimatedTotal > m.chat.contextTokenFloor {
+			m.chat.contextTokenFloor = liveEstimatedTotal
+		}
 		if msg.event.Usage != nil {
 			m.chat.usage = *msg.event.Usage
+			if m.chat.usage.TotalTokens > m.chat.contextTokenFloor {
+				m.chat.contextTokenFloor = m.chat.usage.TotalTokens
+			}
 		}
 		m.refreshViewport(true)
 		return m, pollStreamCmd(m.stream.ch)

@@ -49,40 +49,44 @@ func (m Model) usageLine() string {
 
 	exactTotal := m.chat.usage.TotalTokens
 	estimatedTotal := m.chat.usage.PromptTokens + m.chat.estimatedTokensStream
+	displayTotal := 0
+	isEstimated := false
 
 	// Во время генерации всегда показываем "живой" счетчик:
 	// берем максимум между серверным total и локальной оценкой по дельтам.
 	if m.chat.thinking {
-		liveTotal := exactTotal
-		if estimatedTotal > liveTotal {
-			liveTotal = estimatedTotal
+		displayTotal = exactTotal
+		if estimatedTotal > displayTotal {
+			displayTotal = estimatedTotal
 		}
-		if liveTotal <= 0 {
-			liveTotal = estimatedTotal
-		}
-		percent := (float64(liveTotal) / float64(active.ContextSize)) * 100
-		return fmt.Sprintf("~%s / %s (%.2f%% ctx)",
-			formatCompact(liveTotal),
-			formatCompact(active.ContextSize),
-			percent)
+		isEstimated = true
+	} else if exactTotal > 0 {
+		// После генерации — показываем точные данные от API, если они есть.
+		displayTotal = exactTotal
+	} else {
+		// До получения usage показываем оценку.
+		displayTotal = estimatedTotal
+		isEstimated = true
 	}
 
-	// После генерации — показываем точные данные от API, если они есть.
-	if exactTotal > 0 {
-		percent := (float64(exactTotal) / float64(active.ContextSize)) * 100
-		return fmt.Sprintf("%s / %s (%.2f%% ctx)",
-			formatCompact(exactTotal),
-			formatCompact(active.ContextSize),
-			percent)
+	// Никогда не показываем уменьшение счетчика между ходами диалога.
+	if displayTotal < m.chat.contextTokenFloor {
+		displayTotal = m.chat.contextTokenFloor
+		isEstimated = true
 	}
 
-	// До получения usage показываем оценку
-	if estimatedTotal == 0 {
+	if displayTotal == 0 {
 		return fmt.Sprintf("0 / %s (0.00%% ctx)", formatCompact(active.ContextSize))
 	}
-	percent := (float64(estimatedTotal) / float64(active.ContextSize)) * 100
-	return fmt.Sprintf("~%s / %s (%.2f%% ctx)",
-		formatCompact(estimatedTotal),
+
+	prefix := ""
+	if isEstimated {
+		prefix = "~"
+	}
+	percent := (float64(displayTotal) / float64(active.ContextSize)) * 100
+	return fmt.Sprintf("%s%s / %s (%.2f%% ctx)",
+		prefix,
+		formatCompact(displayTotal),
 		formatCompact(active.ContextSize),
 		percent)
 }

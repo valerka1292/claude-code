@@ -59,6 +59,12 @@ func (m Model) executeInput() (tea.Model, tea.Cmd) {
 	m.clearPendingConfirmation()
 	m.chat.abortChan = make(chan struct{})
 	promptTokens := estimatePromptTokens(m.chat.messages)
+	if promptTokens < m.chat.contextTokenFloor {
+		promptTokens = m.chat.contextTokenFloor
+	}
+	if promptTokens > m.chat.contextTokenFloor {
+		m.chat.contextTokenFloor = promptTokens
+	}
 	m.chat.usage = agent.UsageState{
 		PromptTokens: promptTokens,
 		TotalTokens:  promptTokens,

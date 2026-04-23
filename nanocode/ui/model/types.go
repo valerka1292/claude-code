@@ -62,6 +62,7 @@ type ChatState struct {
 	cycleStartedAt           time.Time
 	estimatedTokensStream    int
 	estimatedReasoningTokens int
+	contextTokenFloor        int
 	showInferring            bool
 	lastWorkedForSec         int
 	interrupted              bool
