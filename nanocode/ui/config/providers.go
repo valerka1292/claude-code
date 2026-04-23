@@ -91,5 +91,5 @@ func providersPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, "nanocode", "providers.json"), nil
+	return filepath.Join(home, ".nanocode", "providers.json"), nil
 }
