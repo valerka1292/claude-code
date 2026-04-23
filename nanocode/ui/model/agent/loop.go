@@ -28,19 +28,13 @@ func RunLoop(provider config.Provider, messages []APIMessage, timeoutSeconds int
 	}
 
 	for turns := 0; turns < MaxTurns; turns++ {
-		calls, usage, finishReason, err := streamOneTurnWithRetry(client, apiHistory, out)
+		calls, usage, finishReason, err := streamOneTurnWithRetry(client, provider, apiHistory, out)
 		if err != nil {
 			out <- StreamEvent{ErrorText: err.Error()}
 			return
 		}
 		if usage != nil {
-			// Convert internal UsageState to exported type
-			out <- StreamEvent{Usage: &UsageState{
-				PromptTokens:     usage.PromptTokens,
-				CompletionTokens: usage.CompletionTokens,
-				ReasoningTokens:  usage.ReasoningTokens,
-				TotalTokens:      usage.TotalTokens,
-			}}
+			out <- StreamEvent{Usage: usage}
 		}
 		if finishReason != "tool_calls" {
 			out <- StreamEvent{FinishReason: finishReason}
@@ -61,7 +55,7 @@ func RunLoop(provider config.Provider, messages []APIMessage, timeoutSeconds int
 	out <- StreamEvent{ErrorText: "agent loop stopped: maximum turns reached"}
 }
 
-func streamOneTurnWithRetry(client *Client, messages []APIMessage, out chan<- StreamEvent) ([]APIToolCall, *UsageState, string, error) {
+func streamOneTurnWithRetry(client *Client, provider config.Provider, messages []APIMessage, out chan<- StreamEvent) ([]APIToolCall, *UsageState, string, error) {
 	var (
 		calls        []APIToolCall
 		usage        *UsageState
@@ -70,7 +64,10 @@ func streamOneTurnWithRetry(client *Client, messages []APIMessage, out chan<- St
 	)
 
 	for attempt := 0; attempt <= MaxRetries; attempt++ {
-		calls, usage, finishReason, err = client.Stream(StreamConfig{Messages: messages}, out)
+		calls, usage, finishReason, err = client.Stream(StreamConfig{
+			Provider: provider,
+			Messages: messages,
+		}, out)
 		if err == nil {
 			return calls, usage, finishReason, nil
 		}

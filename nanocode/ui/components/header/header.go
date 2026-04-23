@@ -31,7 +31,7 @@ func View(cwd string, mascot string, providerName string, modelName string) stri
 
 	topSection := lipgloss.JoinHorizontal(lipgloss.Top, mascot, info)
 
-	note := noteStyle.Render("↑ Fastest coding agent· 5x faster than other agents, 5x cheaper!")
+	note := noteStyle.Render("↑ Fastest coding agent · 5x faster than other agents, 5x cheaper!")
 
 	content := lipgloss.JoinVertical(lipgloss.Left, topSection, "", note)
 

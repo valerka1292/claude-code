@@ -22,7 +22,7 @@ func TestRenderMarkdown_RendersStrongText(t *testing.T) {
 
 func TestRenderAssistantBlock_PrefixesBullet(t *testing.T) {
 	out := renderAssistantBlock("hello", 80, false)
-	if !strings.Contains(out, "•") {
+	if !strings.Contains(out, "●") {
 		t.Fatalf("expected assistant output to include bullet prefix, got %q", out)
 	}
 }

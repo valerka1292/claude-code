@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"nanocode/internal/mathutil"
 	"nanocode/ui/components/providers"
 	"nanocode/ui/components/spinner"
 	"nanocode/ui/config"
@@ -18,7 +19,7 @@ func (m *Model) reloadProviderNames() {
 		m.providers.selectedProvider = 0
 		return
 	}
-	m.providers.selectedProvider = clampInt(m.providers.selectedProvider, 0, len(m.providers.names)-1)
+	m.providers.selectedProvider = mathutil.Clamp(m.providers.selectedProvider, 0, len(m.providers.names)-1)
 }
 
 func (m Model) activeProviderName() string {
@@ -67,7 +68,7 @@ func (m Model) agentStatusLine() string {
 	if m.chat.lastWorkedForSec > 0 {
 		return fmt.Sprintf(
 			"%s Worked for %ds",
-			spinner.Indicator(m.settings.values.SpinnerStyle, m.chat.spinnerStep),
+			spinner.StaticIndicator(m.settings.values.SpinnerStyle),
 			m.chat.lastWorkedForSec,
 		)
 	}

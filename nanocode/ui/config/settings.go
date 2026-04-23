@@ -12,6 +12,8 @@ const (
 	SpinnerCircles  = "circles"
 )
 
+var TimeoutOptions = []int{30, 60, 90, 120, 180, 240, 300}
+
 type Settings struct {
 	SpinnerStyle      string `json:"spinner_style"`
 	APITimeoutSeconds int    `json:"api_timeout_seconds"`
@@ -45,9 +47,14 @@ func LoadSettings() (Settings, error) {
 	if cfg.SpinnerStyle != SpinnerHexagons && cfg.SpinnerStyle != SpinnerCircles {
 		cfg.SpinnerStyle = SpinnerHexagons
 	}
-	switch cfg.APITimeoutSeconds {
-	case 30, 60, 90, 120, 180, 240, 300:
-	default:
+	validTimeout := false
+	for _, t := range TimeoutOptions {
+		if cfg.APITimeoutSeconds == t {
+			validTimeout = true
+			break
+		}
+	}
+	if !validTimeout {
 		cfg.APITimeoutSeconds = 180
 	}
 	return cfg, nil

@@ -54,8 +54,12 @@ func Status(frame int, verb string, style string) string {
 }
 
 func Indicator(style string, frame int) string {
+	return Frame(style, frame)
+}
+
+func StaticIndicator(style string) string {
 	if style == config.SpinnerHexagons {
 		return "⬢"
 	}
-	return circleFrames[frame%len(circleFrames)]
+	return "○"
 }

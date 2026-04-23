@@ -6,8 +6,6 @@ import (
 	"nanocode/ui/config"
 )
 
-var timeoutOptions = []int{30, 60, 90, 120, 180, 240, 300}
-
 func (m Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -49,8 +47,8 @@ func (m *Model) shiftCurrentSetting(delta int) {
 		m.settings.values.SpinnerStyle = styles[idx]
 	case 1:
 		idx := timeoutIndexFor(m.settings.values.APITimeoutSeconds)
-		idx = mathutil.Clamp(idx+delta, 0, len(timeoutOptions)-1)
-		m.settings.values.APITimeoutSeconds = timeoutOptions[idx]
+		idx = mathutil.Clamp(idx+delta, 0, len(config.TimeoutOptions)-1)
+		m.settings.values.APITimeoutSeconds = config.TimeoutOptions[idx]
 	}
 }
 
@@ -62,7 +60,7 @@ func spinnerIndexFor(style string) int {
 }
 
 func timeoutIndexFor(seconds int) int {
-	for i, option := range timeoutOptions {
+	for i, option := range config.TimeoutOptions {
 		if option == seconds {
 			return i
 		}
