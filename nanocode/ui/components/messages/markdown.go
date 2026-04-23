@@ -112,52 +112,43 @@ func splitSegments(text string) []segment {
 // ── code block renderer ──────────────────────────────────────────────────────
 
 var (
-	codeHeaderStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#2A2A2A")).
-			Foreground(lipgloss.Color("#808080")).
-			PaddingLeft(1)
-
 	codeBodyBg = lipgloss.Color("#1A1A1A")
 
 	lineNumStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#4A4A4A")).
+			Foreground(lipgloss.Color("#5A6473")).
 			Background(codeBodyBg)
 
-	gutterSepStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#333333")).
-			Background(codeBodyBg)
+	lineNumContinuationStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#3B3B3B")).
+					Background(codeBodyBg)
 
 	codeLineStyle = lipgloss.NewStyle().
 			Background(codeBodyBg).
 			Foreground(lipgloss.Color("#E5E7EB"))
 
 	codeBorderStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#333333"))
+			Foreground(lipgloss.Color("#3A3F4B"))
 
 	langBadgeStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#FBFA56")).
-			Foreground(lipgloss.Color("#181818")).
-			Bold(true).
-			PaddingLeft(1).
-			PaddingRight(1)
-
-	langBarBg = lipgloss.NewStyle().
-			Background(lipgloss.Color("#2A2A2A"))
+			Foreground(lipgloss.Color("#FBFA56")).
+			Bold(true)
 )
 
 func renderCodeBlock(lang, body string, width int) string {
-	// Clamp width
 	if width < minMarkdownWidth {
 		width = minMarkdownWidth
 	}
 
-	// Syntax-highlight the body via glamour (renders as a standalone code block)
 	highlighted := highlightCode(lang, body, width)
 
-	rawLines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	rawBody := strings.TrimRight(body, "\n")
+	rawLines := strings.Split(rawBody, "\n")
+	if rawBody == "" {
+		rawLines = []string{""}
+	}
 	hlLines := strings.Split(strings.TrimRight(highlighted, "\n"), "\n")
 
-	// Ensure same line count (glamour may add/remove blank lines)
+	// Выравниваем количество строк после работы glamour
 	for len(hlLines) < len(rawLines) {
 		hlLines = append(hlLines, "")
 	}
@@ -167,45 +158,59 @@ func renderCodeBlock(lang, body string, width int) string {
 		digits = 2
 	}
 
-	innerWidth := width - digits - 4 // gutter: " NN │ "
+	// Рассчитываем ширину (без лишних разделителей в центре)
+	innerWidth := width - digits - 5
+	if innerWidth < 8 {
+		innerWidth = 8
+	}
+	// Ширина от левой до правой рамки
+	innerFrameWidth := digits + 3 + innerWidth
 
 	var sb strings.Builder
 
-	// ── top bar: language badge ──────────────────────────────────────────
-	langLabel := lang
+	langLabel := strings.ToLower(lang)
 	if langLabel == "" {
-		langLabel = "text"
+		langLabel = "code"
 	}
-	badge := langBadgeStyle.Render(langLabel)
-	barPad := langBarBg.Width(width - lipgloss.Width(badge)).Render("")
-	sb.WriteString(badge + barPad)
+
+	// Элегантная верхняя грань с интегрированным названием языка (например: ╭─ go ─────╮ )
+	title := " " + langLabel + " "
+	titleRendered := langBadgeStyle.Render(title)
+
+	dashCount := innerFrameWidth - lipgloss.Width(title) - 1
+	if dashCount < 0 {
+		dashCount = 0
+	}
+
+	topBorder := codeBorderStyle.Render("╭─") + titleRendered + codeBorderStyle.Render(strings.Repeat("─", dashCount)+"╮")
+	sb.WriteString(topBorder)
 	sb.WriteByte('\n')
 
-	// ── top border ───────────────────────────────────────────────────────
-	sb.WriteString(codeBorderStyle.Render("┌" + strings.Repeat("─", width-2) + "┐"))
-	sb.WriteByte('\n')
-
-	// ── code lines ───────────────────────────────────────────────────────
+	// Вывод строк с кодом без внутренних границ
 	for i, hl := range hlLines {
-		num := lineNumStyle.Render(fmt.Sprintf(" %*d ", digits, i+1))
-		sep := gutterSepStyle.Render("│")
-		// Pad/truncate the highlighted line to innerWidth visible chars
-		visLen := visibleWidth(hl)
-		var codePart string
-		if visLen < innerWidth {
-			codePart = codeLineStyle.Render(hl + strings.Repeat(" ", innerWidth-visLen))
-		} else {
-			codePart = codeLineStyle.Render(hl)
+		wrapped := wrapVisibleANSI(hl, innerWidth)
+		if len(wrapped) == 0 {
+			wrapped = []string{""}
 		}
-		sb.WriteString(codeBorderStyle.Render("│") + num + sep + " " + codePart + codeBorderStyle.Render("│"))
-		sb.WriteByte('\n')
+		for j, part := range wrapped {
+			var num string
+			if j == 0 {
+				num = lineNumStyle.Render(fmt.Sprintf(" %*d ", digits, i+1))
+			} else {
+				num = lineNumContinuationStyle.Render(fmt.Sprintf(" %*s ", digits, ""))
+			}
+
+			codePart := codeLineStyle.Render(padVisibleANSI(part, innerWidth))
+			sb.WriteString(codeBorderStyle.Render("│") + num + " " + codePart + codeBorderStyle.Render("│"))
+			sb.WriteByte('\n')
+		}
 	}
 
-	// ── bottom border ────────────────────────────────────────────────────
-	sb.WriteString(codeBorderStyle.Render("└" + strings.Repeat("─", width-2) + "┘"))
+	// Плавное закругление снизу
+	sb.WriteString(codeBorderStyle.Render("╰" + strings.Repeat("─", innerFrameWidth) + "╯"))
 	sb.WriteByte('\n')
 
-	return sb.String()
+	return sb.String() + "\n"
 }
 
 // highlightCode renders only the code body through glamour so chroma applies
@@ -290,10 +295,11 @@ func glamourStyle() string {
 	"document": { "block_prefix": "", "block_suffix": "" },
 
 	"block_quote": {
-		"color": "#9CA3AF",
+		"color": "#A8B0BD",
+		"background_color": "#222222",
 		"italic": true,
 		"indent": 1,
-		"indent_token": "▎ "
+		"indent_token": "▍ "
 	},
 
 	"list": { "level_indent": 2 },
@@ -309,12 +315,12 @@ func glamourStyle() string {
 		"block_suffix": "\n"
 	},
 	"h2": {
-		"prefix": "  ",
+		"prefix": "◉ ",
 		"color": "#EBDC2F",
 		"bold": true
 	},
 	"h3": {
-		"prefix": " ▸ ",
+		"prefix": "◆ ",
 		"color": "#D4D4D4",
 		"bold": true
 	},
@@ -322,14 +328,14 @@ func glamourStyle() string {
 	"h5": { "prefix": "     ‣ ", "color": "#6B7280" },
 	"h6": { "prefix": "       – ", "color": "#4B5563" },
 
-	"text":          { "color": "#E5E7EB" },
+	"text":          { "color": "#E5E7EB", "block_suffix": "" },
 	"strong":        { "bold": true, "color": "#F9FAFB" },
-	"italic":        { "italic": true, "color": "#D1D5DB" },
+	"italic":        { "italic": true, "color": "#D6DEE8" },
 	"strikethrough": { "crossed_out": true, "color": "#6B7280" },
 
 	"code": {
 		"color": "#FBFA56",
-		"background_color": "#2A2A2A",
+		"background_color": "#2E3440",
 		"prefix": " ",
 		"suffix": " "
 	},
@@ -374,7 +380,7 @@ func glamourStyle() string {
 		}
 	},
 
-	"paragraph": { "margin": 0 },
+	"paragraph": { "margin": 0, "block_suffix": "\n" },
 
 	"table": {
 		"center_separator": "┼",
@@ -382,7 +388,7 @@ func glamourStyle() string {
 		"row_separator": "─"
 	},
 
-	"item":        { "block_prefix": "  ● " },
+	"item":        { "block_prefix": "  • " },
 	"enumeration": { "block_prefix": ". " },
 	"task": {
 		"ticked":   "[✓] ",
@@ -395,7 +401,7 @@ func glamourStyle() string {
 	},
 
 	"link":       { "color": "#60A5FA", "underline": true },
-	"link_text":  { "color": "#93C5FD", "bold": true },
+	"link_text":  { "color": "#93C5FD", "bold": true, "underline": true },
 	"image":      { "color": "#60A5FA", "underline": true },
 	"image_text": { "color": "#93C5FD", "bold": true, "format": "🖼  {{.text}}" }
 }`
@@ -484,6 +490,55 @@ func dedentRendered(text string) string {
 		lines[i] = removeVisibleIndent(line, minIndent)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func padVisibleANSI(text string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	vis := visibleWidth(text)
+	if vis >= width {
+		return text
+	}
+	return text + strings.Repeat(" ", width-vis)
+}
+
+func wrapVisibleANSI(text string, width int) []string {
+	if width <= 0 {
+		return []string{text}
+	}
+	if visibleWidth(text) <= width {
+		return []string{text}
+	}
+	var lines []string
+	current := strings.Builder{}
+	visible := 0
+	inEscape := false
+	for _, r := range text {
+		if inEscape {
+			current.WriteRune(r)
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+		if r == '\x1b' {
+			inEscape = true
+			current.WriteRune(r)
+			continue
+		}
+		current.WriteRune(r)
+		visible++
+		if visible >= width {
+			lines = append(lines, current.String())
+			current.Reset()
+			visible = 0
+		}
+	}
+	if current.Len() > 0 {
+		lines = append(lines, current.String())
+	}
+	return lines
 }
 
 func fenceTokenFromStart(line string) string {
