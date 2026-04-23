@@ -136,10 +136,10 @@ func DurationFor(pose Pose, step int) time.Duration {
 
 func Render(pose Pose, step int) string {
 	f := FrameFor(pose, step)
-	lineStyle := lipgloss.NewStyle().Foreground(f.Color)
 
-	// 1. Убрали Background(theme.SurfaceBackground)
-	bodyStyle := lipgloss.NewStyle().Foreground(f.Color)
+	lineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(f.Color))
+
+	bodyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(f.Color))
 
 	lines := []string{
 		lineStyle.Render(f.Antenna),
