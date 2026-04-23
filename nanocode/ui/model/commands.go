@@ -1,6 +1,9 @@
 package model
 
-import "strings"
+import (
+	"nanocode/internal/mathutil"
+	"strings"
+)
 
 func (m *Model) updateCommandSuggestions() {
 	value := strings.TrimSpace(m.input.Value())
@@ -16,7 +19,7 @@ func (m *Model) updateCommandSuggestions() {
 			m.commands.selected = 0
 			return
 		}
-		m.commands.selected = clamp(m.commands.selected, 0, len(m.commands.suggestions)-1)
+		m.commands.selected = mathutil.Clamp(m.commands.selected, 0, len(m.commands.suggestions)-1)
 		return
 	}
 	m.clearCommandSuggestions()

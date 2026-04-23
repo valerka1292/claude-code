@@ -2,6 +2,7 @@ package model
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
+	"nanocode/internal/mathutil"
 	"nanocode/ui/config"
 )
 
@@ -14,10 +15,10 @@ func (m Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.resizeViewport()
 		return m, nil
 	case "up":
-		m.settings.selectedRow = clamp(m.settings.selectedRow-1, 0, 1)
+		m.settings.selectedRow = mathutil.Clamp(m.settings.selectedRow-1, 0, 1)
 		return m, nil
 	case "down":
-		m.settings.selectedRow = clamp(m.settings.selectedRow+1, 0, 1)
+		m.settings.selectedRow = mathutil.Clamp(m.settings.selectedRow+1, 0, 1)
 		return m, nil
 	case "left":
 		m.shiftCurrentSetting(-1)
@@ -44,11 +45,11 @@ func (m *Model) shiftCurrentSetting(delta int) {
 	case 0:
 		styles := []string{config.SpinnerHexagons, config.SpinnerCircles}
 		idx := spinnerIndexFor(m.settings.values.SpinnerStyle)
-		idx = clamp(idx+delta, 0, len(styles)-1)
+		idx = mathutil.Clamp(idx+delta, 0, len(styles)-1)
 		m.settings.values.SpinnerStyle = styles[idx]
 	case 1:
 		idx := timeoutIndexFor(m.settings.values.APITimeoutSeconds)
-		idx = clamp(idx+delta, 0, len(timeoutOptions)-1)
+		idx = mathutil.Clamp(idx+delta, 0, len(timeoutOptions)-1)
 		m.settings.values.APITimeoutSeconds = timeoutOptions[idx]
 	}
 }

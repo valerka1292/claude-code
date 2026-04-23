@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"nanocode/internal/mathutil"
 	"nanocode/ui/theme"
 )
 
@@ -52,8 +53,8 @@ func (m *Model) scrollToMouseY(y int) {
 	if !m.hasScrollableContent() || m.viewport.Height <= 1 {
 		return
 	}
-	trackY := clamp(y-m.layout.viewportTop, 0, m.viewport.Height-1)
-	maxOffset := max(0, m.viewport.TotalLineCount()-m.viewport.Height)
+	trackY := mathutil.Clamp(y-m.layout.viewportTop, 0, m.viewport.Height-1)
+	maxOffset := mathutil.Max(0, m.viewport.TotalLineCount()-m.viewport.Height)
 	target := int(math.Round(float64(trackY) / float64(m.viewport.Height-1) * float64(maxOffset)))
 	m.viewport.SetYOffset(target)
 }
@@ -69,9 +70,9 @@ func (m Model) viewportWithScrollbar() string {
 		lines = append(lines, padding...)
 	}
 
-	thumbSize := max(1, (m.viewport.Height*m.viewport.Height)/max(1, m.viewport.TotalLineCount()))
-	maxThumbTop := max(0, m.viewport.Height-thumbSize)
-	maxOffset := max(1, m.viewport.TotalLineCount()-m.viewport.Height)
+	thumbSize := mathutil.Max(1, (m.viewport.Height*m.viewport.Height)/mathutil.Max(1, m.viewport.TotalLineCount()))
+	maxThumbTop := mathutil.Max(0, m.viewport.Height-thumbSize)
+	maxOffset := mathutil.Max(1, m.viewport.TotalLineCount()-m.viewport.Height)
 	thumbTop := int(math.Round(float64(m.viewport.YOffset) / float64(maxOffset) * float64(maxThumbTop)))
 
 	trackStyle := lipgloss.NewStyle().Foreground(theme.MutedText)
