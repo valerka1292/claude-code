@@ -114,29 +114,24 @@ func splitSegments(text string) []segment {
 var (
 	codeFrameBg = lipgloss.Color("#141414")
 
-	codeTopBarStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#222222")).
-			Foreground(lipgloss.Color("#6B7280"))
+	codeHeaderRowStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#1E1F22")).
+				Foreground(lipgloss.Color("#8A92A3"))
 
 	codeWindowDotMuted = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#4B5563")).
-				Background(lipgloss.Color("#222222")).
+				Background(lipgloss.Color("#1E1F22")).
 				Render("●")
 
 	codeWindowDotAccent = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#FBFA56")).
-				Background(lipgloss.Color("#222222")).
+				Background(lipgloss.Color("#1E1F22")).
 				Render("●")
-
-	codeHeaderStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#2A2A2A")).
-			Foreground(lipgloss.Color("#808080")).
-			PaddingLeft(1)
 
 	codeBodyBg = lipgloss.Color("#1A1A1A")
 
 	lineNumStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#4A4A4A")).
+			Foreground(lipgloss.Color("#5A6473")).
 			Background(codeBodyBg)
 
 	lineNumContinuationStyle = lipgloss.NewStyle().
@@ -144,7 +139,7 @@ var (
 					Background(codeBodyBg)
 
 	gutterSepStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#333333")).
+			Foreground(lipgloss.Color("#2F3640")).
 			Background(codeBodyBg)
 
 	codeLineStyle = lipgloss.NewStyle().
@@ -152,18 +147,18 @@ var (
 			Foreground(lipgloss.Color("#E5E7EB"))
 
 	codeBorderStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#2F2F2F")).
+			Foreground(lipgloss.Color("#353B45")).
 			Background(codeFrameBg)
 
 	langBadgeStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#2F2F2F")).
+			Background(lipgloss.Color("#262A31")).
 			Foreground(lipgloss.Color("#FBFA56")).
 			Bold(true).
 			PaddingLeft(1).
 			PaddingRight(1)
 
 	langBarBg = lipgloss.NewStyle().
-			Background(lipgloss.Color("#222222"))
+			Background(lipgloss.Color("#1E1F22"))
 )
 
 func renderCodeBlock(lang, body string, width int) string {
@@ -192,30 +187,35 @@ func renderCodeBlock(lang, body string, width int) string {
 		digits = 2
 	}
 
-	innerWidth := width - digits - 6 // gutter, separator and borders
+	innerWidth := width - digits - 8 // borders, spaces and separator
 	if innerWidth < 8 {
 		innerWidth = 8
 	}
+	innerFrameWidth := digits + 4 + innerWidth // " NN │ " + code
 
 	var sb strings.Builder
+
+	// ── rounded frame top ─────────────────────────────────────────────────
+	sb.WriteString(codeBorderStyle.Render("╭" + strings.Repeat("─", innerFrameWidth) + "╮"))
+	sb.WriteByte('\n')
 
 	// ── top bar: language badge + faux window controls ───────────────────
 	langLabel := lang
 	if langLabel == "" {
 		langLabel = "text"
 	}
-	topBarLeft := codeTopBarStyle.Render(" " + codeWindowDotAccent + " " + codeWindowDotMuted + " " + codeWindowDotMuted + " ")
+	topBarLeft := codeHeaderRowStyle.Render(" " + codeWindowDotAccent + " " + codeWindowDotMuted + " " + codeWindowDotMuted + " ")
 	badge := langBadgeStyle.Render(" " + strings.ToLower(langLabel))
-	topBarRightWidth := width - lipgloss.Width(topBarLeft) - lipgloss.Width(badge)
+	topBarRightWidth := innerFrameWidth - lipgloss.Width(topBarLeft) - lipgloss.Width(badge)
 	if topBarRightWidth < 0 {
 		topBarRightWidth = 0
 	}
 	barPad := langBarBg.Width(topBarRightWidth).Render("")
-	sb.WriteString(topBarLeft + badge + barPad)
+	sb.WriteString(codeBorderStyle.Render("│") + topBarLeft + badge + barPad + codeBorderStyle.Render("│"))
 	sb.WriteByte('\n')
 
-	// ── top border ───────────────────────────────────────────────────────
-	sb.WriteString(codeBorderStyle.Render("┌" + strings.Repeat("─", width-2) + "┐"))
+	// ── divider ───────────────────────────────────────────────────────────
+	sb.WriteString(codeBorderStyle.Render("├" + strings.Repeat("─", innerFrameWidth) + "┤"))
 	sb.WriteByte('\n')
 
 	// ── code lines ───────────────────────────────────────────────────────
@@ -229,7 +229,7 @@ func renderCodeBlock(lang, body string, width int) string {
 			if j == 0 {
 				num = lineNumStyle.Render(fmt.Sprintf(" %*d ", digits, i+1))
 			} else {
-				num = lineNumContinuationStyle.Render(fmt.Sprintf(" %*s ", digits, "⋮"))
+				num = lineNumContinuationStyle.Render(fmt.Sprintf(" %*s ", digits, ""))
 			}
 			sep := gutterSepStyle.Render("│")
 			codePart := codeLineStyle.Render(padVisibleANSI(part, innerWidth))
@@ -239,7 +239,7 @@ func renderCodeBlock(lang, body string, width int) string {
 	}
 
 	// ── bottom border ────────────────────────────────────────────────────
-	sb.WriteString(codeBorderStyle.Render("└" + strings.Repeat("─", width-2) + "┘"))
+	sb.WriteString(codeBorderStyle.Render("╰" + strings.Repeat("─", innerFrameWidth) + "╯"))
 	sb.WriteByte('\n')
 
 	return sb.String() + "\n"

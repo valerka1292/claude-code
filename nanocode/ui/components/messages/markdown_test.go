@@ -45,7 +45,7 @@ func TestRenderCodeBlock_ContainsLangBadge(t *testing.T) {
 func TestRenderCodeBlock_HasBorders(t *testing.T) {
 	out := renderCodeBlock("go", "x := 1\n", 80)
 	plain := stripANSI(out)
-	if !strings.Contains(plain, "┌") || !strings.Contains(plain, "└") {
+	if !strings.Contains(plain, "╭") || !strings.Contains(plain, "╰") {
 		t.Fatalf("expected box borders in code block, got %q", out)
 	}
 }
@@ -53,8 +53,8 @@ func TestRenderCodeBlock_HasBorders(t *testing.T) {
 func TestRenderCodeBlock_WrapsLongLines(t *testing.T) {
 	out := renderCodeBlock("go", "fmt.Println(\"abcdefghijklmnopqrstuvwxyz\")\n", 32)
 	plain := stripANSI(out)
-	if !strings.Contains(plain, "⋮") {
-		t.Fatalf("expected continuation marker for wrapped line, got %q", out)
+	if strings.Count(plain, "\n") < 6 {
+		t.Fatalf("expected wrapped output to span extra rows, got %q", out)
 	}
 }
 
