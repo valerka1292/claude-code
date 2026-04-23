@@ -8,12 +8,69 @@ import (
 	"nanocode/ui/config"
 )
 
+// NanoCode-themed spinner verbs - organized by category
+// Keeping brand identity while matching Claude's spirit (alliteration, playful terms)
 var verbs = []string{
-	"Assembling nanoblocks",
-	"Growing lattice",
-	"Synthesizing structure",
-	"Stitching microcode",
-	"Aligning bits",
+	// Nano-Tech (Micro-world & Physics)
+	"Assembling",
+	"Atomizing",
+	"Bonding",
+	"Colliding",
+	"Condensing",
+	"Crystallizing",
+	"Etching",
+	"Ionizing",
+	"Layering",
+	"Magnetizing",
+	"Nanifying",
+	"Nucleating",
+	"Polarizing",
+	"Quantumizing",
+	"Synthesizing",
+
+	// Nerd/Hacker Culture
+	"Baffling",
+	"Bit-flipping",
+	"Bootstrapping",
+	"Compiling",
+	"Debugging",
+	"Deploying",
+	"Gitifying",
+	"Hashing",
+	"Hydrating",
+	"Indexing",
+	"Linting",
+	"Optimizing",
+	"Parsing",
+	"Refactoring",
+	"Reticulating",
+	"Transpiling",
+
+	// Absurd & Playful
+	"Bamboozling",
+	"Blooping",
+	"Brainstorming",
+	"Caffeinating",
+	"Chai-sipping",
+	"Deep-frying",
+	"Hallucinating",
+	"Meditating",
+	"Napping",
+	"Overthinking",
+	"Pondering",
+	"Rubber-ducking",
+	"Shrugging",
+	"Vibing",
+
+	// Nano-Action (Dynamic verbs)
+	"Accelerating",
+	"Beaming",
+	"Blasting",
+	"Cascading",
+	"Igniting",
+	"Orbiting",
+	"Sprinting",
+	"Warping",
 }
 
 var hexFrames = []string{
