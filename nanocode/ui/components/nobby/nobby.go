@@ -6,7 +6,7 @@ import (
 
 	"nanocode/ui/theme"
 
-	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type Pose string
@@ -30,7 +30,7 @@ type AnimationFrame struct {
 	BodyC   string
 	BodyR   string
 	Legs    string
-	Color   lipgloss.Color
+	Color   string
 }
 
 type animation struct {
@@ -91,24 +91,24 @@ var animations = map[Pose]animation{
 	},
 	PoseToolError: {
 		Frames: []AnimationFrame{
-			{Antenna: "    ✗    ", Face: "  [X X]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: lipgloss.Color("#ff5f5f")},
-			{Antenna: "    ✗    ", Face: "  [x x]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "  █   █  ", Color: lipgloss.Color("#ff5f5f")},
+			{Antenna: "    ✗    ", Face: "  [X X]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: "#ff5f5f"},
+			{Antenna: "    ✗    ", Face: "  [x x]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "  █   █  ", Color: "#ff5f5f"},
 		},
 		Speed: 400 * time.Millisecond,
 	},
 	PoseAPIErrorReconnect: {
 		Frames: []AnimationFrame{
-			{Antenna: "    │    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: lipgloss.Color("#ff5f5f")},
-			{Antenna: "    ╱    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: lipgloss.Color("#ff5f5f")},
-			{Antenna: "    ─    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: lipgloss.Color("#ff5f5f")},
-			{Antenna: "    ╲    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: lipgloss.Color("#ff5f5f")},
+			{Antenna: "    │    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: "#ff5f5f"},
+			{Antenna: "    ╱    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: "#ff5f5f"},
+			{Antenna: "    ─    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: "#ff5f5f"},
+			{Antenna: "    ╲    ", Face: "  [@ @]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: "#ff5f5f"},
 		},
 		Speed: 200 * time.Millisecond,
 	},
 	PoseAPIError: {
 		Frames: []AnimationFrame{
-			{Antenna: "    ✗    ", Face: "  [x x]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: lipgloss.Color("#ff5f5f")},
-			{Antenna: "    ·    ", Face: "  [. .]  ", BodyL: "  ", BodyC: "░░░░░", BodyR: "  ", Legs: "   █ █   ", Color: theme.MutedText},
+			{Antenna: "    ✗    ", Face: "  [x x]  ", BodyL: "  ", BodyC: "█████", BodyR: "  ", Legs: "   █ █   ", Color: "#ff5f5f"},
+			{Antenna: "    ·    ", Face: "  [. .]  ", BodyL: "  ", BodyC: "░░░░░", BodyR: "  ", Legs: "   █ █   ", Color: string(theme.MutedText)},
 		},
 		Speed: 600 * time.Millisecond,
 	},
@@ -118,7 +118,7 @@ func FrameFor(pose Pose, step int) AnimationFrame {
 	a := animations[pose]
 	f := a.Frames[step%len(a.Frames)]
 	if f.Color == "" {
-		f.Color = theme.PrimaryAccent
+		f.Color = string(theme.PrimaryAccent)
 	}
 	return f
 }

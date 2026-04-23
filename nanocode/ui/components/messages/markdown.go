@@ -308,7 +308,6 @@ func getRenderer(width int) (*glamour.TermRenderer, error) {
 
 	renderer, err := glamour.NewTermRenderer(
 		glamour.WithWordWrap(wrap),
-		glamour.WithTableWrap(true),
 		glamour.WithStylesFromJSONBytes([]byte(getCustomStyle())),
 	)
 	if err != nil {

@@ -1,6 +1,6 @@
 package theme
 
-import "charm.land/lipgloss/v2"
+import "github.com/charmbracelet/lipgloss"
 
 const (
 	PrimaryAccentHex   = "#FBFA56"

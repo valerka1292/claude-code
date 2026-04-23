@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/lipgloss"
 	"nanocode/internal/mathutil"
 	"nanocode/ui/theme"
 )
