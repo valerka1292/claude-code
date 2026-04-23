@@ -54,6 +54,10 @@ func (m Model) executeInput() (tea.Model, tea.Cmd) {
 	m.chat.estimatedTokensStream = 0
 	m.chat.showInferring = true
 	m.chat.lastWorkedForSec = 0
+	m.chat.interrupted = false
+	m.chat.escapePending = false
+	m.chat.escapePressTime = time.Time{}
+	m.chat.abortChan = make(chan struct{})
 	promptTokens := estimatePromptTokens(m.chat.messages)
 	m.chat.usage = agent.UsageState{
 		PromptTokens: promptTokens,
@@ -64,7 +68,7 @@ func (m Model) executeInput() (tea.Model, tea.Cmd) {
 	m.refreshViewport(true)
 	return m, tea.Batch(
 		spinnerTickCmd(m.settings.values.SpinnerStyle),
-		startAgentStreamCmd(active, m.chat.messages, m.settings.values),
+		startAgentStreamCmd(active, m.chat.messages, m.settings.values, m.chat.abortChan),
 	)
 }
 

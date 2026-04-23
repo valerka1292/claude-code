@@ -64,6 +64,10 @@ type ChatState struct {
 	showInferring         bool
 	lastWorkedForSec      int
 	interrupted           bool
+	// Double-press ESC handling
+	escapePressTime    time.Time
+	escapePending      bool
+	abortChan          chan struct{}
 }
 
 type CommandState struct {

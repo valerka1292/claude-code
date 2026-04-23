@@ -11,7 +11,7 @@ const (
 )
 
 // RunLoop executes the agent loop, streaming events to the output channel.
-func RunLoop(provider ProviderConfig, messages []APIMessage, timeoutSeconds int, out chan<- StreamEvent) {
+func RunLoop(provider ProviderConfig, messages []APIMessage, timeoutSeconds int, out chan<- StreamEvent, abortChan <-chan struct{}) {
 	defer close(out)
 
 	client := NewClient(timeoutSeconds)
@@ -20,7 +20,7 @@ func RunLoop(provider ProviderConfig, messages []APIMessage, timeoutSeconds int,
 	apiHistory = append(apiHistory, messages...)
 
 	for turns := 0; turns < MaxTurns; turns++ {
-		calls, usage, finishReason, err := streamOneTurnWithRetry(client, provider, apiHistory, out)
+		calls, usage, finishReason, err := streamOneTurnWithRetry(client, provider, apiHistory, out, abortChan)
 		if err != nil {
 			out <- StreamEvent{ErrorText: err.Error()}
 			return
@@ -47,7 +47,7 @@ func RunLoop(provider ProviderConfig, messages []APIMessage, timeoutSeconds int,
 	out <- StreamEvent{ErrorText: "agent loop stopped: maximum turns reached"}
 }
 
-func streamOneTurnWithRetry(client *Client, provider ProviderConfig, messages []APIMessage, out chan<- StreamEvent) ([]APIToolCall, *UsageState, string, error) {
+func streamOneTurnWithRetry(client *Client, provider ProviderConfig, messages []APIMessage, out chan<- StreamEvent, abortChan <-chan struct{}) ([]APIToolCall, *UsageState, string, error) {
 	var (
 		calls        []APIToolCall
 		usage        *UsageState
@@ -57,8 +57,9 @@ func streamOneTurnWithRetry(client *Client, provider ProviderConfig, messages []
 
 	for attempt := 0; attempt <= MaxRetries; attempt++ {
 		calls, usage, finishReason, err = client.Stream(StreamConfig{
-			Provider: provider,
-			Messages: messages,
+			Provider:  provider,
+			Messages:  messages,
+			AbortChan: abortChan,
 		}, out)
 		if err == nil {
 			return calls, usage, finishReason, nil
