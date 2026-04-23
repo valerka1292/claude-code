@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"nanocode/internal/mathutil"
-	"nanocode/ui/theme"
-
 	"github.com/charmbracelet/lipgloss"
+	"nanocode/ui/theme"
 )
 
 var (
@@ -41,7 +39,7 @@ func Panel(width int, title string, description string, options []string, select
 	}
 
 	rows = append(rows, "", mutedText.Render("↑/↓ move • Enter select • Esc close"))
-	return boxStyle.Width(mathutil.Max(62, width*3/4)).Render(strings.Join(rows, "\n"))
+	return boxStyle.Width(max(62, width*3/4)).Render(strings.Join(rows, "\n"))
 }
 
 func ProviderSummary(name string, model string, contextSize int, active bool) string {
@@ -50,4 +48,11 @@ func ProviderSummary(name string, model string, contextSize int, active bool) st
 		activeMark = "✓"
 	}
 	return fmt.Sprintf("%s %s · %s · ctx %d", activeMark, name, model, contextSize)
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

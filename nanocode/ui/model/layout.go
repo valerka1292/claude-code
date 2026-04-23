@@ -1,8 +1,6 @@
 package model
 
 import (
-	"nanocode/internal/mathutil"
-
 	"github.com/charmbracelet/lipgloss"
 	"nanocode/ui/components/header"
 	"nanocode/ui/components/nobby"
@@ -41,6 +39,6 @@ func (m *Model) resizeViewport() {
 	}
 	m.layout.viewportTop = headerHeight + 1
 	m.layout.viewportMaxHeight = vHeight
-	m.viewport.Width = mathutil.Max(10, m.layout.width-1)
+	m.viewport.Width = max(10, m.layout.width-1)
 	m.viewport.Height = vHeight
 }

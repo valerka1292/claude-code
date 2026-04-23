@@ -1,10 +1,8 @@
 package prompt
 
 import (
-	"nanocode/internal/mathutil"
-	"nanocode/ui/theme"
-
 	"github.com/charmbracelet/lipgloss"
+	"nanocode/ui/theme"
 )
 
 var (
@@ -26,5 +24,12 @@ func Footer(width int, usage string) string {
 	if usage == "" {
 		return left
 	}
-	return lipgloss.NewStyle().Width(width).Render(lipgloss.JoinHorizontal(lipgloss.Top, left, lipgloss.NewStyle().Width(mathutil.Max(0, width-lipgloss.Width(left)-lipgloss.Width(right))).Render(""), right))
+	return lipgloss.NewStyle().Width(width).Render(lipgloss.JoinHorizontal(lipgloss.Top, left, lipgloss.NewStyle().Width(max(0, width-lipgloss.Width(left)-lipgloss.Width(right))).Render(""), right))
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

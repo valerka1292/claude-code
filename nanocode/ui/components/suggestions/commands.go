@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"nanocode/internal/mathutil"
-	"nanocode/ui/theme"
-
 	"github.com/charmbracelet/lipgloss"
+	"nanocode/ui/theme"
 )
 
 var (
@@ -31,8 +29,22 @@ func CommandList(width int, items []string, selected int) string {
 		}
 		rows = append(rows, line)
 	}
-	contentWidth := mathutil.Max(18, mathutil.Min(width-4, maxItemWidth(items)+4))
+	contentWidth := max(18, min(width-4, maxItemWidth(items)+4))
 	return boxStyle.Width(contentWidth).Render(strings.Join(rows, "\n"))
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func maxItemWidth(items []string) int {
