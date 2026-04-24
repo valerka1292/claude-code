@@ -55,7 +55,6 @@ type LayoutState struct {
 	height            int
 	viewportMaxHeight int
 	viewportTop       int
-	scrollbarDragging bool
 }
 
 type ChatState struct {
