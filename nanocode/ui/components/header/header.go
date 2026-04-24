@@ -35,6 +35,6 @@ func View(width int, cwd string, mascot string, providerName string, modelName s
 
 	content := lipgloss.JoinVertical(lipgloss.Left, topSection, "", note)
 
-	wrap := lipgloss.NewStyle().Background(theme.AppBackground).Padding(0, 1).Width(width)
+	wrap := lipgloss.NewStyle().Padding(0, 1).Width(width)
 	return wrap.Render(content)
 }

@@ -14,7 +14,6 @@ import (
 	"nanocode/ui/components/settings"
 	"nanocode/ui/components/spinner"
 	"nanocode/ui/components/suggestions"
-	"nanocode/ui/theme"
 )
 
 func (m *Model) refreshViewport(forceBottom bool) {
@@ -64,8 +63,6 @@ func (m Model) View() string {
 
 	parts = append(parts, prompt.Footer(m.layout.width, m.usageLine(), m.confirmationHint(), string(m.chat.mode)))
 	root := lipgloss.NewStyle().
-		Background(theme.AppBackground).
-		Foreground(theme.PrimaryText).
 		Width(m.layout.width).
 		Height(m.layout.height)
 	return root.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))

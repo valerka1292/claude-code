@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	panelStyle = lipgloss.NewStyle().Padding(0, 0, 1, 0).Background(theme.AppBackground)
+	panelStyle = lipgloss.NewStyle().Padding(0, 0, 1, 0)
 	userStyle  = lipgloss.NewStyle().Foreground(theme.PrimaryText).Padding(0, 1)
 	agentStyle = lipgloss.NewStyle().Foreground(theme.PrimaryText)
 	thinkStyle = lipgloss.NewStyle().Foreground(theme.MutedText).PaddingLeft(3)
