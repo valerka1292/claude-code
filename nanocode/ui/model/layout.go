@@ -16,16 +16,17 @@ func (m *Model) resizeViewport() {
 	if m.layout.width == 0 || m.layout.height == 0 {
 		return
 	}
-	headerHeight := lipgloss.Height(header.View(
+	headerView := header.View(
 		m.layout.width,
 		m.cwd,
 		nobby.Render(m.nobbyPose, m.nobbyStep),
 		m.activeProviderName(),
 		m.activeModelName(),
-	))
+	)
+	headerHeight := lipgloss.Height(headerView)
 	inputHeight := lipgloss.Height(prompt.InputBar(m.input.View(), m.layout.width))
 	footerHeight := lipgloss.Height(prompt.Footer(m.layout.width, m.usageLine(), m.confirmationHint(), string(m.chat.mode)))
-	reserved := headerHeight + inputHeight + footerHeight + 3
+	reserved := headerHeight + inputHeight + footerHeight + 1
 	if len(m.commands.suggestions) > 0 {
 		reserved += lipgloss.Height(suggestions.CommandList(m.layout.width, m.commands.suggestions, m.commands.selected))
 	}

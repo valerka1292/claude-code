@@ -1,7 +1,6 @@
 package model
 
 import (
-	"math"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -61,7 +60,7 @@ func (m *Model) scrollToMouseY(y int) {
 	if maxOffset == 0 {
 		return
 	}
-	target := int(math.Round(float64(trackY) / float64(height-1) * float64(maxOffset)))
+	target := trackY * maxOffset / mathutil.Max(1, height-1)
 	m.viewport.SetYOffset(target)
 }
 
@@ -70,30 +69,30 @@ func (m Model) viewportWithScrollbar() string {
 	if !m.hasScrollableContent() {
 		return content
 	}
-	lines := strings.Split(content, "\n")
 	height := mathutil.Max(1, m.viewport.Height)
-	if len(lines) > height {
-		lines = lines[:height]
-	}
-	if len(lines) < height {
-		padding := make([]string, height-len(lines))
-		lines = append(lines, padding...)
-	}
+	contentColumn := lipgloss.NewStyle().
+		Width(m.viewport.Width).
+		Height(height).
+		MaxHeight(height).
+		Render(content)
+	scrollbarColumn := m.scrollbarColumnView(height)
+	return lipgloss.JoinHorizontal(lipgloss.Top, contentColumn, scrollbarColumn)
+}
 
+func (m Model) scrollbarColumnView(height int) string {
 	thumbSize := mathutil.Max(1, (height*height)/mathutil.Max(1, m.viewport.TotalLineCount()))
 	maxThumbTop := mathutil.Max(0, height-thumbSize)
 	maxOffset := mathutil.Max(1, m.viewport.TotalLineCount()-height)
-	thumbTop := int(math.Round(float64(m.viewport.YOffset) / float64(maxOffset) * float64(maxThumbTop)))
-
+	thumbTop := m.viewport.YOffset * maxThumbTop / maxOffset
 	trackStyle := lipgloss.NewStyle().Foreground(theme.MutedText)
 	thumbStyle := lipgloss.NewStyle().Foreground(theme.PrimaryAccent)
-	rendered := make([]string, 0, len(lines))
-	for i, line := range lines {
+	rendered := make([]string, 0, height)
+	for i := 0; i < height; i++ {
 		bar := trackStyle.Render("│")
 		if i >= thumbTop && i < thumbTop+thumbSize {
 			bar = thumbStyle.Render("█")
 		}
-		rendered = append(rendered, line+bar)
+		rendered = append(rendered, bar)
 	}
 	return strings.Join(rendered, "\n")
 }
