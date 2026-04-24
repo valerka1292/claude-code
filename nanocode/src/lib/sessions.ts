@@ -3,16 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { SessionData, SessionMeta, StoredMessage } from "../electron";
-import type { ChatMessage } from "./agentLoop";
+import type { SessionData, SessionMeta } from "../types/session";
 import type { Provider } from "./providers";
 
-export type { SessionData, SessionMeta, StoredMessage };
+export type { SessionData, SessionMeta, StoredMessage } from "../types/session";
+
+const DEFAULT_SESSION_NAME = "New session";
 
 function generateId(): string {
-  return Array.from(crypto.getRandomValues(new Uint8Array(4)))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+  return crypto.randomUUID();
 }
 
 export async function listSessions(
@@ -46,7 +45,7 @@ export function createNewSession(projectPath: string): SessionData {
   return {
     id: generateId(),
     projectPath,
-    name: "New session",
+    name: DEFAULT_SESSION_NAME,
     createdAt: Date.now(),
     messages: [],
   };
@@ -95,26 +94,15 @@ export async function generateSessionName(
       }),
     });
 
-    if (!response.ok) return "New session";
+    if (!response.ok) return DEFAULT_SESSION_NAME;
 
     const data = await response.json();
     const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-    if (!toolCall) return "New session";
+    if (!toolCall) return DEFAULT_SESSION_NAME;
 
     const args = JSON.parse(toolCall.function.arguments ?? "{}");
-    return (args.name as string)?.slice(0, 60) || "New session";
+    return (args.name as string)?.slice(0, 60) || DEFAULT_SESSION_NAME;
   } catch {
-    return "New session";
+    return DEFAULT_SESSION_NAME;
   }
-}
-
-export function storedToChat(msg: StoredMessage): ChatMessage {
-  const m: ChatMessage = {
-    role: msg.role,
-    content: msg.content,
-  };
-  if (msg.tool_calls) m.tool_calls = msg.tool_calls as ChatMessage["tool_calls"];
-  if (msg.tool_call_id) m.tool_call_id = msg.tool_call_id;
-  if (msg.name) m.name = msg.name;
-  return m;
 }

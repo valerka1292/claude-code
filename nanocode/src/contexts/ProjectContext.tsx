@@ -10,6 +10,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
+import { pathToProjectKey } from "../lib/paths";
 
 interface ProjectContextValue {
   folderPath: string | null;
@@ -20,14 +21,6 @@ interface ProjectContextValue {
 }
 
 const ProjectContext = createContext<ProjectContextValue | null>(null);
-
-export function pathToProjectKey(absPath: string): string {
-  return absPath
-    .replace(/\\/g, "/")
-    .replace(/^\//, "")
-    .replace(/\/$/, "")
-    .replace(/\//g, "-");
-}
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const [folderPath, setFolderPath] = useState<string | null>(null);

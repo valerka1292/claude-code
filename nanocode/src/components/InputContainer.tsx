@@ -12,7 +12,8 @@ import {
   useImperativeHandle,
 } from "react";
 import { FolderIcon } from "./Icons";
-import { ModeDropdown, type Mode } from "./ModeDropdown";
+import { ModeDropdown } from "./ModeDropdown";
+import type { Mode } from "../types";
 import { ContextIndicator } from "./ContextIndicator";
 import { CornerDownLeft } from "lucide-react";
 import { useProject } from "../contexts/ProjectContext";

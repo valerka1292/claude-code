@@ -3,35 +3,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback, useState } from "react";
 import { TitleBar } from "./components/TitleBar";
 import { Sidebar } from "./components/Sidebar";
 import { MainArea } from "./components/MainArea";
 import { InputContainer, type InputContainerHandle } from "./components/InputContainer";
-import { type Mode } from "./components/ModeDropdown";
-import { type Message, MessageItem } from "./components/MessageItem";
+import { MessageItem } from "./components/MessageItem";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { motion } from "motion/react";
-import { useProviders } from "./contexts/ProvidersContext";
-import { useProject } from "./contexts/ProjectContext";
 import { useSession } from "./contexts/SessionContext";
-import { runAgentStream, type ChatMessage } from "./lib/agentLoop";
-import { buildSystemMessages } from "./lib/systemPrompt";
-import {
-  generateSessionName,
-  saveSession,
-  storedToChat,
-  type StoredMessage,
-  type SessionData,
-} from "./lib/sessions";
+import { useAgent } from "./hooks/useAgent";
 
 export default function App() {
-  const { activeProvider } = useProviders();
-  const { folderPath, folderName, projectKey } = useProject();
   const {
     activeSession,
-    initSession,
-    updateSession,
     startNewSession,
     openSession,
     sessionList,
@@ -39,253 +24,35 @@ export default function App() {
     removeSession,
   } = useSession();
 
-  const [mode, setMode] = useState<Mode>("Ask");
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isTyping, setIsTyping] = useState(false);
+  const {
+    mode,
+    setMode,
+    messages,
+    isTyping,
+    usedTokens,
+    handleSend,
+    resetAgentUi,
+  } = useAgent();
+
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [usedTokens, setUsedTokens] = useState(0);
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<InputContainerHandle>(null);
-  const lastRestoredIdRef = useRef<string | null>(null);
-
-  const activeSessionRef = useRef<SessionData | null>(null);
-  activeSessionRef.current = activeSession;
-
-  const projectKeyRef = useRef<string | null>(null);
-  projectKeyRef.current = projectKey;
-
-  const activeProviderRef = useRef(activeProvider);
-  activeProviderRef.current = activeProvider;
-
-  const folderPathRef = useRef(folderPath);
-  folderPathRef.current = folderPath;
-
-  const folderNameRef = useRef(folderName);
-  folderNameRef.current = folderName;
-
-  const modeRef = useRef(mode);
-  modeRef.current = mode;
-
-  useEffect(() => {
-    if (!activeSession) {
-      setMessages([]);
-      lastRestoredIdRef.current = null;
-      return;
-    }
-
-    if (
-      lastRestoredIdRef.current === activeSession.id ||
-      activeSession.messages.length === 0
-    ) {
-      return;
-    }
-
-    lastRestoredIdRef.current = activeSession.id;
-    const uiMessages: Message[] = activeSession.messages
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .map((m) => ({
-        id: `${m.ts}-${m.role}`,
-        role: m.role as "user" | "assistant",
-        content: m.content ?? "",
-        reasoning: (m as StoredMessage).reasoning,
-      }));
-    setMessages(uiMessages);
-  }, [activeSession?.id]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping]);
 
-  const updateMsg = useCallback(
-    (id: string, patch: Partial<Message>) =>
-      setMessages((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, ...patch } : m))
-      ),
-    []
-  );
-
-  const handleSend = useCallback(
-    async (value: string) => {
-      const fp = folderPathRef.current;
-      const pk = projectKeyRef.current;
-      const ap = activeProviderRef.current;
-
-      if (!value.trim() || !fp || !pk) return;
-
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      const sendTs = Date.now();
-      const isFirstMessage = !activeSessionRef.current;
-
-      const session: SessionData =
-        activeSessionRef.current ?? initSession(fp);
-
-      const userMsgId = `${sendTs}-user`;
-      const assistantId = `${sendTs + 1}-assistant`;
-
-      setMessages((prev) => [
-        ...prev,
-        { id: userMsgId, role: "user", content: value },
-        {
-          id: assistantId,
-          role: "assistant",
-          content: "",
-          reasoning: "",
-          isStreaming: true,
-          isReasoningStreaming: false,
-        },
-      ]);
-      setIsTyping(true);
-
-      if (!ap) {
-        setTimeout(() => {
-          updateMsg(assistantId, {
-            content: "⚠ No provider configured. Please add one in Settings.",
-            isStreaming: false,
-          });
-          setIsTyping(false);
-        }, 300);
-        return;
-      }
-
-      const sessionNameRef = { current: session.name };
-      if (isFirstMessage) {
-        generateSessionName(ap, value).then((name) => {
-          sessionNameRef.current = name;
-          updateSession({ ...session, name });
-        });
-      }
-
-      const fn = folderNameRef.current;
-      const md = modeRef.current;
-
-      const history: ChatMessage[] = [
-        ...buildSystemMessages({
-          cwd: fp,
-          projectName: fn ?? fp,
-          mode: md,
-        }),
-        ...session.messages.map(storedToChat),
-        { role: "user", content: value },
-      ];
-
-      let assistantContent = "";
-      let assistantReasoning = "";
-
-      runAgentStream(ap, history, {
-        onReasoningChunk: (chunk) => {
-          assistantReasoning += chunk;
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? {
-                    ...m,
-                    reasoning: (m.reasoning ?? "") + chunk,
-                    isReasoningStreaming: true,
-                  }
-                : m
-            )
-          );
-        },
-
-        onContentChunk: (chunk) => {
-          assistantContent += chunk;
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? {
-                    ...m,
-                    content: (m.content ?? "") + chunk,
-                    isReasoningStreaming: false,
-                    isStreaming: true,
-                  }
-                : m
-            )
-          );
-        },
-
-        onToolCallStart: (_id, name) => {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, content: (m.content ?? "") + `\n[Tool: ${name}]` }
-                : m
-            )
-          );
-        },
-
-        onToolCallDone: () => {},
-
-        onUsage: (prompt, completion) => setUsedTokens(prompt + completion),
-
-        onError: (err) => {
-          updateMsg(assistantId, {
-            content: `⚠ Error: ${err.message}`,
-            isStreaming: false,
-            isReasoningStreaming: false,
-          });
-          setIsTyping(false);
-        },
-
-        onDone: async () => {
-          updateMsg(assistantId, {
-            isStreaming: false,
-            isReasoningStreaming: false,
-          });
-          setIsTyping(false);
-
-          const currentPk = projectKeyRef.current;
-          if (!currentPk) return;
-
-          const userStored: StoredMessage = {
-            role: "user",
-            content: value,
-            ts: sendTs,
-          };
-
-          const assistantStored: StoredMessage = {
-            role: "assistant",
-            content: assistantContent || null,
-            reasoning: assistantReasoning || undefined,
-            ts: Date.now(),
-          };
-
-          const finalSession: SessionData = {
-            ...session,
-            name: sessionNameRef.current,
-            messages: [...session.messages, userStored, assistantStored],
-          };
-
-          await saveSession(currentPk, finalSession);
-          updateSession(finalSession);
-        },
-      }, controller.signal);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [initSession, updateSession, updateMsg]
-  );
-
   const handleNewSession = useCallback(() => {
-    abortRef.current?.abort();
+    resetAgentUi();
     startNewSession();
-    setMessages([]);
-    setUsedTokens(0);
-    lastRestoredIdRef.current = null;
-  }, [startNewSession]);
+  }, [resetAgentUi, startNewSession]);
 
   const handleOpenSession = useCallback(
     async (id: string) => {
-      abortRef.current?.abort();
-      setMessages([]);
-      setUsedTokens(0);
-      lastRestoredIdRef.current = null;
+      resetAgentUi();
       await openSession(id);
     },
-    [openSession]
+    [openSession, resetAgentUi]
   );
 
   const inputNode = (

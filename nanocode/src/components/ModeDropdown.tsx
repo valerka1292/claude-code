@@ -7,7 +7,7 @@ import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ChevronDown, MessageSquare, Code } from "lucide-react";
 
-export type Mode = "Ask" | "Code";
+import type { Mode } from "../types";
 
 interface ModeDropdownProps {
   mode: Mode;
