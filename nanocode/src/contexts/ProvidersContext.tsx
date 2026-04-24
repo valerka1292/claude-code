@@ -14,14 +14,13 @@ import {
 import {
   type ProvidersStore,
   type Provider,
-  loadProviders,
-  saveProviders,
   createProvider,
   updateProvider,
   deleteProvider,
   setActiveProvider,
   getActiveProvider,
 } from "../lib/providers";
+import { loadProviders, saveProviders } from "../lib/providersIO";
 
 interface ProvidersContextValue {
   store: ProvidersStore;

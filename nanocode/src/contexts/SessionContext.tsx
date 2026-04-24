@@ -12,7 +12,7 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import type { SessionData, SessionMeta } from "../lib/sessions";
+import type { SessionData, SessionMeta } from "../types/session";
 import {
   listSessions,
   loadSession,
@@ -32,6 +32,8 @@ interface SessionContextValue {
   initSession: (projectPath: string) => SessionData;
   reloadList: () => Promise<void>;
   removeSession: (id: string) => Promise<void>;
+  getActiveSessionSnapshot: () => SessionData | null;
+  onSessionSaveError: (error: unknown) => void;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -48,6 +50,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const projectKeyRef = useRef<string | null>(null);
   projectKeyRef.current = projectKey;
+
+  const onSessionSaveError = useCallback((error: unknown) => {
+    console.error("[sessions] save error:", error);
+    window.alert("Failed to save the current session.");
+  }, []);
 
   useEffect(() => {
     setActiveSession(null);
@@ -72,11 +79,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const key = projectKeyRef.current;
 
     if (current && key && current.messages.length > 0) {
-      saveSession(key, current).catch(console.error);
+      saveSession(key, current).catch(onSessionSaveError);
     }
 
     setActiveSession(null);
-  }, []);
+  }, [onSessionSaveError]);
 
   const openSession = useCallback(async (id: string) => {
     const key = projectKeyRef.current;
@@ -134,6 +141,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         initSession,
         reloadList,
         removeSession,
+        getActiveSessionSnapshot: () => activeSessionRef.current,
+        onSessionSaveError,
       }}
     >
       {children}

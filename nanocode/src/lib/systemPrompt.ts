@@ -3,33 +3,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type { Mode } from "../types";
 import type { ChatMessage } from "./agentLoop";
 
-let _staticPrompt: string | null = null;
+const STATIC_SYSTEM_PROMPT = [
+  "# Identity",
+  "You are **nanocode** — an autonomous coding agent.",
+  "",
+  "# Tool Protocol",
+  "- Solve tasks through available tool calls, not by guessing outcomes.",
+  "- Treat tool output as the single source of truth.",
+  "- Any read, write, search, or execution action must happen via tools.",
+  "",
+  "# Agentic Loop",
+  "- Continue until user request is fully resolved or a blocker is hit.",
+  "- Evaluate, choose best tool, execute.",
+  "- Keep CLI text concise. Return short completion report.",
+  "- Use absolute paths only in tool calls.",
+  "- In user-facing text (reports/commands/headings), use paths relative to CWD",
+  "  and never print absolute paths unless the user explicitly asks.",
+].join("\n");
 
 export function buildStaticSystemPrompt(): string {
-  if (_staticPrompt !== null) return _staticPrompt;
-
-  const sections = [
-    "# Identity",
-    "You are **nanocode** — an autonomous coding agent.",
-    "",
-    "# Tool Protocol",
-    "- Solve tasks through available tool calls, not by guessing outcomes.",
-    "- Treat tool output as the single source of truth.",
-    "- Any read, write, search, or execution action must happen via tools.",
-    "",
-    "# Agentic Loop",
-    "- Continue until user request is fully resolved or a blocker is hit.",
-    "- Evaluate, choose best tool, execute.",
-    "- Keep CLI text concise. Return short completion report.",
-    "- Use absolute paths only in tool calls.",
-    "- In user-facing text (reports/commands/headings), use paths relative to CWD",
-    "  and never print absolute paths unless the user explicitly asks.",
-  ];
-
-  _staticPrompt = sections.join("\n");
-  return _staticPrompt;
+  return STATIC_SYSTEM_PROMPT;
 }
 
 export interface DynamicPromptOptions {
@@ -37,14 +33,15 @@ export interface DynamicPromptOptions {
   projectName: string;
   os?: string;
   shell?: string;
-  mode?: string;
+  mode?: Mode;
 }
 
 export function buildDynamicSystemPrompt(opts: DynamicPromptOptions): string {
   const {
     cwd,
     projectName,
-    os: osName = navigator.platform ?? "unknown",
+    os: osName =
+      typeof navigator !== "undefined" ? navigator.platform : "unknown",
     shell = "bash",
     mode = "Ask",
   } = opts;
