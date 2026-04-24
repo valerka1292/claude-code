@@ -45,9 +45,10 @@ func Footer(width int, usage string, hint string, mode string) string {
 
 	right := footerStyle.Foreground(theme.MutedText).Render(usage)
 	if usage == "" {
-		return left
+		return lipgloss.NewStyle().Width(width).Background(theme.AppBackground).Render(left)
 	}
 	spacerWidth := mathutil.Max(0, width-lipgloss.Width(left)-lipgloss.Width(right))
 	spacer := lipgloss.NewStyle().Width(spacerWidth).Render("")
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, spacer, right)
+	content := lipgloss.JoinHorizontal(lipgloss.Top, left, spacer, right)
+	return lipgloss.NewStyle().Width(width).Background(theme.AppBackground).Render(content)
 }

@@ -42,7 +42,7 @@ func (m Model) View() string {
 	}
 
 	nobbyView := nobby.Render(m.nobbyPose, m.nobbyStep)
-	headerView := header.View(m.cwd, nobbyView, m.activeProviderName(), m.activeModelName())
+	headerView := header.View(m.layout.width, m.cwd, nobbyView, m.activeProviderName(), m.activeModelName())
 	inputView := prompt.InputBar(m.input.View(), m.layout.width)
 	parts := []string{headerView, "", m.viewportWithScrollbar(), inputView}
 
@@ -63,7 +63,11 @@ func (m Model) View() string {
 	}
 
 	parts = append(parts, prompt.Footer(m.layout.width, m.usageLine(), m.confirmationHint(), string(m.chat.mode)))
-	root := lipgloss.NewStyle().Background(theme.AppBackground).Foreground(theme.PrimaryText)
+	root := lipgloss.NewStyle().
+		Background(theme.AppBackground).
+		Foreground(theme.PrimaryText).
+		Width(m.layout.width).
+		Height(m.layout.height)
 	return root.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
 
