@@ -45,20 +45,7 @@ func (m Model) View() string {
 	inputHeight := lipgloss.Height(inputView)
 	footerHeight := lipgloss.Height(footerView)
 	totalReserved := headerHeight + inputHeight + footerHeight + 1
-	debugInfo := fmt.Sprintf(
-		"RAW W:%d H:%d | HeaderH:%d InputH:%d FooterH:%d | ViewportW:%d ViewportH:%d ViewTop:%d | ScrollbarX:%d | Reserved:%d",
-		m.layout.width,
-		m.layout.height,
-		headerHeight,
-		inputHeight,
-		footerHeight,
-		m.viewport.Width,
-		m.viewport.Height,
-		m.layout.viewportTop,
-		m.scrollbarColumn(),
-		totalReserved,
-	)
-	parts := []string{headerView, debugInfo, m.viewportWithScrollbar(), inputView}
+	parts := []string{headerView, m.viewportWithScrollbar(), inputView}
 
 	if len(m.commands.suggestions) > 0 {
 		suggestionsView := suggestions.CommandList(m.layout.width, m.commands.suggestions, m.commands.selected)
