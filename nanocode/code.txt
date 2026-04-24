@@ -619,6 +619,7 @@ import (
 	"strconv"
 	"strings"
 
+	"nanocode/internal/mathutil"
 	"nanocode/ui/theme"
 
 	"github.com/alecthomas/chroma/v2/quick"
@@ -627,19 +628,29 @@ import (
 
 var hunkHeaderRegex = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
 
-var (
-	addBgStyle = lipgloss.NewStyle().Background(lipgloss.Color("#163320"))
-	subBgStyle = lipgloss.NewStyle().Background(lipgloss.Color("#3d1a1a"))
-
-	addPrefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#2EEA78")).Bold(true)
-	subPrefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#EA4646")).Bold(true)
-
-	numStyle = lipgloss.NewStyle().Foreground(theme.MutedText)
-
-	infoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD")).Italic(true)
+// Сырые ANSI-коды фона для +/- строк.
+// Реинжектируются после каждого \x1b[0m из chroma, чтобы фон не сбрасывался между токенами.
+const (
+	addBgANSI = "\x1b[48;2;22;51;32m" // #163320 тёмно-зелёный
+	subBgANSI = "\x1b[48;2;61;26;26m" // #3d1a1a тёмно-красный
 )
 
-func RenderDiff(filePath string, diffText string) string {
+var (
+	addPrefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#2EEA78")).Bold(true)
+	subPrefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#EA4646")).Bold(true)
+	numStyle       = lipgloss.NewStyle().Foreground(theme.MutedText)
+	infoStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD")).Italic(true)
+)
+
+// reinjectBg вставляет bgCode после каждого ANSI-сброса (\x1b[0m / \x1b[m),
+// чтобы фон сохранялся сквозь все токены chroma-подсветки.
+func reinjectBg(s, bgCode string) string {
+	s = strings.ReplaceAll(s, "\x1b[0m", "\x1b[0m"+bgCode)
+	s = strings.ReplaceAll(s, "\x1b[m", "\x1b[m"+bgCode)
+	return s
+}
+
+func RenderDiff(filePath string, diffText string, width int) string {
 	lines := strings.Split(diffText, "\n")
 	var cleanLines []string
 	var lineTypes []string
@@ -665,12 +676,12 @@ func RenderDiff(filePath string, diffText string) string {
 		cleanLines = append(cleanLines, line)
 	}
 
+	// Подсветка синтаксиса всего текста (используется и для +/-, и для контекста)
 	cleanText := strings.Join(cleanLines, "\n")
 	ext := strings.TrimPrefix(filepath.Ext(filePath), ".")
 	if ext == "" {
 		ext = "text"
 	}
-
 	var buf strings.Builder
 	err := quick.Highlight(&buf, cleanText, ext, "terminal256", "dracula")
 	highlightedText := cleanText
@@ -679,19 +690,12 @@ func RenderDiff(filePath string, diffText string) string {
 	}
 	hlLines := strings.Split(highlightedText, "\n")
 
-	var formatted strings.Builder
-
-	oldLine := 0
-	newLine := 0
-	hlIndex := 0
-
+	// Ширина номеров строк
 	maxLine := 0
 	for _, line := range lines {
 		if matches := hunkHeaderRegex.FindStringSubmatch(line); len(matches) == 3 {
-			if nl, err := strconv.Atoi(matches[2]); err == nil {
-				if nl > maxLine {
-					maxLine = nl
-				}
+			if nl, err2 := strconv.Atoi(matches[2]); err2 == nil && nl > maxLine {
+				maxLine = nl
 			}
 		}
 	}
@@ -701,11 +705,18 @@ func RenderDiff(filePath string, diffText string) string {
 		digits = 2
 	}
 
+	// Расчёт ширин
+	gutterWidth := digits + 3 // "%Nd │ "
+	innerWidth := mathutil.Max(40, width-8)
+	contentWidth := mathutil.Max(10, innerWidth-gutterWidth)
+
+	var formatted strings.Builder
+	oldLine, newLine, hlIndex := 0, 0, 0
+
 	for i, lType := range lineTypes {
 		if lType == "skip" {
 			continue
 		}
-
 		if lType == "@@" {
 			matches := hunkHeaderRegex.FindStringSubmatch(lines[i])
 			if len(matches) == 3 {
@@ -717,35 +728,44 @@ func RenderDiff(filePath string, diffText string) string {
 			continue
 		}
 
-		var numStr string
-		var lineContent string
-
 		hlContent := ""
+		if hlIndex < len(cleanLines) {
+			hlContent = cleanLines[hlIndex] // fallback: без ANSI
+		}
 		if hlIndex < len(hlLines) {
-			hlContent = hlLines[hlIndex]
+			hlContent = hlLines[hlIndex] // с chroma-подсветкой
 		}
 		hlIndex++
 
-		if hlContent == "" {
-			hlContent = " "
-		}
+		var numStr, lineContent string
 
-		if lType == "+" {
+		switch lType {
+		case "+":
 			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, newLine))
 			newLine++
-			prefix := addPrefixStyle.Render("+ ")
-			lineContent = addBgStyle.Render(prefix + hlContent)
-		} else if lType == "-" {
+			// Реинжектируем фон в prefix (lipgloss ставит \x1b[0m в конце Render)
+			// и в каждый ANSI-reset внутри chroma-подсветки.
+			pfx := reinjectBg(addPrefixStyle.Render("+ "), addBgANSI)
+			hlit := reinjectBg(hlContent, addBgANSI)
+			full := pfx + hlit
+			pad := strings.Repeat(" ", mathutil.Max(0, contentWidth-lipgloss.Width(full)))
+			lineContent = addBgANSI + full + pad + "\x1b[0m"
+
+		case "-":
 			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, oldLine))
 			oldLine++
-			prefix := subPrefixStyle.Render("- ")
-			lineContent = subBgStyle.Render(prefix + hlContent)
-		} else {
+			pfx := reinjectBg(subPrefixStyle.Render("- "), subBgANSI)
+			hlit := reinjectBg(hlContent, subBgANSI)
+			full := pfx + hlit
+			pad := strings.Repeat(" ", mathutil.Max(0, contentWidth-lipgloss.Width(full)))
+			lineContent = subBgANSI + full + pad + "\x1b[0m"
+
+		default:
+			// Контекстные строки: только подсветка синтаксиса, без фона
 			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, newLine))
 			oldLine++
 			newLine++
-			prefix := "  "
-			lineContent = prefix + hlContent
+			lineContent = "  " + hlContent
 		}
 
 		formatted.WriteString(numStr + lineContent + "\n")
@@ -753,22 +773,23 @@ func RenderDiff(filePath string, diffText string) string {
 
 	content := strings.TrimRight(formatted.String(), "\n")
 
-	headerText := " WRITE: " + filePath + " "
 	header := lipgloss.NewStyle().
 		Background(theme.PrimaryAccent).
 		Foreground(theme.AccentContrast).
 		Bold(true).
 		Padding(0, 1).
 		MarginLeft(2).
-		Render(headerText)
+		Render(" WRITE: " + filePath + " ")
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.SurfaceBackground).
+		Width(innerWidth).
 		Render(content)
 
 	return header + "\n" + box
 }
+
 
 ui/components/nobby/nobby.go
 package nobby
@@ -2952,7 +2973,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.event.ToolCallResult != nil {
 			name := msg.event.ToolCallResult.Name
 			isErr := msg.event.ToolCallResult.IsError
-			summary := formatToolResult(name, msg.event.ToolCallResult.Result, isErr)
+			summary := formatToolResult(name, msg.event.ToolCallResult.Result, isErr, m.layout.width)
 
 			updated := false
 			if len(m.chat.messages) > 0 {
@@ -3145,7 +3166,7 @@ func formatToolArgs(name string, raw string, cwd string) string {
 	}
 }
 
-func formatToolResult(name string, raw string, isErr bool) string {
+func formatToolResult(name string, raw string, isErr bool, width int) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return "empty result"
@@ -3171,7 +3192,7 @@ func formatToolResult(name string, raw string, isErr bool) string {
 			Diff     string `json:"diff"`
 		}
 		if json.Unmarshal([]byte(trimmed), &writeData) == nil && writeData.Diff != "" {
-			return messages.RenderDiff(writeData.FilePath, writeData.Diff)
+			return messages.RenderDiff(writeData.FilePath, writeData.Diff, width)
 		}
 		if strings.Contains(trimmed, `"type":"create"`) {
 			return "File created"

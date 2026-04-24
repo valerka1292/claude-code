@@ -115,7 +115,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.event.ToolCallResult != nil {
 			name := msg.event.ToolCallResult.Name
 			isErr := msg.event.ToolCallResult.IsError
-			summary := formatToolResult(name, msg.event.ToolCallResult.Result, isErr)
+			summary := formatToolResult(name, msg.event.ToolCallResult.Result, isErr, m.layout.width)
 
 			updated := false
 			if len(m.chat.messages) > 0 {
@@ -308,7 +308,7 @@ func formatToolArgs(name string, raw string, cwd string) string {
 	}
 }
 
-func formatToolResult(name string, raw string, isErr bool) string {
+func formatToolResult(name string, raw string, isErr bool, width int) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return "empty result"
@@ -334,7 +334,7 @@ func formatToolResult(name string, raw string, isErr bool) string {
 			Diff     string `json:"diff"`
 		}
 		if json.Unmarshal([]byte(trimmed), &writeData) == nil && writeData.Diff != "" {
-			return messages.RenderDiff(writeData.FilePath, writeData.Diff)
+			return messages.RenderDiff(writeData.FilePath, writeData.Diff, width)
 		}
 		if strings.Contains(trimmed, `"type":"create"`) {
 			return "File created"
