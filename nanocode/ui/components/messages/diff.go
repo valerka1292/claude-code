@@ -2,6 +2,7 @@ package messages
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -15,21 +16,92 @@ import (
 )
 
 var hunkHeaderRegex = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
-var ansiBgRe = regexp.MustCompile(`\x1b\[(4[0-9]|48;5;\d+|48;2;\d+;\d+;\d+)m`)
-var ansiResetRe = regexp.MustCompile(`\x1b\[0m`)
+var ansiSGRRe = regexp.MustCompile(`\x1b\[([0-9;]*)m`)
 
 var (
 	addBgStyle     = lipgloss.NewStyle().Background(lipgloss.Color("#163320"))
 	subBgStyle     = lipgloss.NewStyle().Background(lipgloss.Color("#3d1a1a"))
-	addPrefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#2EEA78")).Bold(true)
+	addPrefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#63FF47")).Bold(true)
 	subPrefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#EA4646")).Bold(true)
 	numStyle       = lipgloss.NewStyle().Foreground(theme.MutedText)
 	infoStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD")).Italic(true)
 )
 
+func stripBgSGR(s string) string {
+	return ansiSGRRe.ReplaceAllStringFunc(s, func(code string) string {
+		m := ansiSGRRe.FindStringSubmatch(code)
+		if len(m) != 2 {
+			return code
+		}
+		if m[1] == "" {
+			return code
+		}
+
+		parts := strings.Split(m[1], ";")
+		filtered := make([]string, 0, len(parts))
+		for i := 0; i < len(parts); i++ {
+			p := parts[i]
+			if p == "" {
+				continue
+			}
+
+			n, err := strconv.Atoi(p)
+			if err != nil {
+				filtered = append(filtered, p)
+				continue
+			}
+
+			if (n >= 40 && n <= 49) || (n >= 100 && n <= 109) {
+				continue
+			}
+			if n == 48 && i+1 < len(parts) {
+				mode := parts[i+1]
+				if mode == "5" && i+2 < len(parts) {
+					i += 2
+					continue
+				}
+				if mode == "2" && i+4 < len(parts) {
+					i += 4
+					continue
+				}
+			}
+
+			filtered = append(filtered, p)
+		}
+
+		if len(filtered) == 0 {
+			return ""
+		}
+		return "\x1b[" + strings.Join(filtered, ";") + "m"
+	})
+}
+
 func keepFgAndReapplyBg(s string, bgANSI string) string {
-	withoutBg := ansiBgRe.ReplaceAllString(s, "")
-	return ansiResetRe.ReplaceAllString(withoutBg, "\x1b[0m"+bgANSI)
+	withoutBg := stripBgSGR(s)
+	withoutBg = strings.ReplaceAll(withoutBg, "\x1b[0m", "\x1b[0m"+bgANSI)
+	withoutBg = strings.ReplaceAll(withoutBg, "\x1b[m", "\x1b[m"+bgANSI)
+	return withoutBg
+}
+
+func displayPath(filePath string) string {
+	if filePath == "" {
+		return filePath
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return filePath
+	}
+	rel, err := filepath.Rel(cwd, filePath)
+	if err != nil {
+		return filePath
+	}
+	if rel == "." {
+		return filepath.Base(cwd)
+	}
+	if strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return filePath
+	}
+	return rel
 }
 
 func RenderDiff(filePath string, diffText string, width int) string {
@@ -110,14 +182,11 @@ func RenderDiff(filePath string, diffText string, width int) string {
 			continue
 		}
 
-		hlContent := ""
 		rawContent := ""
 		if hlIndex < len(cleanLines) {
 			rawContent = cleanLines[hlIndex]
 		}
-		if hlIndex < len(cleanLines) {
-			hlContent = cleanLines[hlIndex]
-		}
+		hlContent := rawContent
 		if hlIndex < len(hlLines) {
 			hlContent = hlLines[hlIndex]
 		}
@@ -129,14 +198,14 @@ func RenderDiff(filePath string, diffText string, width int) string {
 		case "+":
 			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, newLine))
 			newLine++
-			pfx := addPrefixStyle.Render("+ ")
+			pfx := keepFgAndReapplyBg(addPrefixStyle.Render("+ "), "\x1b[48;2;22;51;32m")
 			lineContent = addBgStyle.Width(contentWidth).Render(
 				pfx + keepFgAndReapplyBg(hlContent, "\x1b[48;2;22;51;32m"),
 			)
 		case "-":
 			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, oldLine))
 			oldLine++
-			pfx := subPrefixStyle.Render("- ")
+			pfx := keepFgAndReapplyBg(subPrefixStyle.Render("- "), "\x1b[48;2;61;26;26m")
 			lineContent = subBgStyle.Width(contentWidth).Render(
 				pfx + keepFgAndReapplyBg(hlContent, "\x1b[48;2;61;26;26m"),
 			)
@@ -158,7 +227,7 @@ func RenderDiff(filePath string, diffText string, width int) string {
 		Bold(true).
 		Padding(0, 1).
 		MarginLeft(2).
-		Render(" WRITE: " + filePath + " ")
+		Render(" WRITE: " + displayPath(filePath) + " ")
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
