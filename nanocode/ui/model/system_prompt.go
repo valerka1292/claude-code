@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -37,7 +38,8 @@ func buildStaticSystemPrompt() string {
 			"- Continue until user request is fully resolved or a blocker is hit.",
 			"- Evaluate, choose best tool, execute.",
 			"- Keep CLI text concise. Return short completion report.",
-			"- In user-facing text, always use paths relative to CWD; use absolute paths only in tool calls.",
+			"- Use absolute paths only in tool calls.",
+			"- In user-facing text (reports/commands/headings), use paths relative to CWD and never print absolute paths unless user asks.",
 		}
 		staticSystemPromptText = strings.Join(sections, "\n")
 	})
@@ -46,6 +48,10 @@ func buildStaticSystemPrompt() string {
 
 func buildDynamicSystemPrompt(mode AgentMode) string {
 	cwd := currentWorkingDirectory()
+	projectName := filepath.Base(cwd)
+	if projectName == "." || projectName == string(filepath.Separator) || projectName == "" {
+		projectName = cwd
+	}
 	shell := shellName()
 	osName := runtime.GOOS
 
@@ -69,7 +75,8 @@ func buildDynamicSystemPrompt(mode AgentMode) string {
 
 	sections := []string{
 		"# Environment",
-		fmt.Sprintf("- CWD: `%s`", cwd),
+		fmt.Sprintf("- CWD (tool calls only): `%s`", cwd),
+		fmt.Sprintf("- Project name (user-facing): `%s`", projectName),
 		fmt.Sprintf("- OS: `%s`", osName),
 		fmt.Sprintf("- Shell: `%s`", shell),
 		"",
