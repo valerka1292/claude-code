@@ -1,6 +1,12 @@
 package model
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+func (m Model) hasScrollableContent() bool {
+	return m.viewport.TotalLineCount() > m.viewport.Height
+}
 
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
