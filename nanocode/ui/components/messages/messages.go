@@ -32,6 +32,8 @@ var (
 	horizontalFrame = toolBoxStyle.GetHorizontalFrameSize()
 )
 
+const assistantBulletIndent = 4
+
 func availableWidth(totalWidth int, frameSize int) int {
 	return mathutil.Max(10, totalWidth-frameSize)
 }
@@ -92,9 +94,8 @@ func View(list []types.Message, width int, spinnerLine string, thinking string, 
 }
 
 func renderAssistantBlock(text string, width int, streaming bool) string {
-	contentWidth := availableWidth(width, horizontalFrame+4)
+	contentWidth := availableWidth(width, assistantBulletIndent)
 	rendered := renderMarkdown(text, contentWidth, streaming)
-	rendered = lipgloss.NewStyle().MaxWidth(contentWidth).Render(rendered)
 	rendered = strings.Trim(rendered, "\n\r")
 
 	if rendered == "" {
