@@ -48,6 +48,6 @@ func (m *Model) resizeViewport() {
 	}
 	m.layout.viewportTop = headerHeight + 1
 	m.layout.viewportMaxHeight = vHeight
-	m.viewport.Width = mathutil.Max(10, m.layout.width-2)
+	m.viewport.Width = mathutil.Max(10, m.layout.width-3)
 	m.viewport.Height = vHeight
 }
