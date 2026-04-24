@@ -101,7 +101,7 @@ func (m Model) viewportWithScrollbar() string {
 				symbol = scrollbarThumbStyle.Render("█")
 			}
 		}
-		lines[i] += symbol
+		lines[i] += " " + symbol
 	}
 
 	return strings.Join(lines, "\n")

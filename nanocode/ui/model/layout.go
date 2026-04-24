@@ -48,6 +48,8 @@ func (m *Model) resizeViewport() {
 	}
 	m.layout.viewportTop = headerHeight + 1
 	m.layout.viewportMaxHeight = vHeight
-	m.viewport.Width = mathutil.Max(10, m.layout.width-1)
+	// Keep one visual gap plus one scrollbar column.
+	// This avoids terminal auto-wrap pushing scrollbar glyphs to the next line.
+	m.viewport.Width = mathutil.Max(10, m.layout.width-2)
 	m.viewport.Height = vHeight
 }
