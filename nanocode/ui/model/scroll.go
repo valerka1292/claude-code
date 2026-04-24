@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"nanocode/internal/mathutil"
 	"nanocode/ui/theme"
 )
@@ -85,6 +86,7 @@ func (m Model) viewportWithScrollbar() string {
 	content := m.viewport.View()
 	lines := strings.Split(content, "\n")
 	height := mathutil.Max(1, m.viewport.Height)
+	contentWidth := mathutil.Max(1, m.viewport.Width)
 	if len(lines) > height {
 		lines = lines[:height]
 	}
@@ -101,10 +103,19 @@ func (m Model) viewportWithScrollbar() string {
 				symbol = scrollbarThumbStyle.Render("█")
 			}
 		}
-		lines[i] += " " + symbol
+		lines[i] = fitLineToWidth(lines[i], contentWidth) + " " + symbol
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func fitLineToWidth(line string, width int) string {
+	trimmed := ansi.Truncate(line, width, "")
+	pad := width - ansi.StringWidth(trimmed)
+	if pad <= 0 {
+		return trimmed
+	}
+	return trimmed + strings.Repeat(" ", pad)
 }
 
 func scrollbarThumbGeometry(height int, totalLines int, yOffset int) (int, int) {
