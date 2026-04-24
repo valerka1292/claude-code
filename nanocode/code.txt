@@ -522,6 +522,18 @@ var (
 	agentStyle = lipgloss.NewStyle().Foreground(theme.PrimaryText)
 	thinkStyle = lipgloss.NewStyle().Foreground(theme.MutedText).PaddingLeft(3)
 	dotStyle   = lipgloss.NewStyle().Foreground(theme.PrimaryAccent)
+
+	toolRunIconStyle     = lipgloss.NewStyle().Foreground(theme.SecondaryAccent).Bold(true)
+	toolSuccessIconStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#50fa7b")).Bold(true)
+	toolErrorIconStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f")).Bold(true)
+	toolTextStyle        = lipgloss.NewStyle().Foreground(theme.MutedText)
+	toolResultStyle      = lipgloss.NewStyle().Foreground(theme.SecondaryAccent)
+
+	toolBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder(), false, false, false, true).
+			BorderForeground(theme.SurfaceBackground).
+			PaddingLeft(1).
+			MarginLeft(2)
 )
 
 func View(list []types.Message, width int, spinnerLine string, thinking string, streamingText string) string {
@@ -532,6 +544,33 @@ func View(list []types.Message, width int, spinnerLine string, thinking string, 
 			lines = append(lines, userStyle.Width(mathutil.Max(width-2, 10)).Render("❯ "+msg.Text))
 		case types.RoleAssistant:
 			lines = append(lines, agentStyle.Render(renderAssistantBlock(msg.Text, width, false)))
+		case types.RoleTool:
+			text := msg.Text
+			formattedText := text
+
+			if strings.HasPrefix(text, "⚙") {
+				formattedText = toolRunIconStyle.Render("⚙") + toolTextStyle.Render(text[3:])
+			} else if strings.HasPrefix(text, "✓") {
+				parts := strings.SplitN(text, "\n", 2)
+				firstLine := toolSuccessIconStyle.Render("✓") + toolTextStyle.Render(parts[0][3:])
+				if len(parts) > 1 {
+					secondLine := toolResultStyle.Render(parts[1])
+					formattedText = firstLine + "\n" + secondLine
+				} else {
+					formattedText = firstLine
+				}
+			} else if strings.HasPrefix(text, "✗") {
+				parts := strings.SplitN(text, "\n", 2)
+				firstLine := toolErrorIconStyle.Render("✗") + toolTextStyle.Render(parts[0][3:])
+				if len(parts) > 1 {
+					secondLine := toolErrorIconStyle.Render(parts[1])
+					formattedText = firstLine + "\n" + secondLine
+				} else {
+					formattedText = firstLine
+				}
+			}
+
+			lines = append(lines, toolBoxStyle.Width(mathutil.Max(width-4, 10)).Render(formattedText))
 		}
 		lines = append(lines, "")
 	}
@@ -569,6 +608,167 @@ func renderAssistantBlock(text string, width int, streaming bool) string {
 	return strings.Join(rows, "\n")
 }
 
+
+ui/components/messages/diff.go
+package messages
+
+import (
+	"fmt"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"nanocode/ui/theme"
+
+	"github.com/alecthomas/chroma/v2/quick"
+	"github.com/charmbracelet/lipgloss"
+)
+
+var hunkHeaderRegex = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
+
+var (
+	addBgStyle = lipgloss.NewStyle().Background(lipgloss.Color("#163320"))
+	subBgStyle = lipgloss.NewStyle().Background(lipgloss.Color("#3d1a1a"))
+
+	addPrefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#2EEA78")).Bold(true)
+	subPrefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#EA4646")).Bold(true)
+
+	numStyle = lipgloss.NewStyle().Foreground(theme.MutedText)
+
+	infoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD")).Italic(true)
+)
+
+func RenderDiff(filePath string, diffText string) string {
+	lines := strings.Split(diffText, "\n")
+	var cleanLines []string
+	var lineTypes []string
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "\\") {
+			lineTypes = append(lineTypes, "skip")
+			continue
+		}
+		if strings.HasPrefix(line, "@@") {
+			lineTypes = append(lineTypes, "@@")
+			continue
+		}
+		if len(line) > 0 {
+			char := line[0:1]
+			if char == "+" || char == "-" || char == " " {
+				lineTypes = append(lineTypes, char)
+				cleanLines = append(cleanLines, line[1:])
+				continue
+			}
+		}
+		lineTypes = append(lineTypes, " ")
+		cleanLines = append(cleanLines, line)
+	}
+
+	cleanText := strings.Join(cleanLines, "\n")
+	ext := strings.TrimPrefix(filepath.Ext(filePath), ".")
+	if ext == "" {
+		ext = "text"
+	}
+
+	var buf strings.Builder
+	err := quick.Highlight(&buf, cleanText, ext, "terminal256", "dracula")
+	highlightedText := cleanText
+	if err == nil && buf.Len() > 0 {
+		highlightedText = buf.String()
+	}
+	hlLines := strings.Split(highlightedText, "\n")
+
+	var formatted strings.Builder
+
+	oldLine := 0
+	newLine := 0
+	hlIndex := 0
+
+	maxLine := 0
+	for _, line := range lines {
+		if matches := hunkHeaderRegex.FindStringSubmatch(line); len(matches) == 3 {
+			if nl, err := strconv.Atoi(matches[2]); err == nil {
+				if nl > maxLine {
+					maxLine = nl
+				}
+			}
+		}
+	}
+	maxLine += len(lines)
+	digits := len(strconv.Itoa(maxLine))
+	if digits < 2 {
+		digits = 2
+	}
+
+	for i, lType := range lineTypes {
+		if lType == "skip" {
+			continue
+		}
+
+		if lType == "@@" {
+			matches := hunkHeaderRegex.FindStringSubmatch(lines[i])
+			if len(matches) == 3 {
+				oldLine, _ = strconv.Atoi(matches[1])
+				newLine, _ = strconv.Atoi(matches[2])
+			}
+			gutter := strings.Repeat(" ", digits) + " │ "
+			formatted.WriteString(numStyle.Render(gutter) + infoStyle.Render(lines[i]) + "\n")
+			continue
+		}
+
+		var numStr string
+		var lineContent string
+
+		hlContent := ""
+		if hlIndex < len(hlLines) {
+			hlContent = hlLines[hlIndex]
+		}
+		hlIndex++
+
+		if hlContent == "" {
+			hlContent = " "
+		}
+
+		if lType == "+" {
+			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, newLine))
+			newLine++
+			prefix := addPrefixStyle.Render("+ ")
+			lineContent = addBgStyle.Render(prefix + hlContent)
+		} else if lType == "-" {
+			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, oldLine))
+			oldLine++
+			prefix := subPrefixStyle.Render("- ")
+			lineContent = subBgStyle.Render(prefix + hlContent)
+		} else {
+			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, newLine))
+			oldLine++
+			newLine++
+			prefix := "  "
+			lineContent = prefix + hlContent
+		}
+
+		formatted.WriteString(numStr + lineContent + "\n")
+	}
+
+	content := strings.TrimRight(formatted.String(), "\n")
+
+	headerText := " WRITE: " + filePath + " "
+	header := lipgloss.NewStyle().
+		Background(theme.PrimaryAccent).
+		Foreground(theme.AccentContrast).
+		Bold(true).
+		Padding(0, 1).
+		MarginLeft(2).
+		Render(headerText)
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.SurfaceBackground).
+		Render(content)
+
+	return header + "\n" + box
+}
 
 ui/components/nobby/nobby.go
 package nobby
@@ -747,17 +947,36 @@ func InputBar(text string, width int) string {
 	return boxStyle.Width(width).Render("❯ " + text)
 }
 
-func Footer(width int, usage string, hint string) string {
-	leftText := "⏵⏵ accept edits on (shift+tab to cycle)"
-	if hint != "" {
-		leftText = hint
+func Footer(width int, usage string, hint string, mode string) string {
+	var badge string
+	if mode == "code" {
+		badge = lipgloss.NewStyle().
+			Foreground(theme.AccentContrast).
+			Background(theme.PrimaryAccent).
+			Padding(0, 1).Bold(true).Render("CODE")
+	} else {
+		badge = lipgloss.NewStyle().
+			Foreground(theme.AccentContrast).
+			Background(theme.ModeAsk).
+			Padding(0, 1).Bold(true).Render("ASK")
 	}
-	left := footerStyle.Render(leftText)
+
+	badgePadded := lipgloss.NewStyle().PaddingLeft(1).Render(badge)
+	hintStyle := lipgloss.NewStyle().Foreground(theme.SecondaryAccent)
+
+	leftText := hintStyle.Render("(shift+tab to cycle)")
+	if hint != "" {
+		leftText = hintStyle.Render(hint)
+	}
+	left := lipgloss.JoinHorizontal(lipgloss.Left, badgePadded, " ", leftText)
+
 	right := footerStyle.Foreground(theme.MutedText).Render(usage)
 	if usage == "" {
 		return left
 	}
-	return lipgloss.NewStyle().Width(width).Render(lipgloss.JoinHorizontal(lipgloss.Top, left, lipgloss.NewStyle().Width(mathutil.Max(0, width-lipgloss.Width(left)-lipgloss.Width(right))).Render(""), right))
+	spacerWidth := mathutil.Max(0, width-lipgloss.Width(left)-lipgloss.Width(right))
+	spacer := lipgloss.NewStyle().Width(spacerWidth).Render("")
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, spacer, right)
 }
 
 
@@ -1319,7 +1538,9 @@ func New() Model {
 		viewport:  vp,
 		nobbyPose: nobby.PoseIdle,
 		layout:    LayoutState{},
-		chat:      ChatState{},
+		chat: ChatState{
+			mode: ModeAsk,
+		},
 		commands:  CommandState{},
 		settings: SettingsState{
 			values:      cfg,
@@ -1832,37 +2053,6 @@ type Model struct {
 }
 
 
-ui/model/utils.go
-package model
-
-import (
-	"strings"
-	"unicode/utf8"
-
-	"nanocode/ui/types"
-)
-
-func estimateTokens(text string) int {
-	runes := utf8.RuneCountInString(text)
-	if runes <= 0 {
-		return 0
-	}
-	estimated := runes / 4
-	if estimated < 1 {
-		return 1
-	}
-	return estimated
-}
-
-func estimatePromptTokens(history []types.Message) int {
-	total := estimateTokens(strings.Join(buildSystemPrompts(), "\n"))
-	for _, msg := range history {
-		total += estimateTokens(msg.Text)
-	}
-	return total
-}
-
-
 ui/model/format.go
 package model
 
@@ -1970,7 +2160,7 @@ func (m Model) View() string {
 		parts = append(parts, providers.Panel(m.layout.width, title, desc, options, selected, inputView))
 	}
 
-	parts = append(parts, prompt.Footer(m.layout.width, m.usageLine(), m.confirmationHint()))
+	parts = append(parts, prompt.Footer(m.layout.width, m.usageLine(), m.confirmationHint(), string(m.chat.mode)))
 	root := lipgloss.NewStyle().Background(theme.AppBackground).Foreground(theme.PrimaryText)
 	return root.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
@@ -2009,7 +2199,7 @@ func (m *Model) resizeViewport() {
 	}
 	headerHeight := lipgloss.Height(header.View(m.cwd, nobby.Render(m.nobbyPose, m.nobbyStep), m.activeProviderName(), m.activeModelName()))
 	inputHeight := lipgloss.Height(prompt.InputBar(m.input.View(), m.layout.width))
-	footerHeight := lipgloss.Height(prompt.Footer(m.layout.width, m.usageLine(), m.confirmationHint()))
+	footerHeight := lipgloss.Height(prompt.Footer(m.layout.width, m.usageLine(), m.confirmationHint(), string(m.chat.mode)))
 	reserved := headerHeight + inputHeight + footerHeight + 3
 	if len(m.commands.suggestions) > 0 {
 		reserved += lipgloss.Height(suggestions.CommandList(m.layout.width, m.commands.suggestions, m.commands.selected))
@@ -2034,457 +2224,6 @@ func (m *Model) resizeViewport() {
 	m.layout.viewportMaxHeight = vHeight
 	m.viewport.Width = mathutil.Max(10, m.layout.width-1)
 	m.viewport.Height = vHeight
-}
-
-
-ui/model/input_handler.go
-package model
-
-import (
-	"strings"
-	"time"
-
-	tea "github.com/charmbracelet/bubbletea"
-	"nanocode/ui/components/nobby"
-	"nanocode/ui/components/spinner"
-	"nanocode/ui/config"
-	"nanocode/ui/model/agent"
-	"nanocode/ui/types"
-)
-
-func (m Model) executeInput() (tea.Model, tea.Cmd) {
-	text := strings.TrimSpace(m.input.Value())
-	if text == "" {
-		return m, nil
-	}
-	if text == "/settings" {
-		m.settings.open = true
-		m.settings.selectedRow = 0
-		m.input.SetValue("")
-		m.clearCommandSuggestions()
-		m.resizeViewport()
-		return m, nil
-	}
-	if text == "/provider" {
-		m.openProviderPanel()
-		m.input.SetValue("")
-		m.clearCommandSuggestions()
-		m.resizeViewport()
-		return m, nil
-	}
-
-	active, ok := config.ActiveProvider(m.providers.data)
-	if !ok {
-		m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: "No active provider. Run /provider and create one first."})
-		m.input.SetValue("")
-		m.clearCommandSuggestions()
-		m.refreshViewport(true)
-		return m, nil
-	}
-
-	m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleUser, Text: text, Timestamp: time.Now()})
-	m.input.SetValue("")
-	m.clearCommandSuggestions()
-	m.chat.thinking = true
-	m.chat.spinnerStep = 0
-	m.chat.spinnerVerb = spinner.RandomVerb()
-	m.chat.streamingText = ""
-	m.chat.streamingThought = ""
-	m.chat.cycleStartedAt = time.Now()
-	m.chat.estimatedTokensStream = 0
-	m.chat.estimatedReasoningTokens = 0
-	m.chat.showInferring = true
-	m.chat.lastWorkedForSec = 0
-	m.chat.interrupted = false
-	m.clearPendingConfirmation()
-	m.chat.abortChan = make(chan struct{})
-	promptTokens := estimatePromptTokens(m.chat.messages)
-	if promptTokens < m.chat.contextTokenFloor {
-		promptTokens = m.chat.contextTokenFloor
-	}
-	if promptTokens > m.chat.contextTokenFloor {
-		m.chat.contextTokenFloor = promptTokens
-	}
-	m.chat.usage = agent.UsageState{
-		PromptTokens: promptTokens,
-		TotalTokens:  promptTokens,
-	}
-	m.setNobbyPose(nobby.PoseReading)
-	m.resizeViewport()
-	m.refreshViewport(true)
-	return m, tea.Batch(
-		spinnerTickCmd(m.settings.values.SpinnerStyle),
-		startAgentStreamCmd(active, m.chat.messages, m.chat.toolHistory, m.settings.values, m.chat.abortChan),
-	)
-}
-
-func (m *Model) setNobbyPose(pose nobby.Pose) {
-	if m.nobbyPose == pose {
-		return
-	}
-	m.nobbyPose = pose
-	m.nobbyStep = 0
-}
-
-
-ui/model/types.go
-package model
-
-import (
-	"time"
-
-	"github.com/charmbracelet/bubbles/textinput"
-	"nanocode/ui/config"
-	"nanocode/ui/model/agent"
-	"nanocode/ui/model/provider"
-	"nanocode/ui/types"
-)
-
-type providerMode string
-
-const (
-	providerModeMenu       providerMode = "menu"
-	providerModeCreate     providerMode = "create"
-	providerModeSelect     providerMode = "select"
-	providerModeEditPick   providerMode = "edit_pick"
-	providerModeEditField  providerMode = "edit_field"
-	providerModeEditInput  providerMode = "edit_input"
-	providerModeDelete     providerMode = "delete"
-	providerModeInputValue providerMode = "input_value"
-)
-
-type spinnerTickMsg time.Time
-type spinnerChangedMsg struct{ saved bool }
-type providerSavedMsg struct {
-	saved   bool
-	message string
-}
-type nobbyTickMsg time.Time
-
-type streamStartedMsg struct{ ch <-chan agent.StreamEvent }
-type streamEventMsg struct {
-	event agent.StreamEvent
-	done  bool
-}
-
-type command struct {
-	Name string
-}
-
-var availableCommands = []command{{Name: "/settings"}, {Name: "/provider"}}
-
-type LayoutState struct {
-	width             int
-	height            int
-	viewportMaxHeight int
-	viewportTop       int
-	scrollbarDragging bool
-}
-
-type ChatState struct {
-	messages                 []types.Message
-	toolHistory              []agent.APIMessage
-	thinking                 bool
-	spinnerVerb              string
-	spinnerStep              int
-	streamingText            string
-	streamingThought         string
-	usage                    agent.UsageState
-	cycleStartedAt           time.Time
-	estimatedTokensStream    int
-	estimatedReasoningTokens int
-	contextTokenFloor        int
-	showInferring            bool
-	lastWorkedForSec         int
-	interrupted              bool
-	// Double-press exit/interrupt confirmation state
-	confirmPressTime time.Time
-	confirmPending   bool
-	confirmKey       string
-	abortChan        chan struct{}
-}
-
-type CommandState struct {
-	suggestions []string
-	selected    int
-}
-
-type SettingsState struct {
-	open        bool
-	selectedRow int
-	values      config.Settings
-}
-
-type ProviderState struct {
-	open               bool
-	mode               providerMode
-	menuIndex          int
-	selectedProvider   int
-	selectedField      provider.Field
-	input              textinput.Model
-	data               config.ProvidersFile
-	names              []string
-	form               provider.Form
-	inputPrompt        string
-	inputField         provider.Field
-	currentProviderRef string
-}
-
-type StreamState struct {
-	ch <-chan agent.StreamEvent
-}
-
-
-ui/model/update.go
-package model
-
-import (
-	"strings"
-	"time"
-
-	tea "github.com/charmbracelet/bubbletea"
-	"nanocode/internal/mathutil"
-	"nanocode/ui/components/nobby"
-	"nanocode/ui/types"
-)
-
-const confirmWindow = 800 * time.Millisecond
-
-func (m *Model) isPendingConfirmationFor(key string) bool {
-	if !m.chat.confirmPending || m.chat.confirmKey != key {
-		return false
-	}
-	return time.Since(m.chat.confirmPressTime) <= confirmWindow
-}
-
-func (m *Model) setPendingConfirmation(key string) {
-	m.chat.confirmPending = true
-	m.chat.confirmKey = key
-	m.chat.confirmPressTime = time.Now()
-}
-
-func (m *Model) clearPendingConfirmation() {
-	m.chat.confirmPending = false
-	m.chat.confirmKey = ""
-	m.chat.confirmPressTime = time.Time{}
-}
-
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.layout.width = msg.Width
-		m.layout.height = msg.Height
-		m.input.Width = mathutil.Max(10, msg.Width-6)
-		m.providers.input.Width = mathutil.Max(30, msg.Width/2)
-		m.resizeViewport()
-		m.refreshViewport(false)
-		return m, nil
-	case tea.MouseMsg:
-		return m.handleMouse(msg)
-	case nobbyTickMsg:
-		m.nobbyStep++
-		return m, nobbyTickCmd(m.nobbyPose, m.nobbyStep)
-	case spinnerChangedMsg:
-		if msg.saved {
-			m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: "Settings saved: spinner style updated."})
-			m.refreshViewport(true)
-		}
-		return m, nil
-	case providerSavedMsg:
-		if msg.saved {
-			m.providers.open = false
-			m.providers.mode = providerModeMenu
-			m.providers.input.Blur()
-			m.reloadProviderNames()
-			m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: msg.message, Timestamp: time.Now()})
-			m.refreshViewport(true)
-		}
-		return m, nil
-	case streamStartedMsg:
-		m.stream.ch = msg.ch
-		m.setNobbyPose(nobby.PoseReading)
-		return m, pollStreamCmd(m.stream.ch)
-	case streamEventMsg:
-		if msg.done {
-			m.setNobbyPose(nobby.PoseIdle)
-			m.chat.thinking = false
-			m.chat.spinnerVerb = ""
-			m.chat.spinnerStep = 0
-			m.chat.showInferring = false
-			if !m.chat.cycleStartedAt.IsZero() {
-				m.chat.lastWorkedForSec = int(time.Since(m.chat.cycleStartedAt).Seconds())
-			}
-			if strings.TrimSpace(m.chat.streamingText) != "" {
-				m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: m.chat.streamingText, Timestamp: time.Now()})
-			}
-			m.chat.streamingText = ""
-			m.chat.streamingThought = ""
-			m.refreshViewport(true)
-			return m, nil
-		}
-		if msg.event.ErrorText != "" {
-			m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: "Error: " + msg.event.ErrorText, Timestamp: time.Now()})
-			m.setNobbyPose(nobby.PoseAPIError)
-			m.chat.thinking = false
-			m.chat.showInferring = false
-			m.chat.streamingText = ""
-			m.chat.streamingThought = ""
-			m.refreshViewport(true)
-			return m, nil
-		}
-		if msg.event.ReconnectNote != "" {
-			m.setNobbyPose(nobby.PoseAPIErrorReconnect)
-			m.chat.messages = append(m.chat.messages, types.Message{
-				Role:      types.RoleAssistant,
-				Text:      msg.event.ReconnectNote,
-				Timestamp: time.Now(),
-			})
-			m.refreshViewport(true)
-			return m, pollStreamCmd(m.stream.ch)
-		}
-		if msg.event.ReasoningDelta != "" {
-			m.setNobbyPose(nobby.PoseThinking)
-			m.chat.streamingThought += msg.event.ReasoningDelta
-			m.chat.estimatedTokensStream++
-			m.chat.estimatedReasoningTokens++
-		}
-		if msg.event.ContentDelta != "" {
-			m.setNobbyPose(nobby.PoseWriting)
-			m.chat.showInferring = false
-			m.chat.streamingText += msg.event.ContentDelta
-			m.chat.estimatedTokensStream++
-		}
-		if msg.event.RefusalDelta != "" {
-			m.chat.estimatedTokensStream++
-		}
-		if msg.event.ToolDelta != "" {
-			m.setNobbyPose(nobby.PoseToolCalling)
-			m.chat.estimatedTokensStream++
-		}
-		if msg.event.ToolName != "" {
-			m.setNobbyPose(nobby.PoseToolCalling)
-		}
-		if msg.event.FinalHistory != nil {
-			m.chat.toolHistory = msg.event.FinalHistory
-		}
-		liveEstimatedTotal := m.chat.usage.PromptTokens + m.chat.estimatedTokensStream
-		if liveEstimatedTotal > m.chat.contextTokenFloor {
-			m.chat.contextTokenFloor = liveEstimatedTotal
-		}
-		if msg.event.Usage != nil {
-			m.chat.usage = *msg.event.Usage
-			if m.chat.usage.TotalTokens > m.chat.contextTokenFloor {
-				m.chat.contextTokenFloor = m.chat.usage.TotalTokens
-			}
-		}
-		m.refreshViewport(true)
-		return m, pollStreamCmd(m.stream.ch)
-	case tea.KeyMsg:
-		if m.settings.open {
-			return m.handleSettingsKeys(msg)
-		}
-		if m.providers.open {
-			return m.handleProviderKeys(msg)
-		}
-		if nextModel, cmd, handled := m.handleKeyMsg(msg); handled {
-			return nextModel, cmd
-		}
-	case spinnerTickMsg:
-		if !m.chat.thinking || !m.chat.showInferring {
-			return m, nil
-		}
-		m.chat.spinnerStep++
-		m.refreshViewport(true)
-		return m, spinnerTickCmd(m.settings.values.SpinnerStyle)
-	}
-
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	m.updateCommandSuggestions()
-	m.resizeViewport()
-	m.refreshViewport(false)
-	return m, cmd
-}
-
-func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
-	if len(m.commands.suggestions) > 0 {
-		switch msg.String() {
-		case "up":
-			m.commands.selected = mathutil.Clamp(m.commands.selected-1, 0, len(m.commands.suggestions)-1)
-			return m, nil, true
-		case "down":
-			m.commands.selected = mathutil.Clamp(m.commands.selected+1, 0, len(m.commands.suggestions)-1)
-			return m, nil, true
-		case "tab":
-			m.input.SetValue(m.commands.suggestions[m.commands.selected] + " ")
-			m.clearCommandSuggestions()
-			m.resizeViewport()
-			return m, nil, true
-		}
-	}
-
-	switch msg.String() {
-	case "ctrl+c":
-		// Double-press Ctrl+C to quit.
-		if m.isPendingConfirmationFor("ctrl+c") {
-			m.clearPendingConfirmation()
-			return m, tea.Quit, true
-		}
-		m.setPendingConfirmation("ctrl+c")
-		return m, nil, true
-	case "esc":
-		// During thinking mode, ESC interrupts the stream with confirmation.
-		if m.chat.thinking {
-			if m.isPendingConfirmationFor("esc") {
-				m.chat.interrupted = true
-				m.chat.thinking = false
-				m.chat.showInferring = false
-				close(m.chat.abortChan)
-				m.chat.abortChan = nil
-				m.setNobbyPose(nobby.PoseIdle)
-				if !m.chat.cycleStartedAt.IsZero() {
-					m.chat.lastWorkedForSec = int(time.Since(m.chat.cycleStartedAt).Seconds())
-				}
-				m.clearPendingConfirmation()
-				m.refreshViewport(true)
-				return m, nil, true
-			}
-			m.setPendingConfirmation("esc")
-			return m, nil, true
-		}
-		// Outside generation ESC should do nothing (reserved for canceling generation only).
-		if m.chat.confirmKey == "esc" {
-			m.clearPendingConfirmation()
-		}
-		return m, nil, true
-	case "pgup":
-		m.viewport.HalfViewUp()
-		return m, nil, true
-	case "pgdown":
-		m.viewport.HalfViewDown()
-		return m, nil, true
-	case "up":
-		if len(m.commands.suggestions) == 0 {
-			m.viewport.LineUp(1)
-			return m, nil, true
-		}
-	case "down":
-		if len(m.commands.suggestions) == 0 {
-			m.viewport.LineDown(1)
-			return m, nil, true
-		}
-	case "enter":
-		if m.chat.thinking {
-			return m, nil, true
-		}
-		if len(m.commands.suggestions) > 0 {
-			m.input.SetValue(m.commands.suggestions[m.commands.selected])
-			m.clearCommandSuggestions()
-		}
-		nextModel, cmd := m.executeInput()
-		return nextModel, cmd, true
-	}
-	return m, nil, false
 }
 
 
@@ -2703,10 +2442,11 @@ import (
 	"nanocode/ui/types"
 )
 
-func startAgentStreamCmd(provider config.Provider, history []types.Message, toolHistory []agent.APIMessage, settings config.Settings, abortChan <-chan struct{}) tea.Cmd {
+func startAgentStreamCmd(provider config.Provider, history []types.Message, settings config.Settings, abortChan <-chan struct{}, mode AgentMode) tea.Cmd {
 	return func() tea.Msg {
 		ch := make(chan agent.StreamEvent, 64)
-		go agent.RunLoop(convertProvider(provider), convertMessages(history, toolHistory), settings.APITimeoutSeconds, ch, abortChan)
+		readOnly := mode == ModeAsk
+		go agent.RunLoop(convertProvider(provider), convertMessages(history, mode), settings.APITimeoutSeconds, ch, abortChan, readOnly)
 		return streamStartedMsg{ch: ch}
 	}
 }
@@ -2719,9 +2459,9 @@ func convertProvider(provider config.Provider) agent.ProviderConfig {
 	}
 }
 
-func convertMessages(history []types.Message, toolHistory []agent.APIMessage) []agent.APIMessage {
-	systemPrompts := buildSystemPrompts()
-	result := make([]agent.APIMessage, 0, len(history)+len(systemPrompts)+len(toolHistory))
+func convertMessages(history []types.Message, mode AgentMode) []agent.APIMessage {
+	systemPrompts := buildSystemPrompts(mode)
+	result := make([]agent.APIMessage, 0, len(history)+len(systemPrompts))
 	for _, prompt := range systemPrompts {
 		if strings.TrimSpace(prompt) == "" {
 			continue
@@ -2740,7 +2480,6 @@ func convertMessages(history []types.Message, toolHistory []agent.APIMessage) []
 			Content: msg.Text,
 		})
 	}
-	result = append(result, toolHistory...)
 	return result
 }
 
@@ -2755,6 +2494,240 @@ func pollStreamCmd(ch <-chan agent.StreamEvent) tea.Cmd {
 }
 
 
+ui/model/input_handler.go
+package model
+
+import (
+	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"nanocode/ui/components/nobby"
+	"nanocode/ui/components/spinner"
+	"nanocode/ui/config"
+	"nanocode/ui/model/agent"
+	"nanocode/ui/types"
+)
+
+func (m Model) executeInput() (tea.Model, tea.Cmd) {
+	text := strings.TrimSpace(m.input.Value())
+	if text == "" {
+		return m, nil
+	}
+	if text == "/settings" {
+		m.settings.open = true
+		m.settings.selectedRow = 0
+		m.input.SetValue("")
+		m.clearCommandSuggestions()
+		m.resizeViewport()
+		return m, nil
+	}
+	if text == "/provider" {
+		m.openProviderPanel()
+		m.input.SetValue("")
+		m.clearCommandSuggestions()
+		m.resizeViewport()
+		return m, nil
+	}
+
+	active, ok := config.ActiveProvider(m.providers.data)
+	if !ok {
+		m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: "No active provider. Run /provider and create one first."})
+		m.input.SetValue("")
+		m.clearCommandSuggestions()
+		m.refreshViewport(true)
+		return m, nil
+	}
+
+	m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleUser, Text: text, Timestamp: time.Now()})
+	m.input.SetValue("")
+	m.clearCommandSuggestions()
+	m.chat.thinking = true
+	m.chat.spinnerStep = 0
+	m.chat.spinnerVerb = spinner.RandomVerb()
+	m.chat.streamingText = ""
+	m.chat.streamingThought = ""
+	m.chat.cycleStartedAt = time.Now()
+	m.chat.estimatedTokensStream = 0
+	m.chat.estimatedReasoningTokens = 0
+	m.chat.showInferring = true
+	m.chat.lastWorkedForSec = 0
+	m.chat.interrupted = false
+	m.clearPendingConfirmation()
+	m.chat.abortChan = make(chan struct{})
+	promptTokens := estimatePromptTokens(m.chat.messages, m.chat.mode)
+	if promptTokens < m.chat.contextTokenFloor {
+		promptTokens = m.chat.contextTokenFloor
+	}
+	if promptTokens > m.chat.contextTokenFloor {
+		m.chat.contextTokenFloor = promptTokens
+	}
+	m.chat.usage = agent.UsageState{
+		PromptTokens: promptTokens,
+		TotalTokens:  promptTokens,
+	}
+	m.setNobbyPose(nobby.PoseReading)
+	m.resizeViewport()
+	m.refreshViewport(true)
+	return m, tea.Batch(
+		spinnerTickCmd(m.settings.values.SpinnerStyle),
+		startAgentStreamCmd(active, m.chat.messages, m.settings.values, m.chat.abortChan, m.chat.mode),
+	)
+}
+
+func (m *Model) setNobbyPose(pose nobby.Pose) {
+	if m.nobbyPose == pose {
+		return
+	}
+	m.nobbyPose = pose
+	m.nobbyStep = 0
+}
+
+
+ui/model/types.go
+package model
+
+import (
+	"time"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	"nanocode/ui/config"
+	"nanocode/ui/model/agent"
+	"nanocode/ui/model/provider"
+	"nanocode/ui/types"
+)
+
+type providerMode string
+
+const (
+	providerModeMenu       providerMode = "menu"
+	providerModeCreate     providerMode = "create"
+	providerModeSelect     providerMode = "select"
+	providerModeEditPick   providerMode = "edit_pick"
+	providerModeEditField  providerMode = "edit_field"
+	providerModeEditInput  providerMode = "edit_input"
+	providerModeDelete     providerMode = "delete"
+	providerModeInputValue providerMode = "input_value"
+)
+
+type AgentMode string
+
+const (
+	ModeAsk  AgentMode = "ask"
+	ModeCode AgentMode = "code"
+)
+
+type spinnerTickMsg time.Time
+type spinnerChangedMsg struct{ saved bool }
+type providerSavedMsg struct {
+	saved   bool
+	message string
+}
+type nobbyTickMsg time.Time
+
+type streamStartedMsg struct{ ch <-chan agent.StreamEvent }
+type streamEventMsg struct {
+	event agent.StreamEvent
+	done  bool
+}
+
+type command struct {
+	Name string
+}
+
+var availableCommands = []command{{Name: "/settings"}, {Name: "/provider"}}
+
+type LayoutState struct {
+	width             int
+	height            int
+	viewportMaxHeight int
+	viewportTop       int
+	scrollbarDragging bool
+}
+
+type ChatState struct {
+	messages                 []types.Message
+	thinking                 bool
+	spinnerVerb              string
+	spinnerStep              int
+	streamingText            string
+	streamingThought         string
+	usage                    agent.UsageState
+	cycleStartedAt           time.Time
+	estimatedTokensStream    int
+	estimatedReasoningTokens int
+	contextTokenFloor        int
+	showInferring            bool
+	lastWorkedForSec         int
+	interrupted              bool
+	confirmPressTime time.Time
+	confirmPending   bool
+	confirmKey       string
+	abortChan        chan struct{}
+	mode            AgentMode
+}
+
+type CommandState struct {
+	suggestions []string
+	selected    int
+}
+
+type SettingsState struct {
+	open        bool
+	selectedRow int
+	values      config.Settings
+}
+
+type ProviderState struct {
+	open               bool
+	mode               providerMode
+	menuIndex          int
+	selectedProvider   int
+	selectedField      provider.Field
+	input              textinput.Model
+	data               config.ProvidersFile
+	names              []string
+	form               provider.Form
+	inputPrompt        string
+	inputField         provider.Field
+	currentProviderRef string
+}
+
+type StreamState struct {
+	ch <-chan agent.StreamEvent
+}
+
+
+ui/model/utils.go
+package model
+
+import (
+	"unicode/utf8"
+
+	"nanocode/ui/types"
+)
+
+func estimateTokens(text string) int {
+	runes := utf8.RuneCountInString(text)
+	if runes <= 0 {
+		return 0
+	}
+	estimated := runes / 4
+	if estimated < 1 {
+		return 1
+	}
+	return estimated
+}
+
+func estimatePromptTokens(history []types.Message, mode AgentMode) int {
+	total := estimateTokens(buildSystemPrompt(mode))
+	for _, msg := range history {
+		total += estimateTokens(msg.Text)
+	}
+	return total
+}
+
+
 ui/model/system_prompt.go
 package model
 
@@ -2764,6 +2737,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+
+	"nanocode/ui/model/agent"
 )
 
 var (
@@ -2771,10 +2746,10 @@ var (
 	staticSystemPromptText string
 )
 
-func buildSystemPrompts() []string {
+func buildSystemPrompts(mode AgentMode) []string {
 	return []string{
 		buildStaticSystemPrompt(),
-		buildDynamicSystemPrompt(),
+		buildDynamicSystemPrompt(mode),
 	}
 }
 
@@ -2785,32 +2760,53 @@ func buildStaticSystemPrompt() string {
 			"You are **nanocode - autonomous coding agent**.",
 			"",
 			"# Tool Protocol",
-			"- Solve tasks through available tool calls, not by guessing outcomes in plain text.",
-			"- Treat tool output as the single source of truth for the next step.",
+			"- Solve tasks through available tool calls, not by guessing outcomes.",
+			"- Treat tool output as the single source of truth.",
 			"- Any read, write, search, or execution action must happen via tools.",
 			"",
 			"# Agentic Loop",
-			"- Continue until the user request is fully resolved or a real blocker is hit.",
-			"- After each tool result: evaluate, choose the best next tool, execute.",
-			"- Keep CLI text concise: brief progress + next action.",
-			"- Finish by returning a short completion report with outcome and key artifacts.",
+			"- Continue until user request is fully resolved or a blocker is hit.",
+			"- Evaluate, choose best tool, execute.",
+			"- Keep CLI text concise. Return short completion report.",
 		}
 		staticSystemPromptText = strings.Join(sections, "\n")
 	})
 	return staticSystemPromptText
 }
 
-func buildDynamicSystemPrompt() string {
+func buildDynamicSystemPrompt(mode AgentMode) string {
 	cwd := currentWorkingDirectory()
 	shell := shellName()
 	osName := runtime.GOOS
 
+	var modeDesc string
+	if mode == ModeAsk {
+		modeDesc = "Current Mode: `ask` (READ-ONLY).\nWrite tools will explicitly fail. If writing is required, ask the user to press `shift+tab` to switch to `code` mode."
+	} else {
+		modeDesc = "Current Mode: `code` (READ/WRITE).\nAll tools are available."
+	}
+
+	registry := agent.NewDefaultToolRegistry()
+	var toolsDesc []string
+	toolsDesc = append(toolsDesc, "# Tools Status")
+	for _, t := range registry.GetAllTools() {
+		status := "✅ Available"
+		if mode == ModeAsk && !t.ReadOnly {
+			status = "❌ BLOCKED (Requires 'code' mode)"
+		}
+		toolsDesc = append(toolsDesc, fmt.Sprintf("- %s: %s", t.Name, status))
+	}
+
 	sections := []string{
 		"# Environment",
-		"Current runtime context:",
 		fmt.Sprintf("- CWD: `%s`", cwd),
 		fmt.Sprintf("- OS: `%s`", osName),
 		fmt.Sprintf("- Shell: `%s`", shell),
+		"",
+		"# Permissions",
+		modeDesc,
+		"",
+		strings.Join(toolsDesc, "\n"),
 	}
 	return strings.Join(sections, "\n")
 }
@@ -2825,10 +2821,8 @@ func currentWorkingDirectory() string {
 
 func shellName() string {
 	shell := strings.TrimSpace(os.Getenv("SHELL"))
-	if shell == "" {
-		if runtime.GOOS == "windows" {
-			shell = strings.TrimSpace(os.Getenv("COMSPEC"))
-		}
+	if shell == "" && runtime.GOOS == "windows" {
+		shell = strings.TrimSpace(os.Getenv("COMSPEC"))
 	}
 	if shell == "" {
 		return "unknown"
@@ -2836,233 +2830,463 @@ func shellName() string {
 	return shell
 }
 
+func buildSystemPrompt(mode AgentMode) string {
+	return strings.Join(buildSystemPrompts(mode), "\n\n")
+}
 
-ui/model/agent/retry.go
-package agent
+ui/model/update.go
+package model
 
 import (
-	"errors"
-	"net"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"nanocode/internal/mathutil"
+	"nanocode/ui/components/messages"
+	"nanocode/ui/components/nobby"
+	"nanocode/ui/types"
 )
 
-// IsRetryableError determines if an error is retryable.
-func IsRetryableError(err error) bool {
-	var netErr net.Error
-	if errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
-		return true
+const confirmWindow = 800 * time.Millisecond
+
+func (m *Model) isPendingConfirmationFor(key string) bool {
+	if !m.chat.confirmPending || m.chat.confirmKey != key {
+		return false
 	}
-
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "timeout") ||
-		strings.Contains(msg, "deadline exceeded") ||
-		strings.Contains(msg, "connection reset") ||
-		strings.Contains(msg, "eof") ||
-		strings.Contains(msg, "502") ||
-		strings.Contains(msg, "503") ||
-		strings.Contains(msg, "504")
+	return time.Since(m.chat.confirmPressTime) <= confirmWindow
 }
 
-// RetryBackoff returns the backoff duration for a given retry attempt.
-func RetryBackoff(attempt int) time.Duration {
-	steps := []time.Duration{
-		1 * time.Second,
-		2 * time.Second,
-		4 * time.Second,
-		8 * time.Second,
-	}
-	if attempt < 0 {
-		return steps[0]
-	}
-	if attempt >= len(steps) {
-		return steps[len(steps)-1]
-	}
-	return steps[attempt]
+func (m *Model) setPendingConfirmation(key string) {
+	m.chat.confirmPending = true
+	m.chat.confirmKey = key
+	m.chat.confirmPressTime = time.Now()
 }
 
-
-ui/model/agent/types.go
-package agent
-
-import "strings"
-
-// StreamEvent represents an event from the streaming API.
-type StreamEvent struct {
-	ContentDelta   string
-	ReasoningDelta string
-	RefusalDelta   string
-	Usage          *UsageState
-	FinishReason   string
-	ErrorText      string
-	ReconnectNote  string
-	ToolDelta      string
-	ToolName       string
-	ToolResult     string
-	FinalHistory   []APIMessage
+func (m *Model) clearPendingConfirmation() {
+	m.chat.confirmPending = false
+	m.chat.confirmKey = ""
+	m.chat.confirmPressTime = time.Time{}
 }
 
-// UsageState holds token usage information.
-type UsageState struct {
-	PromptTokens     int
-	CompletionTokens int
-	ReasoningTokens  int
-	TotalTokens      int
-}
-
-// ProviderConfig is a transport-level provider configuration for the agent.
-type ProviderConfig struct {
-	BaseURL string
-	Model   string
-	APIKey  string
-}
-
-// APIMessage represents a message in the API format.
-type APIMessage struct {
-	Role       string        `json:"role"`
-	Content    string        `json:"content,omitempty"`
-	ToolCallID string        `json:"tool_call_id,omitempty"`
-	ToolCalls  []APIToolCall `json:"tool_calls,omitempty"`
-}
-
-// APIToolCall represents a tool call in the API format.
-type APIToolCall struct {
-	ID       string          `json:"id"`
-	Type     string          `json:"type"`
-	Function APIToolFunction `json:"function"`
-}
-
-// APIToolFunction represents a tool function in the API format.
-type APIToolFunction struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-}
-
-// ChatCompletionChunk represents a chunk from the streaming API.
-type ChatCompletionChunk struct {
-	Choices []struct {
-		Delta struct {
-			Content          string `json:"content"`
-			ReasoningContent string `json:"reasoning_content"`
-			Refusal          string `json:"refusal"`
-			FunctionCall     struct {
-				Name      string `json:"name"`
-				Arguments string `json:"arguments"`
-			} `json:"function_call"`
-			ToolCalls []struct {
-				Index    int    `json:"index"`
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Function struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
-		} `json:"delta"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
-	Usage struct {
-		PromptTokens           int `json:"prompt_tokens"`
-		CompletionTokens       int `json:"completion_tokens"`
-		TotalTokens            int `json:"total_tokens"`
-		CompletionTokenDetails struct {
-			ReasoningTokens int `json:"reasoning_tokens"`
-		} `json:"completion_tokens_details"`
-	} `json:"usage"`
-}
-
-// ToolBuffer accumulates tool call data during streaming.
-type ToolBuffer struct {
-	ID        string
-	Name      string
-	Arguments strings.Builder
-}
-
-
-ui/model/agent/loop.go
-package agent
-
-import (
-	"fmt"
-	"time"
-)
-
-const (
-	MaxTurns   = 8
-	MaxRetries = 4
-)
-
-// RunLoop executes the agent loop, streaming events to the output channel.
-func RunLoop(provider ProviderConfig, messages []APIMessage, timeoutSeconds int, out chan<- StreamEvent, abortChan <-chan struct{}) {
-	defer close(out)
-
-	client := NewClient(timeoutSeconds)
-
-	apiHistory := make([]APIMessage, 0, len(messages))
-	apiHistory = append(apiHistory, messages...)
-
-	for turns := 0; turns < MaxTurns; turns++ {
-		calls, usage, finishReason, err := streamOneTurnWithRetry(client, provider, apiHistory, out, abortChan)
-		if err != nil {
-			out <- StreamEvent{ErrorText: err.Error()}
-			return
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.layout.width = msg.Width
+		m.layout.height = msg.Height
+		m.input.Width = mathutil.Max(10, msg.Width-6)
+		m.providers.input.Width = mathutil.Max(30, msg.Width/2)
+		m.resizeViewport()
+		m.refreshViewport(false)
+		return m, nil
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+	case nobbyTickMsg:
+		m.nobbyStep++
+		return m, nobbyTickCmd(m.nobbyPose, m.nobbyStep)
+	case spinnerChangedMsg:
+		if msg.saved {
+			m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: "Settings saved: spinner style updated."})
+			m.refreshViewport(true)
 		}
-		if usage != nil {
-			out <- StreamEvent{Usage: usage}
+		return m, nil
+	case providerSavedMsg:
+		if msg.saved {
+			m.providers.open = false
+			m.providers.mode = providerModeMenu
+			m.providers.input.Blur()
+			m.reloadProviderNames()
+			m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: msg.message, Timestamp: time.Now()})
+			m.refreshViewport(true)
 		}
-		if finishReason != "tool_calls" {
-			out <- StreamEvent{FinishReason: finishReason, FinalHistory: apiHistory}
-			return
+		return m, nil
+	case streamStartedMsg:
+		m.stream.ch = msg.ch
+		m.setNobbyPose(nobby.PoseReading)
+		return m, pollStreamCmd(m.stream.ch)
+	case streamEventMsg:
+		if msg.done {
+			m.setNobbyPose(nobby.PoseIdle)
+			m.chat.thinking = false
+			m.chat.spinnerVerb = ""
+			m.chat.spinnerStep = 0
+			m.chat.showInferring = false
+			if !m.chat.cycleStartedAt.IsZero() {
+				m.chat.lastWorkedForSec = int(time.Since(m.chat.cycleStartedAt).Seconds())
+			}
+			if strings.TrimSpace(m.chat.streamingText) != "" {
+				m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: m.chat.streamingText, Timestamp: time.Now()})
+			}
+			m.chat.streamingText = ""
+			m.chat.streamingThought = ""
+			m.refreshViewport(true)
+			return m, nil
+		}
+		if msg.event.ErrorText != "" {
+			m.chat.messages = append(m.chat.messages, types.Message{Role: types.RoleAssistant, Text: "Error: " + msg.event.ErrorText, Timestamp: time.Now()})
+			m.setNobbyPose(nobby.PoseAPIError)
+			m.chat.thinking = false
+			m.chat.showInferring = false
+			m.chat.streamingText = ""
+			m.chat.streamingThought = ""
+			m.refreshViewport(true)
+			return m, nil
 		}
 
-		assistantMsg := APIMessage{Role: "assistant", ToolCalls: calls}
-		apiHistory = append(apiHistory, assistantMsg)
-		for _, call := range calls {
-			toolContent := fmt.Sprintf(`{"error":"tool %q not implemented yet","arguments":%q}`, call.Function.Name, call.Function.Arguments)
-			out <- StreamEvent{ToolName: call.Function.Name, ToolResult: toolContent}
-			apiHistory = append(apiHistory, APIMessage{
-				Role:       "tool",
-				ToolCallID: call.ID,
-				Content:    toolContent,
+		if msg.event.ToolCallStart != nil {
+			name := msg.event.ToolCallStart.Name
+			args := formatToolArgs(name, msg.event.ToolCallStart.Arguments, m.cwd)
+
+			m.chat.messages = append(m.chat.messages, types.Message{
+				Role:      types.RoleTool,
+				Text:      fmt.Sprintf("⚙ %s %s", name, args),
+				Timestamp: time.Now(),
 			})
+			m.refreshViewport(true)
+			return m, pollStreamCmd(m.stream.ch)
 		}
+
+		if msg.event.ToolCallResult != nil {
+			name := msg.event.ToolCallResult.Name
+			isErr := msg.event.ToolCallResult.IsError
+			summary := formatToolResult(name, msg.event.ToolCallResult.Result, isErr)
+
+			updated := false
+			if len(m.chat.messages) > 0 {
+				lastIdx := len(m.chat.messages) - 1
+				lastMsg := m.chat.messages[lastIdx]
+				if lastMsg.Role == types.RoleTool && strings.HasPrefix(lastMsg.Text, "⚙ "+name) {
+					icon := "✓"
+					if isErr {
+						icon = "✗"
+					}
+					argsPart := strings.TrimPrefix(lastMsg.Text, "⚙ "+name)
+					m.chat.messages[lastIdx].Text = fmt.Sprintf("%s %s%s\n  ↳ %s", icon, name, argsPart, summary)
+					updated = true
+				}
+			}
+
+			if !updated {
+				icon := "✓"
+				if isErr {
+					icon = "✗"
+				}
+				m.chat.messages = append(m.chat.messages, types.Message{
+					Role:      types.RoleTool,
+					Text:      fmt.Sprintf("%s %s completed\n  ↳ %s", icon, name, summary),
+					Timestamp: time.Now(),
+				})
+			}
+
+			m.refreshViewport(true)
+			return m, pollStreamCmd(m.stream.ch)
+		}
+		if msg.event.ReconnectNote != "" {
+			m.setNobbyPose(nobby.PoseAPIErrorReconnect)
+			m.chat.messages = append(m.chat.messages, types.Message{
+				Role:      types.RoleAssistant,
+				Text:      msg.event.ReconnectNote,
+				Timestamp: time.Now(),
+			})
+			m.refreshViewport(true)
+			return m, pollStreamCmd(m.stream.ch)
+		}
+		if msg.event.ReasoningDelta != "" {
+			m.setNobbyPose(nobby.PoseThinking)
+			m.chat.streamingThought += msg.event.ReasoningDelta
+			m.chat.estimatedTokensStream++
+			m.chat.estimatedReasoningTokens++
+		}
+		if msg.event.ContentDelta != "" {
+			m.setNobbyPose(nobby.PoseWriting)
+			m.chat.showInferring = false
+			m.chat.streamingText += msg.event.ContentDelta
+			m.chat.estimatedTokensStream++
+		}
+		if msg.event.RefusalDelta != "" {
+			m.chat.estimatedTokensStream++
+		}
+		if msg.event.ToolDelta != "" {
+			m.chat.estimatedTokensStream++
+		}
+		liveEstimatedTotal := m.chat.usage.PromptTokens + m.chat.estimatedTokensStream
+		if liveEstimatedTotal > m.chat.contextTokenFloor {
+			m.chat.contextTokenFloor = liveEstimatedTotal
+		}
+		if msg.event.Usage != nil {
+			m.chat.usage = *msg.event.Usage
+			if m.chat.usage.TotalTokens > m.chat.contextTokenFloor {
+				m.chat.contextTokenFloor = m.chat.usage.TotalTokens
+			}
+		}
+		m.refreshViewport(true)
+		return m, pollStreamCmd(m.stream.ch)
+	case tea.KeyMsg:
+		if m.settings.open {
+			return m.handleSettingsKeys(msg)
+		}
+		if m.providers.open {
+			return m.handleProviderKeys(msg)
+		}
+		if nextModel, cmd, handled := m.handleKeyMsg(msg); handled {
+			return nextModel, cmd
+		}
+	case spinnerTickMsg:
+		if !m.chat.thinking || !m.chat.showInferring {
+			return m, nil
+		}
+		m.chat.spinnerStep++
+		m.refreshViewport(true)
+		return m, spinnerTickCmd(m.settings.values.SpinnerStyle)
 	}
-	out <- StreamEvent{ErrorText: "agent loop stopped: maximum turns reached"}
+
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	m.updateCommandSuggestions()
+	m.resizeViewport()
+	m.refreshViewport(false)
+	return m, cmd
 }
 
-func streamOneTurnWithRetry(client *Client, provider ProviderConfig, messages []APIMessage, out chan<- StreamEvent, abortChan <-chan struct{}) ([]APIToolCall, *UsageState, string, error) {
-	var (
-		calls        []APIToolCall
-		usage        *UsageState
-		finishReason string
-		err          error
-	)
-
-	for attempt := 0; attempt <= MaxRetries; attempt++ {
-		calls, usage, finishReason, err = client.Stream(StreamConfig{
-			Provider:  provider,
-			Messages:  messages,
-			AbortChan: abortChan,
-		}, out)
-		if err == nil {
-			return calls, usage, finishReason, nil
-		}
-		if !IsRetryableError(err) || attempt == MaxRetries {
-			return nil, usage, finishReason, err
-		}
-
-		backoff := RetryBackoff(attempt)
-		out <- StreamEvent{
-			ReconnectNote: fmt.Sprintf(
-				"API error/timeout. Reconnect %d/%d in %.1fs…",
-				attempt+1,
-				MaxRetries,
-				backoff.Seconds(),
-			),
-		}
-		time.Sleep(backoff)
+func formatToolArgs(name string, raw string, cwd string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
 	}
-	return nil, usage, finishReason, err
+
+	var args map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &args); err != nil {
+		if len(trimmed) > 70 {
+			return trimmed[:67] + "..."
+		}
+		return trimmed
+	}
+
+	relPath := func(p string) string {
+		if p == "" {
+			return ""
+		}
+		if rel, err := filepath.Rel(cwd, p); err == nil && !strings.HasPrefix(rel, "..") {
+			return rel
+		}
+		return p
+	}
+
+	switch name {
+	case "Write":
+		path, _ := args["file_path"].(string)
+		content, _ := args["content"].(string)
+		base := relPath(path)
+		lines := strings.Count(content, "\n")
+		if len(content) > 0 && !strings.HasSuffix(content, "\n") {
+			lines++
+		}
+		return fmt.Sprintf("%s · %d lines", base, lines)
+
+	case "Read":
+		path, _ := args["file_path"].(string)
+		offsetFloat, hasOffset := args["offset"].(float64)
+		limitFloat, hasLimit := args["limit"].(float64)
+
+		base := relPath(path)
+		if hasOffset || hasLimit {
+			start := 1
+			if hasOffset {
+				start = int(offsetFloat)
+			}
+			if hasLimit {
+				return fmt.Sprintf("%s · lines %d-%d", base, start, start+int(limitFloat)-1)
+			}
+			return fmt.Sprintf("%s · from line %d", base, start)
+		}
+		return base
+
+	case "Glob":
+		pattern, _ := args["pattern"].(string)
+		path, ok := args["path"].(string)
+		if ok && path != "" && path != cwd {
+			return fmt.Sprintf("%q in %s", pattern, relPath(path))
+		}
+		return fmt.Sprintf("%q", pattern)
+
+	case "Grep":
+		pattern, _ := args["pattern"].(string)
+		path, ok := args["path"].(string)
+		glob, _ := args["glob"].(string)
+		mode, _ := args["output_mode"].(string)
+
+		res := fmt.Sprintf("%q", pattern)
+		if ok && path != "" && path != cwd {
+			res += fmt.Sprintf(" in %s", relPath(path))
+		}
+		if glob != "" {
+			res += fmt.Sprintf(" [%s]", glob)
+		}
+		if mode == "content" {
+			res += " (content)"
+		} else if mode == "count" {
+			res += " (count)"
+		}
+		return res
+
+	default:
+		var parts []string
+		for k, v := range args {
+			parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+		}
+		joined := strings.Join(parts, " ")
+		if len(joined) > 70 {
+			return joined[:67] + "..."
+		}
+		return joined
+	}
+}
+
+func formatToolResult(name string, raw string, isErr bool) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "empty result"
+	}
+
+	if isErr {
+		lines := strings.Split(trimmed, "\n")
+		firstLine := strings.TrimPrefix(lines[0], "tool execution failed: ")
+		if len(firstLine) > 120 {
+			return firstLine[:117] + "..."
+		}
+		return firstLine
+	}
+
+	lines := strings.Count(trimmed, "\n") + 1
+	bytes := len(trimmed)
+
+	switch name {
+	case "Write":
+		var writeData struct {
+			Type     string `json:"type"`
+			FilePath string `json:"filePath"`
+			Diff     string `json:"diff"`
+		}
+		if json.Unmarshal([]byte(trimmed), &writeData) == nil && writeData.Diff != "" {
+			return messages.RenderDiff(writeData.FilePath, writeData.Diff)
+		}
+		if strings.Contains(trimmed, `"type":"create"`) {
+			return "File created"
+		}
+		return "File updated"
+	case "Read":
+		return fmt.Sprintf("Read %d lines (%s)", lines, formatBytes(bytes))
+	case "Glob", "Grep":
+		firstLine := strings.SplitN(trimmed, "\n", 2)[0]
+		if strings.HasPrefix(firstLine, "Found ") || strings.HasPrefix(firstLine, "No ") {
+			return firstLine
+		}
+		return fmt.Sprintf("%d results", lines)
+	default:
+		if lines == 1 && bytes < 80 {
+			return trimmed
+		}
+		return fmt.Sprintf("%d lines, %s", lines, formatBytes(bytes))
+	}
+}
+
+func formatBytes(b int) string {
+	if b < 1024 {
+		return fmt.Sprintf("%d B", b)
+	}
+	return fmt.Sprintf("%.1f KB", float64(b)/1024.0)
+}
+
+func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	if len(m.commands.suggestions) > 0 {
+		switch msg.String() {
+		case "up":
+			m.commands.selected = mathutil.Clamp(m.commands.selected-1, 0, len(m.commands.suggestions)-1)
+			return m, nil, true
+		case "down":
+			m.commands.selected = mathutil.Clamp(m.commands.selected+1, 0, len(m.commands.suggestions)-1)
+			return m, nil, true
+		case "tab":
+			m.input.SetValue(m.commands.suggestions[m.commands.selected] + " ")
+			m.clearCommandSuggestions()
+			m.resizeViewport()
+			return m, nil, true
+		}
+	}
+
+	switch msg.String() {
+	case "shift+tab":
+		if m.chat.mode == ModeAsk {
+			m.chat.mode = ModeCode
+		} else {
+			m.chat.mode = ModeAsk
+		}
+		m.resizeViewport()
+		return m, nil, true
+	case "ctrl+c":
+		// Double-press Ctrl+C to quit.
+		if m.isPendingConfirmationFor("ctrl+c") {
+			m.clearPendingConfirmation()
+			return m, tea.Quit, true
+		}
+		m.setPendingConfirmation("ctrl+c")
+		return m, nil, true
+	case "esc":
+		// During thinking mode, ESC interrupts the stream with confirmation.
+		if m.chat.thinking {
+			if m.isPendingConfirmationFor("esc") {
+				m.chat.interrupted = true
+				m.chat.thinking = false
+				m.chat.showInferring = false
+				close(m.chat.abortChan)
+				m.chat.abortChan = nil
+				m.setNobbyPose(nobby.PoseIdle)
+				if !m.chat.cycleStartedAt.IsZero() {
+					m.chat.lastWorkedForSec = int(time.Since(m.chat.cycleStartedAt).Seconds())
+				}
+				m.clearPendingConfirmation()
+				m.refreshViewport(true)
+				return m, nil, true
+			}
+			m.setPendingConfirmation("esc")
+			return m, nil, true
+		}
+		// Outside generation ESC should do nothing (reserved for canceling generation only).
+		if m.chat.confirmKey == "esc" {
+			m.clearPendingConfirmation()
+		}
+		return m, nil, true
+	case "pgup":
+		m.viewport.HalfViewUp()
+		return m, nil, true
+	case "pgdown":
+		m.viewport.HalfViewDown()
+		return m, nil, true
+	case "up":
+		if len(m.commands.suggestions) == 0 {
+			m.viewport.LineUp(1)
+			return m, nil, true
+		}
+	case "down":
+		if len(m.commands.suggestions) == 0 {
+			m.viewport.LineDown(1)
+			return m, nil, true
+		}
+	case "enter":
+		if m.chat.thinking {
+			return m, nil, true
+		}
+		if len(m.commands.suggestions) > 0 {
+			m.input.SetValue(m.commands.suggestions[m.commands.selected])
+			m.clearCommandSuggestions()
+		}
+		nextModel, cmd := m.executeInput()
+		return nextModel, cmd, true
+	}
+	return m, nil, false
 }
 
 
@@ -3096,6 +3320,7 @@ func NewClient(timeoutSeconds int) *Client {
 type StreamConfig struct {
 	Provider  ProviderConfig
 	Messages  []APIMessage
+	Tools     []map[string]any
 	AbortChan <-chan struct{}
 }
 
@@ -3108,6 +3333,10 @@ func (c *Client) Stream(cfg StreamConfig, out chan<- StreamEvent) ([]APIToolCall
 		"stream_options": map[string]any{
 			"include_usage": true,
 		},
+	}
+	if len(cfg.Tools) > 0 {
+		requestBody["tools"] = cfg.Tools
+		requestBody["tool_choice"] = "auto"
 	}
 	raw, err := json.Marshal(requestBody)
 	if err != nil {
@@ -3233,6 +3462,1229 @@ func (c *Client) Stream(cfg StreamConfig, out chan<- StreamEvent) ([]APIToolCall
 }
 
 
+ui/model/agent/loop.go
+package agent
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+)
+
+const (
+	MaxRetries = 4
+)
+
+func RunLoop(provider ProviderConfig, messages []APIMessage, timeoutSeconds int, out chan<- StreamEvent, abortChan <-chan struct{}, readOnly bool) {
+	defer close(out)
+
+	client := NewClient(timeoutSeconds)
+	registry := NewDefaultToolRegistry()
+	tools := registry.OpenAITools()
+
+	apiHistory := make([]APIMessage, 0, len(messages))
+	apiHistory = append(apiHistory, messages...)
+
+	var lastToolName string
+	var lastToolArgs string
+	var duplicateCount int
+
+	for {
+		calls, usage, finishReason, err := streamOneTurnWithRetry(client, provider, apiHistory, tools, out, abortChan)
+		if err != nil {
+			out <- StreamEvent{ErrorText: err.Error()}
+			return
+		}
+		if usage != nil {
+			out <- StreamEvent{Usage: usage}
+		}
+		if finishReason != "tool_calls" || len(calls) == 0 {
+			out <- StreamEvent{FinishReason: finishReason}
+			return
+		}
+
+		if len(calls) == 1 {
+			call := calls[0]
+			if call.Function.Name == lastToolName && call.Function.Arguments == lastToolArgs {
+				duplicateCount++
+				if duplicateCount >= 2 {
+					out <- StreamEvent{ErrorText: fmt.Sprintf("Loop prevention triggered: agent is repeatedly calling %s with identical arguments.", call.Function.Name)}
+					return
+				}
+			} else {
+				duplicateCount = 0
+				lastToolName = call.Function.Name
+				lastToolArgs = call.Function.Arguments
+			}
+		} else {
+			duplicateCount = 0
+			lastToolName = ""
+			lastToolArgs = ""
+		}
+
+		assistantMsg := APIMessage{Role: "assistant", ToolCalls: calls}
+		apiHistory = append(apiHistory, assistantMsg)
+
+		for _, call := range calls {
+			out <- StreamEvent{ToolCallStart: &ToolCallEvent{ID: call.ID, Name: call.Function.Name, Arguments: call.Function.Arguments, ReadOnly: true}}
+			result, execErr := registry.Execute(context.Background(), call, readOnly)
+			if execErr != nil {
+				errMsg := execErr.Error()
+				out <- StreamEvent{ToolCallResult: &ToolResultEvent{ID: call.ID, Name: call.Function.Name, Result: errMsg, IsError: true}}
+				apiHistory = append(apiHistory, APIMessage{Role: "tool", ToolCallID: call.ID, Content: fmt.Sprintf(`{"error":%q}`, errMsg)})
+				continue
+			}
+			out <- StreamEvent{ToolCallResult: &ToolResultEvent{ID: call.ID, Name: call.Function.Name, Result: result, IsError: false}}
+			apiHistory = append(apiHistory, APIMessage{Role: "tool", ToolCallID: call.ID, Content: normalizeToolContent(result)})
+		}
+	}
+}
+
+func normalizeToolContent(result string) string {
+	trimmed := strings.TrimSpace(result)
+	if trimmed == "" {
+		return ""
+	}
+	return trimmed
+}
+
+func streamOneTurnWithRetry(client *Client, provider ProviderConfig, messages []APIMessage, tools []map[string]any, out chan<- StreamEvent, abortChan <-chan struct{}) ([]APIToolCall, *UsageState, string, error) {
+	var (
+		calls        []APIToolCall
+		usage        *UsageState
+		finishReason string
+		err          error
+	)
+
+	for attempt := 0; attempt <= MaxRetries; attempt++ {
+		calls, usage, finishReason, err = client.Stream(StreamConfig{
+			Provider:  provider,
+			Messages:  messages,
+			Tools:     tools,
+			AbortChan: abortChan,
+		}, out)
+		if err == nil {
+			return calls, usage, finishReason, nil
+		}
+		if !IsRetryableError(err) || attempt == MaxRetries {
+			return nil, usage, finishReason, err
+		}
+
+		backoff := RetryBackoff(attempt)
+		out <- StreamEvent{
+			ReconnectNote: fmt.Sprintf(
+				"API error/timeout. Reconnect %d/%d in %.1fs…",
+				attempt+1,
+				MaxRetries,
+				backoff.Seconds(),
+			),
+		}
+		time.Sleep(backoff)
+	}
+	return nil, usage, finishReason, err
+}
+
+
+ui/model/agent/types.go
+package agent
+
+import "strings"
+
+// StreamEvent represents an event from the streaming API.
+type StreamEvent struct {
+	ContentDelta   string
+	ReasoningDelta string
+	RefusalDelta   string
+	Usage          *UsageState
+	FinishReason   string
+	ErrorText      string
+	ReconnectNote  string
+	ToolDelta      string
+	ToolCallStart  *ToolCallEvent
+	ToolCallResult *ToolResultEvent
+}
+
+type ToolCallEvent struct {
+	ID        string
+	Name      string
+	Arguments string
+	ReadOnly  bool
+}
+
+type ToolResultEvent struct {
+	ID      string
+	Name    string
+	Result  string
+	IsError bool
+}
+
+// UsageState holds token usage information.
+type UsageState struct {
+	PromptTokens     int
+	CompletionTokens int
+	ReasoningTokens  int
+	TotalTokens      int
+}
+
+// ProviderConfig is a transport-level provider configuration for the agent.
+type ProviderConfig struct {
+	BaseURL string
+	Model   string
+	APIKey  string
+}
+
+// APIMessage represents a message in the API format.
+type APIMessage struct {
+	Role       string        `json:"role"`
+	Content    string        `json:"content,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"`
+	ToolCalls  []APIToolCall `json:"tool_calls,omitempty"`
+}
+
+// APIToolCall represents a tool call in the API format.
+type APIToolCall struct {
+	ID       string          `json:"id"`
+	Type     string          `json:"type"`
+	Function APIToolFunction `json:"function"`
+}
+
+// APIToolFunction represents a tool function in the API format.
+type APIToolFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+// ChatCompletionChunk represents a chunk from the streaming API.
+type ChatCompletionChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			Refusal          string `json:"refusal"`
+			FunctionCall     struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			} `json:"function_call"`
+			ToolCalls []struct {
+				Index    int    `json:"index"`
+				ID       string `json:"id"`
+				Type     string `json:"type"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+		} `json:"delta"`
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+	Usage struct {
+		PromptTokens           int `json:"prompt_tokens"`
+		CompletionTokens       int `json:"completion_tokens"`
+		TotalTokens            int `json:"total_tokens"`
+		CompletionTokenDetails struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
+	} `json:"usage"`
+}
+
+// ToolBuffer accumulates tool call data during streaming.
+type ToolBuffer struct {
+	ID        string
+	Name      string
+	Arguments strings.Builder
+}
+
+
+ui/model/agent/retry.go
+package agent
+
+import (
+	"errors"
+	"net"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// IsRetryableError determines if an error is retryable.
+func IsRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
+		return true
+	}
+
+	msg := strings.ToLower(err.Error())
+	status := extractHTTPStatus(msg)
+	if status == 429 || status == 529 {
+		return true
+	}
+	return strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "too many requests") ||
+		strings.Contains(msg, "502") ||
+		strings.Contains(msg, "503") ||
+		strings.Contains(msg, "504")
+}
+
+// RetryBackoff returns the backoff duration for a given retry attempt.
+func RetryBackoff(attempt int) time.Duration {
+	if attempt < 0 {
+		attempt = 0
+	}
+
+	base := 500 * time.Millisecond
+	maxDelay := 32 * time.Second
+
+	delay := base << attempt
+	if delay > maxDelay {
+		delay = maxDelay
+	}
+
+	// Deterministic jitter (0-25%) from attempt number keeps retries de-synced
+	// across calls without introducing randomness in tests.
+	jitterPct := (attempt*17 + 11) % 26
+	jitter := time.Duration(int64(delay) * int64(jitterPct) / 100)
+	return delay + jitter
+}
+
+func extractHTTPStatus(lowerMsg string) int {
+	quotedStatus := regexp.MustCompile(`"status"\s*:\s*(\d{3})`)
+	if m := quotedStatus.FindStringSubmatch(lowerMsg); len(m) == 2 {
+		if status, err := strconv.Atoi(m[1]); err == nil {
+			return status
+		}
+	}
+	plainStatus := regexp.MustCompile(`\bstatus(?:\s*code)?\s*[:=]?\s*(\d{3})\b`)
+	if m := plainStatus.FindStringSubmatch(lowerMsg); len(m) == 2 {
+		if status, err := strconv.Atoi(m[1]); err == nil {
+			return status
+		}
+	}
+	return 0
+}
+
+
+ui/model/agent/tools.go
+package agent
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
+
+	"github.com/bmatcuk/doublestar/v4"
+	"github.com/hexops/gotextdiff"
+	"github.com/hexops/gotextdiff/myers"
+	"github.com/hexops/gotextdiff/span"
+)
+
+const (
+	fileReadToolName  = "Read"
+	fileWriteToolName = "Write"
+	globToolName      = "Glob"
+	grepToolName      = "Grep"
+)
+
+const (
+	fileReadMaxLines = 2000
+	fileReadMaxBytes = 256 * 1024 // 256 KB
+)
+
+type ToolDefinition struct {
+	Name        string
+	Description string
+	ReadOnly   bool
+	Parameters map[string]any
+	Handler    func(context.Context, json.RawMessage) (string, error)
+}
+
+type ToolRegistry struct {
+	byName map[string]ToolDefinition
+	order  []ToolDefinition
+
+	readState   map[string]time.Time
+	readStateMu sync.RWMutex
+}
+
+func NewDefaultToolRegistry() *ToolRegistry {
+	r := &ToolRegistry{
+		readState: make(map[string]time.Time),
+	}
+
+	tools := []ToolDefinition{
+		r.newFileReadTool(),
+		r.newFileWriteTool(),
+		r.newGlobTool(),
+		r.newGrepTool(),
+	}
+
+	byName := make(map[string]ToolDefinition, len(tools))
+	for _, tool := range tools {
+		byName[tool.Name] = tool
+	}
+	r.byName = byName
+	r.order = tools
+
+	return r
+}
+
+func (r *ToolRegistry) GetAllTools() []ToolDefinition {
+	return r.order
+}
+
+func (r *ToolRegistry) OpenAITools() []map[string]any {
+	out := make([]map[string]any, 0, len(r.order))
+	for _, t := range r.order {
+		out = append(out, map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        t.Name,
+				"description": t.Description,
+				"parameters":  t.Parameters,
+			},
+		})
+	}
+	return out
+}
+
+func (r *ToolRegistry) Execute(ctx context.Context, call APIToolCall, readOnly bool) (string, error) {
+	def, ok := r.byName[call.Function.Name]
+	if !ok {
+		return "", fmt.Errorf("unknown tool: %s", call.Function.Name)
+	}
+
+	if readOnly && !def.ReadOnly {
+		return "", fmt.Errorf("ERROR: Mode 'ask' (read-only) is active. Tool '%s' is BLOCKED. Do not retry this tool. Politely ask the user to press 'shift+tab' to switch to 'code' mode if writing is required.", def.Name)
+	}
+
+	return def.Handler(ctx, json.RawMessage(call.Function.Arguments))
+}
+
+type fileReadInput struct {
+	FilePath string `json:"file_path"`
+	Offset *int   `json:"offset,omitempty"`
+	Limit  *int   `json:"limit,omitempty"`
+}
+
+func (r *ToolRegistry) newFileReadTool() ToolDefinition {
+	return ToolDefinition{
+		Name:     fileReadToolName,
+		ReadOnly: true,
+		Description: `Reads a file from the local filesystem. You can access any file directly by using this tool.
+Assume this tool is able to read all files on the machine. If the User provides a path to a file assume that path is valid. It is okay to read a file that does not exist; an error will be returned.
+
+Usage:
+- The file_path parameter must be an absolute path, not a relative path
+- By default, it reads up to 2000 lines starting from the beginning of the file. Files larger than 256 KB will return an error; use offset and limit for larger files
+- You can optionally specify a line offset and limit (especially handy for long files), but it's recommended to read the whole file by not providing these parameters
+- Results are returned using cat -n format, with line numbers starting at 1
+- This tool can only read files, not directories. To read a directory, use an ls command via the Bash tool.
+- You will regularly be asked to read screenshots. If the user provides a path to a screenshot, ALWAYS use this tool to view the file at the path. This tool will work with all temporary file paths.
+- If you read a file that exists but has empty contents you will receive a system reminder warning in place of file contents.`,
+		Parameters: map[string]any{
+			"type":                 "object",
+			"additionalProperties":   false,
+			"required":             []string{"file_path"},
+			"properties": map[string]any{
+				"file_path": map[string]any{"type": "string", "description": "The absolute path to the file to read"},
+				"offset":  map[string]any{"type": "integer", "minimum": 1, "description": "The line number to start reading from. Only provide if the file is too large to read at once"},
+				"limit":   map[string]any{"type": "integer", "minimum": 1, "description": "The number of lines to read. Only provide if the file is too large to read at once."},
+			},
+		},
+		Handler: r.runFileRead,
+	}
+}
+
+func (r *ToolRegistry) runFileRead(_ context.Context, raw json.RawMessage) (string, error) {
+	var in fileReadInput
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+	if strings.TrimSpace(in.FilePath) == "" {
+		return "", errors.New("file_path is required")
+	}
+
+	absPath := in.FilePath
+	if !filepath.IsAbs(absPath) {
+		cwd, _ := os.Getwd()
+		absPath = filepath.Join(cwd, absPath)
+	}
+
+	if isBlockedDevicePath(absPath) {
+		return "", fmt.Errorf("Cannot read '%s': this device file would block or produce infinite output.", in.FilePath)
+	}
+
+	info, err := os.Lstat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			cwd, _ := os.Getwd()
+			return "", fmt.Errorf("File does not exist. Note: The current working directory is %s.", cwd)
+		}
+		return "", fmt.Errorf("%v", err)
+	}
+
+	if info.IsDir() {
+		return "", fmt.Errorf("This tool can only read files, not directories. To read a directory, use an ls command via the Bash tool.")
+	}
+
+	offsetLine := 1
+	if in.Offset != nil && *in.Offset > 0 {
+		offsetLine = *in.Offset
+	}
+
+	limitLines := 0
+	if in.Limit != nil {
+		limitLines = *in.Limit
+		if limitLines <= 0 {
+			return "", errors.New("limit must be > 0")
+		}
+	}
+
+	if limitLines == 0 && info.Size() > int64(fileReadMaxBytes) {
+		return "", fmt.Errorf("File content (%d bytes) exceeds maximum allowed size (%d bytes). Use offset and limit parameters to read specific portions of the file.", info.Size(), fileReadMaxBytes)
+	}
+
+	file, err := os.Open(absPath)
+	if err != nil {
+		return "", fmt.Errorf("Error opening file: %v", err)
+	}
+	defer file.Close()
+
+	head := make([]byte, 512)
+	n, _ := file.Read(head)
+	if isBinary(head[:n]) {
+		return "", fmt.Errorf("This tool cannot read binary files. The file appears to be a binary file. Please use appropriate tools for binary file analysis.")
+	}
+
+	file.Seek(0, io.SeekStart)
+
+	reader := bufio.NewReader(file)
+	var sb strings.Builder
+	lineNum := 1
+	linesRead := 0
+
+	for {
+		line, err := reader.ReadString('\n')
+
+		if lineNum >= offsetLine && (line != "" || err == nil) {
+			sb.WriteString(fmt.Sprintf("%d\t%s", lineNum, line))
+
+			if !strings.HasSuffix(line, "\n") {
+				sb.WriteString("\n")
+			}
+
+			linesRead++
+			if limitLines > 0 && linesRead >= limitLines {
+				break
+			}
+			if limitLines == 0 && linesRead >= fileReadMaxLines {
+				break
+			}
+		}
+
+		lineNum++
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", fmt.Errorf("error reading file: %v", err)
+		}
+	}
+
+	if sb.Len() == 0 {
+		if info.Size() == 0 {
+			r.markAsRead(absPath, info.ModTime())
+			return "<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>", nil
+		}
+		return fmt.Sprintf("<system-reminder>Warning: the file exists but is shorter than the provided offset (%d).</system-reminder>", offsetLine), nil
+	}
+
+	r.markAsRead(absPath, info.ModTime())
+	return sb.String(), nil
+}
+
+func isBlockedDevicePath(filePath string) bool {
+	blocked := map[string]bool{
+		"/dev/zero":     true,
+		"/dev/random":   true,
+		"/dev/urandom": true,
+		"/dev/full":     true,
+		"/dev/stdin":    true,
+		"/dev/tty":    true,
+		"/dev/console": true,
+		"/dev/stdout":  true,
+		"/dev/stderr":  true,
+		"/dev/fd/0":   true,
+		"/dev/fd/1":   true,
+		"/dev/fd/2":   true,
+	}
+	if blocked[filePath] {
+		return true
+	}
+	if strings.HasPrefix(filePath, "/proc/") {
+		if strings.HasSuffix(filePath, "/fd/0") || strings.HasSuffix(filePath, "/fd/1") || strings.HasSuffix(filePath, "/fd/2") {
+			return true
+		}
+	}
+	return false
+}
+
+func isBinary(data []byte) bool {
+	for i := 0; i < len(data); i++ {
+		if data[i] == 0 {
+			return true
+		}
+	}
+	return !utf8.Valid(data)
+}
+
+func (r *ToolRegistry) markAsRead(path string, mtime time.Time) {
+	r.readStateMu.Lock()
+	defer r.readStateMu.Unlock()
+	r.readState[path] = mtime
+}
+
+type fileWriteInput struct {
+	FilePath string `json:"file_path"`
+	Content string `json:"content"`
+}
+
+func (r *ToolRegistry) newFileWriteTool() ToolDefinition {
+	return ToolDefinition{
+		Name:     fileWriteToolName,
+		ReadOnly: false,
+		Description: `Writes a file to the local filesystem.
+
+Usage:
+- This tool will overwrite the existing file if there is one at the provided path.
+- If this is an existing file, you MUST use the Read tool first to read the file's contents. This tool will fail if you did not read the file first.
+- Prefer the Edit tool for modifying existing files — it only sends the diff. Only use this tool to create new files or for complete rewrites.
+- NEVER create documentation files (*.md) or README files unless explicitly requested by the User.
+- Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked.`,
+		Parameters: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"required":             []string{"file_path", "content"},
+			"properties": map[string]any{
+				"file_path": map[string]any{"type": "string", "description": "The absolute path to the file to write (must be absolute, not relative)"},
+				"content": map[string]any{"type": "string", "description": "The content to write to the file"},
+			},
+		},
+		Handler: r.runFileWrite,
+	}
+}
+
+func (r *ToolRegistry) runFileWrite(_ context.Context, raw json.RawMessage) (string, error) {
+	var in fileWriteInput
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+
+	absPath := in.FilePath
+	if !filepath.IsAbs(absPath) {
+		cwd, _ := os.Getwd()
+		absPath = filepath.Join(cwd, absPath)
+	}
+
+	if strings.HasPrefix(absPath, `\\`) || strings.HasPrefix(absPath, `//`) {
+		return "Write operation skipped for UNC paths due to security restrictions.", nil
+	}
+
+	isCreate := false
+	fileStat, err := os.Stat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			isCreate = true
+		} else {
+			return "", err
+		}
+	}
+
+	var oldContent string
+
+	if !isCreate {
+		r.readStateMu.RLock()
+		readTime, hasRead := r.readState[absPath]
+		r.readStateMu.RUnlock()
+
+		if !hasRead {
+			return "", errors.New("File has not been read yet. Read it first before writing to it.")
+		}
+
+		if fileStat.ModTime().Unix() > readTime.Unix() {
+			return "", errors.New("File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.")
+		}
+
+		oldBytes, _ := os.ReadFile(absPath)
+		oldContent = string(oldBytes)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+		return "", fmt.Errorf("failed to create directories: %w", err)
+	}
+
+	if err := os.WriteFile(absPath, []byte(in.Content), 0644); err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+
+	newStat, _ := os.Stat(absPath)
+	if newStat != nil {
+		r.markAsRead(absPath, newStat.ModTime())
+	}
+
+	lines := strings.Count(in.Content, "\n")
+	if len(in.Content) > 0 && !strings.HasSuffix(in.Content, "\n") {
+		lines++
+	}
+
+	var diffText string
+	if !isCreate {
+		edits := myers.ComputeEdits(span.URIFromPath(absPath), oldContent, in.Content)
+		diffText = fmt.Sprintf("%s", gotextdiff.ToUnified(filepath.Base(absPath), filepath.Base(absPath), oldContent, edits))
+	} else {
+		diffText = "@@ -0,0 +1," + strconv.Itoa(lines) + " @@\n"
+		for _, line := range strings.Split(in.Content, "\n") {
+			diffText += "+" + line + "\n"
+		}
+	}
+
+	diffJSON, _ := json.Marshal(diffText)
+
+	if isCreate {
+		return fmt.Sprintf(`{"type":"create","filePath":%q,"lines":%d,"diff":%s}`, absPath, lines, string(diffJSON)), nil
+	}
+	return fmt.Sprintf(`{"type":"update","filePath":%q,"lines":%d,"diff":%s}`, absPath, lines, string(diffJSON)), nil
+}
+
+type globInput struct {
+	Pattern string `json:"pattern"`
+	Path    string `json:"path,omitempty"`
+}
+
+func (r *ToolRegistry) newGlobTool() ToolDefinition {
+	return ToolDefinition{
+		Name:     globToolName,
+		ReadOnly: true,
+		Description: `- Fast file pattern matching tool that works with any codebase size
+- Supports glob patterns like "**/*.js" or "src/**/*.ts"
+- Returns matching file paths sorted by modification time
+- Use this tool when you need to find files by name patterns
+- When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the Agent tool instead`,
+		Parameters: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"required":             []string{"pattern"},
+			"properties": map[string]any{
+				"pattern": map[string]any{"type": "string", "description": "The glob pattern to match files against"},
+				"path": map[string]any{
+					"type":        "string",
+					"description": "The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter \"undefined\" or \"null\" - simply omit it for the default behavior. Must be a valid directory path if provided.",
+				},
+			},
+		},
+		Handler: r.runGlob,
+	}
+}
+
+func (r *ToolRegistry) runGlob(_ context.Context, raw json.RawMessage) (string, error) {
+	var in globInput
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+	if strings.TrimSpace(in.Pattern) == "" {
+		return "", errors.New("pattern is required")
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	basePath := in.Path
+	if strings.TrimSpace(basePath) == "" {
+		basePath = cwd
+	}
+	if !filepath.IsAbs(basePath) {
+		basePath = filepath.Join(cwd, basePath)
+	}
+
+	if strings.HasPrefix(basePath, `\\`) || strings.HasPrefix(basePath, `//`) {
+		return "No files found", nil
+	}
+
+	st, err := os.Stat(basePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("Directory does not exist: %s. Note: The current working directory is %s.", in.Path, cwd)
+		}
+		return "", err
+	}
+	if !st.IsDir() {
+		return "", fmt.Errorf("Path is not a directory: %s", in.Path)
+	}
+
+	matches, err := globSearch(basePath, in.Pattern)
+	if err != nil {
+		return "", err
+	}
+
+	if len(matches) == 0 {
+		return "No files found", nil
+	}
+
+	truncated := false
+	limit := 100
+	if len(matches) > limit {
+		matches = matches[:limit]
+		truncated = true
+	}
+
+	relMatches := make([]string, 0, len(matches))
+	for _, m := range matches {
+		rel, err := filepath.Rel(cwd, m)
+		if err == nil {
+			relMatches = append(relMatches, filepath.ToSlash(rel))
+		} else {
+			relMatches = append(relMatches, filepath.ToSlash(m))
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString(strings.Join(relMatches, "\n"))
+	if truncated {
+		sb.WriteString("\n(Results are truncated. Consider using a more specific path or pattern.)")
+	}
+
+	return sb.String(), nil
+}
+
+func globSearch(base string, pattern string) ([]string, error) {
+	fsys := os.DirFS(base)
+
+	matches, err := doublestar.Glob(fsys, pattern)
+	if err != nil {
+		return nil, err
+	}
+
+	type fileInfo struct {
+		path  string
+		mtime int64
+	}
+
+	var files []fileInfo
+	for _, match := range matches {
+		fullPath := filepath.Join(base, match)
+		info, err := os.Stat(fullPath)
+		if err == nil && !info.IsDir() {
+			files = append(files, fileInfo{path: fullPath, mtime: info.ModTime().UnixNano()})
+		}
+	}
+
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].mtime == files[j].mtime {
+			return files[i].path < files[j].path
+		}
+		return files[i].mtime > files[j].mtime
+	})
+
+	var results []string
+	for _, f := range files {
+		results = append(results, f.path)
+	}
+
+	return results, nil
+}
+
+type grepInput struct {
+	Pattern    string `json:"pattern"`
+	Path       string `json:"path,omitempty"`
+	Glob       string `json:"glob,omitempty"`
+	OutputMode string `json:"output_mode,omitempty"`
+	ContextB   *int   `json:"-B,omitempty"`
+	ContextA   *int   `json:"-A,omitempty"`
+	ContextC1  *int   `json:"-C,omitempty"`
+	Context    *int   `json:"context,omitempty"`
+	LineNum    *bool  `json:"-n,omitempty"`
+	IgnoreCase *bool  `json:"-i,omitempty"`
+	Type       string `json:"type,omitempty"`
+	HeadLimit  *int   `json:"head_limit,omitempty"`
+	Offset     *int   `json:"offset,omitempty"`
+	Multiline  *bool  `json:"multiline,omitempty"`
+}
+
+const defaultHeadLimit = 250
+
+func (r *ToolRegistry) newGrepTool() ToolDefinition {
+	return ToolDefinition{
+		Name:     grepToolName,
+		ReadOnly: true,
+		Description: `A powerful search tool built on ripgrep
+
+Usage:
+- ALWAYS use Grep for search tasks. NEVER invoke grep or rg as a Bash command. The Grep tool has been optimized for correct permissions and access.
+- Supports full regex syntax (e.g., "log.*Error", "function\\s+\w+")
+- Filter files with glob parameter (e.g. "*.js", "*.{ts,tsx}") or type parameter (e.g., "js", "py", "rust")
+- Output modes: "content" shows matching lines, "files_with_matches" shows only file paths (default), "count" shows match counts
+- Use Agent tool for open-ended searches requiring multiple rounds
+- Pattern syntax: Uses ripgrep (not grep) - literal braces need escaping (use Backslash + Backtick interface OpenBrace CloseBrace Backtick to find interface{} in Go code)
+- Multiline matching: By default patterns match within single lines only. For cross-line patterns, use multiline: true`,
+		Parameters: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"required":             []string{"pattern"},
+			"properties": map[string]any{
+				"pattern":     map[string]any{"type": "string", "description": "The regular expression pattern to search for in file contents"},
+				"path":        map[string]any{"type": "string", "description": "File or directory to search in (rg PATH). Defaults to current working directory."},
+				"glob":        map[string]any{"type": "string", "description": "Glob pattern to filter files (e.g. \"*.js\", \"*.{ts,tsx}\") - maps to rg --glob"},
+				"output_mode": map[string]any{"type": "string", "enum": []string{"content", "files_with_matches", "count"}, "description": "Output mode: \"content\" shows matching lines, \"files_with_matches\" shows file paths, \"count\" shows match counts. Defaults to \"files_with_matches\"."},
+				"-B":          map[string]any{"type": "integer", "description": "Number of lines to show before each match (rg -B)."},
+				"-A":          map[string]any{"type": "integer", "description": "Number of lines to show after each match (rg -A)."},
+				"-C":          map[string]any{"type": "integer", "description": "Alias for context."},
+				"context":     map[string]any{"type": "integer", "description": "Number of lines to show before and after each match (rg -C)."},
+				"-n":          map[string]any{"type": "boolean", "description": "Show line numbers in output (rg -n). Defaults to true."},
+				"-i":          map[string]any{"type": "boolean", "description": "Case insensitive search (rg -i)"},
+				"type":        map[string]any{"type": "string", "description": "File type to search (rg --type). Common types: js, py, rust, go, java, etc."},
+				"head_limit":  map[string]any{"type": "integer", "description": "Limit output to first N lines/entries. Defaults to 250. Pass 0 for unlimited."},
+				"offset":      map[string]any{"type": "integer", "description": "Skip first N lines/entries before applying head_limit. Defaults to 0."},
+				"multiline":   map[string]any{"type": "boolean", "description": "Enable multiline mode. Default: false."},
+			},
+		},
+		Handler: r.runGrep,
+	}
+}
+
+func (r *ToolRegistry) runGrep(_ context.Context, raw json.RawMessage) (string, error) {
+	var in grepInput
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+	if strings.TrimSpace(in.Pattern) == "" {
+		return "", errors.New("pattern is required")
+	}
+
+	cwd, _ := os.Getwd()
+	absolutePath := in.Path
+	if absolutePath == "" {
+		absolutePath = cwd
+	} else if !filepath.IsAbs(absolutePath) {
+		absolutePath = filepath.Join(cwd, absolutePath)
+	}
+
+	if strings.HasPrefix(absolutePath, `\\`) || strings.HasPrefix(absolutePath, `//`) {
+		return "No files found", nil
+	}
+
+	if _, err := os.Stat(absolutePath); err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("Path does not exist: %s. Note: The current working directory is %s.", in.Path, cwd)
+		}
+		return "", err
+	}
+
+	mode := in.OutputMode
+	if mode == "" {
+		mode = "files_with_matches"
+	}
+
+	args := []string{"--hidden"}
+
+	vcsDirs := []string{".git", ".svn", ".hg", ".bzr", ".jj", ".sl"}
+	for _, dir := range vcsDirs {
+		args = append(args, "--glob", "!"+dir)
+	}
+
+	args = append(args, "--max-columns", "500")
+
+	if in.Multiline != nil && *in.Multiline {
+		args = append(args, "-U", "--multiline-dotall")
+	}
+	if in.IgnoreCase != nil && *in.IgnoreCase {
+		args = append(args, "-i")
+	}
+
+	switch mode {
+	case "files_with_matches":
+		args = append(args, "-l")
+	case "count":
+		args = append(args, "-c")
+	case "content":
+		showLine := true
+		if in.LineNum != nil {
+			showLine = *in.LineNum
+		}
+		if showLine {
+			args = append(args, "-n")
+		}
+		if in.Context != nil {
+			args = append(args, "-C", strconv.Itoa(*in.Context))
+		} else if in.ContextC1 != nil {
+			args = append(args, "-C", strconv.Itoa(*in.ContextC1))
+		} else {
+			if in.ContextB != nil {
+				args = append(args, "-B", strconv.Itoa(*in.ContextB))
+			}
+			if in.ContextA != nil {
+				args = append(args, "-A", strconv.Itoa(*in.ContextA))
+			}
+		}
+	}
+
+	if strings.HasPrefix(in.Pattern, "-") {
+		args = append(args, "-e", in.Pattern)
+	} else {
+		args = append(args, in.Pattern)
+	}
+
+	if in.Type != "" {
+		args = append(args, "--type", in.Type)
+	}
+
+	if strings.TrimSpace(in.Glob) != "" {
+		for _, g := range splitGlobPatterns(in.Glob) {
+			args = append(args, "--glob", g)
+		}
+	}
+
+	args = append(args, absolutePath)
+
+	output, err := exec.Command("rg", args...).CombinedOutput()
+	if err != nil {
+		var ex *exec.ExitError
+		if errors.As(err, &ex) && ex.ExitCode() == 1 {
+			if mode == "files_with_matches" {
+				return "No files found", nil
+			}
+			return "No matches found", nil
+		}
+		return "", fmt.Errorf("grep execution failed: %v\nMake sure 'rg' (ripgrep) is installed.", err)
+	}
+
+	rawLines := splitNonEmptyLines(string(output))
+
+	offsetVal := 0
+	if in.Offset != nil && *in.Offset > 0 {
+		offsetVal = *in.Offset
+	}
+
+	limitedResults, appliedLimit := applyHeadLimit(rawLines, in.HeadLimit, offsetVal)
+	limitInfo := formatLimitInfo(appliedLimit, offsetVal)
+
+	switch mode {
+	case "content":
+		if len(limitedResults) == 0 {
+			return "No matches found", nil
+		}
+		for i, line := range limitedResults {
+			colonIdx := strings.Index(line, ":")
+			if colonIdx > 0 {
+				relPath, _ := filepath.Rel(cwd, line[:colonIdx])
+				limitedResults[i] = filepath.ToSlash(relPath) + line[colonIdx:]
+			}
+		}
+		resultContent := strings.Join(limitedResults, "\n")
+		if limitInfo != "" {
+			resultContent += fmt.Sprintf("\n\n[Showing results with pagination = %s]", limitInfo)
+		}
+		return resultContent, nil
+
+	case "count":
+		totalMatches := 0
+		fileCount := 0
+		for i, line := range limitedResults {
+			colonIdx := strings.LastIndex(line, ":")
+			if colonIdx > 0 {
+				relPath, _ := filepath.Rel(cwd, line[:colonIdx])
+				limitedResults[i] = filepath.ToSlash(relPath) + line[colonIdx:]
+				count, err := strconv.Atoi(strings.TrimSpace(line[colonIdx+1:]))
+				if err == nil {
+					totalMatches += count
+					fileCount++
+				}
+			}
+		}
+
+		summary := fmt.Sprintf("\n\nFound %d total occurrences across %d files.", totalMatches, fileCount)
+		if limitInfo != "" {
+			summary += fmt.Sprintf(" with pagination = %s", limitInfo)
+		}
+		return strings.Join(limitedResults, "\n") + summary, nil
+
+	default:
+		if len(limitedResults) == 0 {
+			return "No files found", nil
+		}
+		for i, line := range limitedResults {
+			relPath, _ := filepath.Rel(cwd, line)
+			limitedResults[i] = filepath.ToSlash(relPath)
+		}
+
+		header := fmt.Sprintf("Found %d files", len(limitedResults))
+		if limitInfo != "" {
+			header += fmt.Sprintf(" %s", limitInfo)
+		}
+		return header + "\n" + strings.Join(limitedResults, "\n"), nil
+	}
+}
+
+func applyHeadLimit(lines []string, limit *int, offset int) ([]string, *int) {
+	if limit != nil && *limit == 0 {
+		if offset < len(lines) {
+			return lines[offset:], nil
+		}
+		return nil, nil
+	}
+
+	effectiveLimit := defaultHeadLimit
+	if limit != nil {
+		effectiveLimit = *limit
+	}
+
+	if offset >= len(lines) {
+		return nil, nil
+	}
+
+	sliced := lines[offset:]
+	wasTruncated := len(sliced) > effectiveLimit
+	var appliedLimit *int
+
+	if wasTruncated {
+		sliced = sliced[:effectiveLimit]
+		appliedLimit = &effectiveLimit
+	}
+	return sliced, appliedLimit
+}
+
+func formatLimitInfo(appliedLimit *int, offset int) string {
+	var parts []string
+	if appliedLimit != nil {
+		parts = append(parts, fmt.Sprintf("limit: %d", *appliedLimit))
+	}
+	if offset > 0 {
+		parts = append(parts, fmt.Sprintf("offset: %d", offset))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func splitGlobPatterns(globRaw string) []string {
+	fields := strings.Fields(globRaw)
+	out := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if strings.Contains(field, "{") && strings.Contains(field, "}") {
+			out = append(out, field)
+			continue
+		}
+		for _, chunk := range strings.Split(field, ",") {
+			chunk = strings.TrimSpace(chunk)
+			if chunk != "" {
+				out = append(out, chunk)
+			}
+		}
+	}
+	return out
+}
+
+func splitNonEmptyLines(raw string) []string {
+	parts := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func grepFallback(base string, pattern string, ignoreCase bool, mode string) (string, error) {
+	reFlags := ""
+	if ignoreCase {
+		reFlags = "(?i)"
+	}
+	re, err := regexp.Compile(reFlags + pattern)
+	if err != nil {
+		return "", err
+	}
+	type countEntry struct {
+		file  string
+		count int
+	}
+	content := make([]string, 0, 128)
+	files := make([]string, 0, 64)
+	counts := make([]countEntry, 0, 64)
+	err = filepath.WalkDir(base, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		txt := strings.ReplaceAll(string(b), "\r\n", "\n")
+		rel, _ := filepath.Rel(base, path)
+		rel = filepath.ToSlash(rel)
+		hits := 0
+		for i, line := range strings.Split(txt, "\n") {
+			if re.MatchString(line) {
+				hits++
+				if mode == "content" {
+					content = append(content, fmt.Sprintf("%s:%d:%s", rel, i+1, line))
+				}
+			}
+		}
+		if hits > 0 {
+			files = append(files, rel)
+			counts = append(counts, countEntry{file: rel, count: hits})
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	sort.Strings(files)
+	switch mode {
+	case "content":
+		if len(content) == 0 {
+			return "No matches found", nil
+		}
+		return strings.Join(content, "\n"), nil
+	case "count":
+		if len(counts) == 0 {
+			return "No matches found", nil
+		}
+		rows := make([]string, 0, len(counts))
+		for _, c := range counts {
+			rows = append(rows, fmt.Sprintf("%s:%d", c.file, c.count))
+		}
+		return strings.Join(rows, "\n"), nil
+	default:
+		if len(files) == 0 {
+			return "No files found", nil
+		}
+		return strings.Join(files, "\n"), nil
+	}
+}
+
 ui/model/provider/form.go
 package provider
 
@@ -3299,6 +4751,8 @@ const (
 
 	PrimaryTextHex = "#D4D4D4"
 	MutedTextHex   = "#808080"
+
+	ModeAskHex = "#8BE9FD"
 )
 
 var (
@@ -3309,6 +4763,8 @@ var (
 	SurfaceBackground = lipgloss.Color(SurfaceBackgroundHex)
 	PrimaryText       = lipgloss.Color(PrimaryTextHex)
 	MutedText         = lipgloss.Color(MutedTextHex)
+
+	ModeAsk           = lipgloss.Color(ModeAskHex)
 )
 
 

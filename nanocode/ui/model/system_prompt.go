@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+
+	"nanocode/ui/model/agent"
 )
 
 var (
@@ -13,10 +15,10 @@ var (
 	staticSystemPromptText string
 )
 
-func buildSystemPrompts() []string {
+func buildSystemPrompts(mode AgentMode) []string {
 	return []string{
 		buildStaticSystemPrompt(),
-		buildDynamicSystemPrompt(),
+		buildDynamicSystemPrompt(mode),
 	}
 }
 
@@ -27,32 +29,53 @@ func buildStaticSystemPrompt() string {
 			"You are **nanocode - autonomous coding agent**.",
 			"",
 			"# Tool Protocol",
-			"- Solve tasks through available tool calls, not by guessing outcomes in plain text.",
-			"- Treat tool output as the single source of truth for the next step.",
+			"- Solve tasks through available tool calls, not by guessing outcomes.",
+			"- Treat tool output as the single source of truth.",
 			"- Any read, write, search, or execution action must happen via tools.",
 			"",
 			"# Agentic Loop",
-			"- Continue until the user request is fully resolved or a real blocker is hit.",
-			"- After each tool result: evaluate, choose the best next tool, execute.",
-			"- Keep CLI text concise: brief progress + next action.",
-			"- Finish by returning a short completion report with outcome and key artifacts.",
+			"- Continue until user request is fully resolved or a blocker is hit.",
+			"- Evaluate, choose best tool, execute.",
+			"- Keep CLI text concise. Return short completion report.",
 		}
 		staticSystemPromptText = strings.Join(sections, "\n")
 	})
 	return staticSystemPromptText
 }
 
-func buildDynamicSystemPrompt() string {
+func buildDynamicSystemPrompt(mode AgentMode) string {
 	cwd := currentWorkingDirectory()
 	shell := shellName()
 	osName := runtime.GOOS
 
+	var modeDesc string
+	if mode == ModeAsk {
+		modeDesc = "Current Mode: `ask` (READ-ONLY).\nWrite tools will explicitly fail. If writing is required, ask the user to press `shift+tab` to switch to `code` mode."
+	} else {
+		modeDesc = "Current Mode: `code` (READ/WRITE).\nAll tools are available."
+	}
+
+	registry := agent.NewDefaultToolRegistry()
+	var toolsDesc []string
+	toolsDesc = append(toolsDesc, "# Tools Status")
+	for _, t := range registry.GetAllTools() {
+		status := "✅ Available"
+		if mode == ModeAsk && !t.ReadOnly {
+			status = "❌ BLOCKED (Requires 'code' mode)"
+		}
+		toolsDesc = append(toolsDesc, fmt.Sprintf("- %s: %s", t.Name, status))
+	}
+
 	sections := []string{
 		"# Environment",
-		"Current runtime context:",
 		fmt.Sprintf("- CWD: `%s`", cwd),
 		fmt.Sprintf("- OS: `%s`", osName),
 		fmt.Sprintf("- Shell: `%s`", shell),
+		"",
+		"# Permissions",
+		modeDesc,
+		"",
+		strings.Join(toolsDesc, "\n"),
 	}
 	return strings.Join(sections, "\n")
 }
@@ -67,10 +90,8 @@ func currentWorkingDirectory() string {
 
 func shellName() string {
 	shell := strings.TrimSpace(os.Getenv("SHELL"))
-	if shell == "" {
-		if runtime.GOOS == "windows" {
-			shell = strings.TrimSpace(os.Getenv("COMSPEC"))
-		}
+	if shell == "" && runtime.GOOS == "windows" {
+		shell = strings.TrimSpace(os.Getenv("COMSPEC"))
 	}
 	if shell == "" {
 		return "unknown"
@@ -78,6 +99,6 @@ func shellName() string {
 	return shell
 }
 
-func buildSystemPrompt() string {
-	return strings.Join(buildSystemPrompts(), "\n\n")
+func buildSystemPrompt(mode AgentMode) string {
+	return strings.Join(buildSystemPrompts(mode), "\n\n")
 }

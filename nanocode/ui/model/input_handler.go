@@ -58,7 +58,7 @@ func (m Model) executeInput() (tea.Model, tea.Cmd) {
 	m.chat.interrupted = false
 	m.clearPendingConfirmation()
 	m.chat.abortChan = make(chan struct{})
-	promptTokens := estimatePromptTokens(m.chat.messages)
+	promptTokens := estimatePromptTokens(m.chat.messages, m.chat.mode)
 	if promptTokens < m.chat.contextTokenFloor {
 		promptTokens = m.chat.contextTokenFloor
 	}
@@ -74,7 +74,7 @@ func (m Model) executeInput() (tea.Model, tea.Cmd) {
 	m.refreshViewport(true)
 	return m, tea.Batch(
 		spinnerTickCmd(m.settings.values.SpinnerStyle),
-		startAgentStreamCmd(active, m.chat.messages, m.settings.values, m.chat.abortChan),
+		startAgentStreamCmd(active, m.chat.messages, m.settings.values, m.chat.abortChan, m.chat.mode),
 	)
 }
 

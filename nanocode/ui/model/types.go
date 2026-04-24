@@ -23,6 +23,13 @@ const (
 	providerModeInputValue providerMode = "input_value"
 )
 
+type AgentMode string
+
+const (
+	ModeAsk  AgentMode = "ask"
+	ModeCode AgentMode = "code"
+)
+
 type spinnerTickMsg time.Time
 type spinnerChangedMsg struct{ saved bool }
 type providerSavedMsg struct {
@@ -66,11 +73,11 @@ type ChatState struct {
 	showInferring            bool
 	lastWorkedForSec         int
 	interrupted              bool
-	// Double-press exit/interrupt confirmation state
 	confirmPressTime time.Time
 	confirmPending   bool
 	confirmKey       string
 	abortChan        chan struct{}
+	mode            AgentMode
 }
 
 type CommandState struct {

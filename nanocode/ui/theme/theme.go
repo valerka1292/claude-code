@@ -12,6 +12,8 @@ const (
 
 	PrimaryTextHex = "#D4D4D4"
 	MutedTextHex   = "#808080"
+
+	ModeAskHex = "#8BE9FD"
 )
 
 var (
@@ -22,4 +24,6 @@ var (
 	SurfaceBackground = lipgloss.Color(SurfaceBackgroundHex)
 	PrimaryText       = lipgloss.Color(PrimaryTextHex)
 	MutedText         = lipgloss.Color(MutedTextHex)
+
+	ModeAsk           = lipgloss.Color(ModeAskHex)
 )

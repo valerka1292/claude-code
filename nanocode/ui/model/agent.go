@@ -9,10 +9,11 @@ import (
 	"nanocode/ui/types"
 )
 
-func startAgentStreamCmd(provider config.Provider, history []types.Message, settings config.Settings, abortChan <-chan struct{}) tea.Cmd {
+func startAgentStreamCmd(provider config.Provider, history []types.Message, settings config.Settings, abortChan <-chan struct{}, mode AgentMode) tea.Cmd {
 	return func() tea.Msg {
 		ch := make(chan agent.StreamEvent, 64)
-		go agent.RunLoop(convertProvider(provider), convertMessages(history), settings.APITimeoutSeconds, ch, abortChan)
+		readOnly := mode == ModeAsk
+		go agent.RunLoop(convertProvider(provider), convertMessages(history, mode), settings.APITimeoutSeconds, ch, abortChan, readOnly)
 		return streamStartedMsg{ch: ch}
 	}
 }
@@ -25,8 +26,8 @@ func convertProvider(provider config.Provider) agent.ProviderConfig {
 	}
 }
 
-func convertMessages(history []types.Message) []agent.APIMessage {
-	systemPrompts := buildSystemPrompts()
+func convertMessages(history []types.Message, mode AgentMode) []agent.APIMessage {
+	systemPrompts := buildSystemPrompts(mode)
 	result := make([]agent.APIMessage, 0, len(history)+len(systemPrompts))
 	for _, prompt := range systemPrompts {
 		if strings.TrimSpace(prompt) == "" {

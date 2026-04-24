@@ -45,7 +45,9 @@ func New() Model {
 		viewport:  vp,
 		nobbyPose: nobby.PoseIdle,
 		layout:    LayoutState{},
-		chat:      ChatState{},
+		chat: ChatState{
+			mode: ModeAsk,
+		},
 		commands:  CommandState{},
 		settings: SettingsState{
 			values:      cfg,

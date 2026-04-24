@@ -8,12 +8,10 @@ import (
 )
 
 const (
-	MaxTurns   = 8
 	MaxRetries = 4
 )
 
-// RunLoop executes the agent loop, streaming events to the output channel.
-func RunLoop(provider ProviderConfig, messages []APIMessage, timeoutSeconds int, out chan<- StreamEvent, abortChan <-chan struct{}) {
+func RunLoop(provider ProviderConfig, messages []APIMessage, timeoutSeconds int, out chan<- StreamEvent, abortChan <-chan struct{}, readOnly bool) {
 	defer close(out)
 
 	client := NewClient(timeoutSeconds)
@@ -23,7 +21,11 @@ func RunLoop(provider ProviderConfig, messages []APIMessage, timeoutSeconds int,
 	apiHistory := make([]APIMessage, 0, len(messages))
 	apiHistory = append(apiHistory, messages...)
 
-	for turns := 0; turns < MaxTurns; turns++ {
+	var lastToolName string
+	var lastToolArgs string
+	var duplicateCount int
+
+	for {
 		calls, usage, finishReason, err := streamOneTurnWithRetry(client, provider, apiHistory, tools, out, abortChan)
 		if err != nil {
 			out <- StreamEvent{ErrorText: err.Error()}
@@ -32,18 +34,38 @@ func RunLoop(provider ProviderConfig, messages []APIMessage, timeoutSeconds int,
 		if usage != nil {
 			out <- StreamEvent{Usage: usage}
 		}
-		if finishReason != "tool_calls" {
+		if finishReason != "tool_calls" || len(calls) == 0 {
 			out <- StreamEvent{FinishReason: finishReason}
 			return
 		}
 
+		if len(calls) == 1 {
+			call := calls[0]
+			if call.Function.Name == lastToolName && call.Function.Arguments == lastToolArgs {
+				duplicateCount++
+				if duplicateCount >= 2 {
+					out <- StreamEvent{ErrorText: fmt.Sprintf("Loop prevention triggered: agent is repeatedly calling %s with identical arguments.", call.Function.Name)}
+					return
+				}
+			} else {
+				duplicateCount = 0
+				lastToolName = call.Function.Name
+				lastToolArgs = call.Function.Arguments
+			}
+		} else {
+			duplicateCount = 0
+			lastToolName = ""
+			lastToolArgs = ""
+		}
+
 		assistantMsg := APIMessage{Role: "assistant", ToolCalls: calls}
 		apiHistory = append(apiHistory, assistantMsg)
+
 		for _, call := range calls {
 			out <- StreamEvent{ToolCallStart: &ToolCallEvent{ID: call.ID, Name: call.Function.Name, Arguments: call.Function.Arguments, ReadOnly: true}}
-			result, execErr := registry.Execute(context.Background(), call)
+			result, execErr := registry.Execute(context.Background(), call, readOnly)
 			if execErr != nil {
-				errMsg := fmt.Sprintf("tool execution failed: %v", execErr)
+				errMsg := execErr.Error()
 				out <- StreamEvent{ToolCallResult: &ToolResultEvent{ID: call.ID, Name: call.Function.Name, Result: errMsg, IsError: true}}
 				apiHistory = append(apiHistory, APIMessage{Role: "tool", ToolCallID: call.ID, Content: fmt.Sprintf(`{"error":%q}`, errMsg)})
 				continue
@@ -52,7 +74,6 @@ func RunLoop(provider ProviderConfig, messages []APIMessage, timeoutSeconds int,
 			apiHistory = append(apiHistory, APIMessage{Role: "tool", ToolCallID: call.ID, Content: normalizeToolContent(result)})
 		}
 	}
-	out <- StreamEvent{ErrorText: "agent loop stopped: maximum turns reached"}
 }
 
 func normalizeToolContent(result string) string {

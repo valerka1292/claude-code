@@ -18,8 +18,8 @@ func estimateTokens(text string) int {
 	return estimated
 }
 
-func estimatePromptTokens(history []types.Message) int {
-	total := estimateTokens(buildSystemPrompt())
+func estimatePromptTokens(history []types.Message, mode AgentMode) int {
+	total := estimateTokens(buildSystemPrompt(mode))
 	for _, msg := range history {
 		total += estimateTokens(msg.Text)
 	}

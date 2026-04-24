@@ -3,11 +3,13 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"nanocode/internal/mathutil"
+	"nanocode/ui/components/messages"
 	"nanocode/ui/components/nobby"
 	"nanocode/ui/types"
 )
@@ -98,29 +100,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if msg.event.ToolCallStart != nil {
-			label := "read-only"
-			if !msg.event.ToolCallStart.ReadOnly {
-				label = "write"
-			}
-			args := formatToolCallArgs(msg.event.ToolCallStart.Arguments)
+			name := msg.event.ToolCallStart.Name
+			args := formatToolArgs(name, msg.event.ToolCallStart.Arguments, m.cwd)
+
 			m.chat.messages = append(m.chat.messages, types.Message{
 				Role:      types.RoleTool,
-				Text:      fmt.Sprintf("tool call → %s [%s]\n%s", msg.event.ToolCallStart.Name, label, args),
+				Text:      fmt.Sprintf("⚙ %s %s", name, args),
 				Timestamp: time.Now(),
 			})
 			m.refreshViewport(true)
 			return m, pollStreamCmd(m.stream.ch)
 		}
+
 		if msg.event.ToolCallResult != nil {
-			prefix := "tool result"
-			if msg.event.ToolCallResult.IsError {
-				prefix = "tool error"
+			name := msg.event.ToolCallResult.Name
+			isErr := msg.event.ToolCallResult.IsError
+			summary := formatToolResult(name, msg.event.ToolCallResult.Result, isErr)
+
+			updated := false
+			if len(m.chat.messages) > 0 {
+				lastIdx := len(m.chat.messages) - 1
+				lastMsg := m.chat.messages[lastIdx]
+				if lastMsg.Role == types.RoleTool && strings.HasPrefix(lastMsg.Text, "⚙ "+name) {
+					icon := "✓"
+					if isErr {
+						icon = "✗"
+					}
+					argsPart := strings.TrimPrefix(lastMsg.Text, "⚙ "+name)
+					m.chat.messages[lastIdx].Text = fmt.Sprintf("%s %s%s\n  ↳ %s", icon, name, argsPart, summary)
+					updated = true
+				}
 			}
-			m.chat.messages = append(m.chat.messages, types.Message{
-				Role:      types.RoleTool,
-				Text:      fmt.Sprintf("%s ← %s\n%s", prefix, msg.event.ToolCallResult.Name, formatToolResultText(msg.event.ToolCallResult.Result)),
-				Timestamp: time.Now(),
-			})
+
+			if !updated {
+				icon := "✓"
+				if isErr {
+					icon = "✗"
+				}
+				m.chat.messages = append(m.chat.messages, types.Message{
+					Role:      types.RoleTool,
+					Text:      fmt.Sprintf("%s %s completed\n  ↳ %s", icon, name, summary),
+					Timestamp: time.Now(),
+				})
+			}
+
 			m.refreshViewport(true)
 			return m, pollStreamCmd(m.stream.ch)
 		}
@@ -191,35 +214,153 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func formatToolCallArgs(raw string) string {
+func formatToolArgs(name string, raw string, cwd string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return "args: {}"
+		return ""
 	}
 
-	var parsed any
-	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
-		return "args: " + trimmed
-	}
-
-	pretty, err := json.MarshalIndent(parsed, "", "  ")
-	if err != nil {
-		return "args: " + trimmed
-	}
-	return "args:\n" + string(pretty)
-}
-
-func formatToolResultText(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return "(empty result)"
-	}
-
-	const maxChars = 4000
-	if len(trimmed) <= maxChars {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &args); err != nil {
+		if len(trimmed) > 70 {
+			return trimmed[:67] + "..."
+		}
 		return trimmed
 	}
-	return trimmed[:maxChars] + "\n…(result truncated in UI)"
+
+	relPath := func(p string) string {
+		if p == "" {
+			return ""
+		}
+		if rel, err := filepath.Rel(cwd, p); err == nil && !strings.HasPrefix(rel, "..") {
+			return rel
+		}
+		return p
+	}
+
+	switch name {
+	case "Write":
+		path, _ := args["file_path"].(string)
+		content, _ := args["content"].(string)
+		base := relPath(path)
+		lines := strings.Count(content, "\n")
+		if len(content) > 0 && !strings.HasSuffix(content, "\n") {
+			lines++
+		}
+		return fmt.Sprintf("%s · %d lines", base, lines)
+
+	case "Read":
+		path, _ := args["file_path"].(string)
+		offsetFloat, hasOffset := args["offset"].(float64)
+		limitFloat, hasLimit := args["limit"].(float64)
+
+		base := relPath(path)
+		if hasOffset || hasLimit {
+			start := 1
+			if hasOffset {
+				start = int(offsetFloat)
+			}
+			if hasLimit {
+				return fmt.Sprintf("%s · lines %d-%d", base, start, start+int(limitFloat)-1)
+			}
+			return fmt.Sprintf("%s · from line %d", base, start)
+		}
+		return base
+
+	case "Glob":
+		pattern, _ := args["pattern"].(string)
+		path, ok := args["path"].(string)
+		if ok && path != "" && path != cwd {
+			return fmt.Sprintf("%q in %s", pattern, relPath(path))
+		}
+		return fmt.Sprintf("%q", pattern)
+
+	case "Grep":
+		pattern, _ := args["pattern"].(string)
+		path, ok := args["path"].(string)
+		glob, _ := args["glob"].(string)
+		mode, _ := args["output_mode"].(string)
+
+		res := fmt.Sprintf("%q", pattern)
+		if ok && path != "" && path != cwd {
+			res += fmt.Sprintf(" in %s", relPath(path))
+		}
+		if glob != "" {
+			res += fmt.Sprintf(" [%s]", glob)
+		}
+		if mode == "content" {
+			res += " (content)"
+		} else if mode == "count" {
+			res += " (count)"
+		}
+		return res
+
+	default:
+		var parts []string
+		for k, v := range args {
+			parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+		}
+		joined := strings.Join(parts, " ")
+		if len(joined) > 70 {
+			return joined[:67] + "..."
+		}
+		return joined
+	}
+}
+
+func formatToolResult(name string, raw string, isErr bool) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "empty result"
+	}
+
+	if isErr {
+		lines := strings.Split(trimmed, "\n")
+		firstLine := strings.TrimPrefix(lines[0], "tool execution failed: ")
+		if len(firstLine) > 120 {
+			return firstLine[:117] + "..."
+		}
+		return firstLine
+	}
+
+	lines := strings.Count(trimmed, "\n") + 1
+	bytes := len(trimmed)
+
+	switch name {
+	case "Write":
+		var writeData struct {
+			Type     string `json:"type"`
+			FilePath string `json:"filePath"`
+			Diff     string `json:"diff"`
+		}
+		if json.Unmarshal([]byte(trimmed), &writeData) == nil && writeData.Diff != "" {
+			return messages.RenderDiff(writeData.FilePath, writeData.Diff)
+		}
+		if strings.Contains(trimmed, `"type":"create"`) {
+			return "File created"
+		}
+		return "File updated"
+	case "Read":
+		return fmt.Sprintf("Read %d lines (%s)", lines, formatBytes(bytes))
+	case "Glob", "Grep":
+		firstLine := strings.SplitN(trimmed, "\n", 2)[0]
+		if strings.HasPrefix(firstLine, "Found ") || strings.HasPrefix(firstLine, "No ") {
+			return firstLine
+		}
+		return fmt.Sprintf("%d results", lines)
+	default:
+		if lines == 1 && bytes < 80 {
+			return trimmed
+		}
+		return fmt.Sprintf("%d lines, %s", lines, formatBytes(bytes))
+	}
+}
+
+func formatBytes(b int) string {
+	if b < 1024 {
+		return fmt.Sprintf("%d B", b)
+	}
+	return fmt.Sprintf("%.1f KB", float64(b)/1024.0)
 }
 
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
@@ -240,6 +381,14 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	}
 
 	switch msg.String() {
+	case "shift+tab":
+		if m.chat.mode == ModeAsk {
+			m.chat.mode = ModeCode
+		} else {
+			m.chat.mode = ModeAsk
+		}
+		m.resizeViewport()
+		return m, nil, true
 	case "ctrl+c":
 		// Double-press Ctrl+C to quit.
 		if m.isPendingConfirmationFor("ctrl+c") {
