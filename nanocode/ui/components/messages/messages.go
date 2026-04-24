@@ -45,7 +45,7 @@ func View(list []types.Message, width int, spinnerLine string, thinking string, 
 		case types.RoleUser:
 			blocks = append(blocks, userStyle.Width(availableWidth(width, horizontalFrame)).Render("❯ "+msg.Text))
 		case types.RoleAssistant:
-			blocks = append(blocks, agentStyle.Render(renderAssistantBlock(msg.Text, width, false)))
+			blocks = append(blocks, agentStyle.Width(width).MaxWidth(width).Render(renderAssistantBlock(msg.Text, width, false)))
 		case types.RoleTool:
 			text := msg.Text
 			formattedText := text
@@ -77,13 +77,13 @@ func View(list []types.Message, width int, spinnerLine string, thinking string, 
 	}
 
 	if spinnerLine != "" {
-		blocks = append(blocks, agentStyle.Render(spinnerLine))
+		blocks = append(blocks, agentStyle.Width(width).MaxWidth(width).Render(spinnerLine))
 	}
 	if thinking != "" {
 		blocks = append(blocks, thinkStyle.Render("thinking: "+thinking))
 	}
 	if streamingText != "" {
-		blocks = append(blocks, agentStyle.Render(renderAssistantBlock(streamingText, width, true)))
+		blocks = append(blocks, agentStyle.Width(width).MaxWidth(width).Render(renderAssistantBlock(streamingText, width, true)))
 	}
 
 	if len(blocks) == 0 {
