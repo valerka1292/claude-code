@@ -52,9 +52,10 @@ var availableCommands = []command{{Name: "/settings"}, {Name: "/provider"}}
 
 type LayoutState struct {
 	width             int
-	height           int
+	height            int
 	viewportMaxHeight int
-	viewportTop     int
+	viewportTop       int
+	scrollbarDragging bool
 }
 
 type ChatState struct {
