@@ -73,11 +73,11 @@ type ChatState struct {
 	showInferring            bool
 	lastWorkedForSec         int
 	interrupted              bool
-	confirmPressTime time.Time
-	confirmPending   bool
-	confirmKey       string
-	abortChan        chan struct{}
-	mode            AgentMode
+	confirmPressTime         time.Time
+	confirmPending           bool
+	confirmKey               string
+	abortChan                chan struct{}
+	mode                     AgentMode
 }
 
 type CommandState struct {
