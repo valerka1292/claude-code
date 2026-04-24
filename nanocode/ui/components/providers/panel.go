@@ -14,8 +14,7 @@ var (
 	boxStyle = lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
 			BorderForeground(theme.SecondaryAccent).
-			Padding(1, 2).
-			Background(theme.AppBackground)
+			Padding(1, 2)
 	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.PrimaryAccent)
 	mutedText  = lipgloss.NewStyle().Foreground(theme.MutedText)
 	selected   = lipgloss.NewStyle().Foreground(theme.AccentContrast).Background(theme.PrimaryAccent)

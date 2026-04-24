@@ -14,7 +14,7 @@ var (
 	noteStyle    = lipgloss.NewStyle().Foreground(theme.SecondaryAccent).Bold(true)
 )
 
-func View(cwd string, mascot string, providerName string, modelName string) string {
+func View(width int, cwd string, mascot string, providerName string, modelName string) string {
 	title := lipgloss.JoinHorizontal(
 		lipgloss.Left,
 		nameStyle.Render(version.Name),
@@ -35,6 +35,6 @@ func View(cwd string, mascot string, providerName string, modelName string) stri
 
 	content := lipgloss.JoinVertical(lipgloss.Left, topSection, "", note)
 
-	wrap := lipgloss.NewStyle().Background(theme.AppBackground).Padding(0, 1)
+	wrap := lipgloss.NewStyle().Padding(0, 1).Width(width)
 	return wrap.Render(content)
 }
