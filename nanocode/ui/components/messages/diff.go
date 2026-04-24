@@ -2,6 +2,7 @@ package messages
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -80,6 +81,27 @@ func keepFgAndReapplyBg(s string, bgANSI string) string {
 	withoutBg = strings.ReplaceAll(withoutBg, "\x1b[0m", "\x1b[0m"+bgANSI)
 	withoutBg = strings.ReplaceAll(withoutBg, "\x1b[m", "\x1b[m"+bgANSI)
 	return withoutBg
+}
+
+func displayPath(filePath string) string {
+	if filePath == "" {
+		return filePath
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return filePath
+	}
+	rel, err := filepath.Rel(cwd, filePath)
+	if err != nil {
+		return filePath
+	}
+	if rel == "." {
+		return filepath.Base(cwd)
+	}
+	if strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return filePath
+	}
+	return rel
 }
 
 func RenderDiff(filePath string, diffText string, width int) string {
@@ -205,7 +227,7 @@ func RenderDiff(filePath string, diffText string, width int) string {
 		Bold(true).
 		Padding(0, 1).
 		MarginLeft(2).
-		Render(" WRITE: " + filePath + " ")
+		Render(" WRITE: " + displayPath(filePath) + " ")
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
