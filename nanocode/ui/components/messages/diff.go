@@ -18,6 +18,118 @@ import (
 var hunkHeaderRegex = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
 var ansiSGRRe = regexp.MustCompile(`\x1b\[([0-9;]*)m`)
 
+type EditLineType int
+
+const (
+	EditLineContext EditLineType = iota
+	EditLineAdd
+	EditLineDel
+)
+
+type EditLine struct {
+	Type    EditLineType
+	Content string
+	OldNum  int
+	NewNum  int
+}
+
+type EditHunk struct {
+	OldStart int
+	NewStart int
+	Lines    []EditLine
+}
+
+type ParsedEditDiff struct {
+	Hunks []EditHunk
+}
+
+func ParseEditDiff(diffText string) ParsedEditDiff {
+	var result ParsedEditDiff
+	diffText = strings.ReplaceAll(diffText, "\r\n", "\n")
+	lines := strings.Split(diffText, "\n")
+
+	var currentHunk *EditHunk
+	oldLineNum := 0
+	newLineNum := 0
+
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+
+		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "diff ") || strings.HasPrefix(line, "index ") {
+			continue
+		}
+
+		if strings.HasPrefix(line, "@@") {
+			if currentHunk != nil {
+				result.Hunks = append(result.Hunks, *currentHunk)
+			}
+
+			m := hunkHeaderRegex.FindStringSubmatch(line)
+			if len(m) >= 3 {
+				oldStart, _ := strconv.Atoi(m[1])
+				newStart, _ := strconv.Atoi(m[2])
+				oldLineNum = oldStart
+				newLineNum = newStart
+
+				currentHunk = &EditHunk{
+					OldStart: oldStart,
+					NewStart: newStart,
+					Lines:    make([]EditLine, 0),
+				}
+			}
+			continue
+		}
+
+		if currentHunk == nil {
+			continue
+		}
+
+		char := line[0:1]
+		content := ""
+		if len(line) > 1 {
+			content = line[1:]
+		}
+
+		switch char {
+		case " ":
+			currentHunk.Lines = append(currentHunk.Lines, EditLine{
+				Type:    EditLineContext,
+				Content: content,
+				OldNum:  oldLineNum,
+				NewNum:  newLineNum,
+			})
+			oldLineNum++
+			newLineNum++
+		case "-":
+			currentHunk.Lines = append(currentHunk.Lines, EditLine{
+				Type:    EditLineDel,
+				Content: content,
+				OldNum:  oldLineNum,
+				NewNum:  0,
+			})
+			oldLineNum++
+		case "+":
+			currentHunk.Lines = append(currentHunk.Lines, EditLine{
+				Type:    EditLineAdd,
+				Content: content,
+				OldNum:  0,
+				NewNum:  newLineNum,
+			})
+			newLineNum++
+		case "\\":
+			continue
+		}
+	}
+
+	if currentHunk != nil {
+		result.Hunks = append(result.Hunks, *currentHunk)
+	}
+
+	return result
+}
+
 var (
 	addBgStyle     = lipgloss.NewStyle().Background(lipgloss.Color("#163320"))
 	subBgStyle     = lipgloss.NewStyle().Background(lipgloss.Color("#3d1a1a"))
@@ -104,36 +216,21 @@ func displayPath(filePath string) string {
 	return rel
 }
 
-func RenderDiff(filePath string, diffText string, width int) string {
-	lines := strings.Split(diffText, "\n")
-	var cleanLines []string
-	var lineTypes []string
+func RenderDiff(filePath string, diffText string, width int, operation string) string {
+	parsed := ParseEditDiff(diffText)
 
-	for _, line := range lines {
-		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "\\") {
-			lineTypes = append(lineTypes, "skip")
-			continue
-		}
-		if strings.HasPrefix(line, "@@") {
-			lineTypes = append(lineTypes, "@@")
-			continue
-		}
-		if len(line) > 0 {
-			char := line[0:1]
-			if char == "+" || char == "-" || char == " " {
-				lineTypes = append(lineTypes, char)
-				cleanLines = append(cleanLines, line[1:])
-				continue
-			}
-		}
-		lineTypes = append(lineTypes, " ")
-		cleanLines = append(cleanLines, line)
+	if len(parsed.Hunks) == 0 {
+		return lipgloss.NewStyle().Foreground(theme.MutedText).Render("No changes to display.")
 	}
 
-	// Syntax-highlight all lines. For +/- rows, we keep foreground token colors,
-	// remove any embedded background codes, and re-apply row background after
-	// each ANSI reset so the diff stripe stays visually solid.
+	var cleanLines []string
+	for _, hunk := range parsed.Hunks {
+		for _, line := range hunk.Lines {
+			cleanLines = append(cleanLines, line.Content)
+		}
+	}
 	cleanText := strings.Join(cleanLines, "\n")
+
 	ext := strings.TrimPrefix(filepath.Ext(filePath), ".")
 	if ext == "" {
 		ext = "text"
@@ -146,88 +243,85 @@ func RenderDiff(filePath string, diffText string, width int) string {
 	}
 	hlLines := strings.Split(highlightedText, "\n")
 
-	// Gutter width
 	maxLine := 0
-	for _, line := range lines {
-		if m := hunkHeaderRegex.FindStringSubmatch(line); len(m) == 3 {
-			if nl, err2 := strconv.Atoi(m[2]); err2 == nil && nl > maxLine {
-				maxLine = nl
+	for _, hunk := range parsed.Hunks {
+		for _, line := range hunk.Lines {
+			if line.NewNum > maxLine {
+				maxLine = line.NewNum
+			}
+			if line.OldNum > maxLine {
+				maxLine = line.OldNum
 			}
 		}
 	}
-	maxLine += len(lines)
+
 	digits := len(strconv.Itoa(maxLine))
-	if digits < 2 {
-		digits = 2
+	if digits < 1 {
+		digits = 1
 	}
 
-	gutterWidth := digits + 3 // "%Nd │ "
+	gutterWidth := digits + 3 + digits + 3
 	innerWidth := mathutil.Max(40, width-8)
 	contentWidth := mathutil.Max(10, innerWidth-gutterWidth)
 
 	var formatted strings.Builder
-	oldLine, newLine, hlIndex := 0, 0, 0
+	hlIndex := 0
 
-	for i, lType := range lineTypes {
-		if lType == "skip" {
-			continue
+	for hIndex, hunk := range parsed.Hunks {
+		if hIndex > 0 {
+			sepWidth := digits*2 + 3
+			text := "..."
+
+			leftPad := (sepWidth - len(text)) / 2
+			rightPad := sepWidth - len(text) - leftPad
+
+			centeredDots := strings.Repeat(" ", leftPad) + text + strings.Repeat(" ", rightPad)
+			sepGutter := numStyle.Render(fmt.Sprintf("%s │ ", centeredDots))
+
+			formatted.WriteString(sepGutter + "\n")
 		}
-		if lType == "@@" {
-			if m := hunkHeaderRegex.FindStringSubmatch(lines[i]); len(m) == 3 {
-				oldLine, _ = strconv.Atoi(m[1])
-				newLine, _ = strconv.Atoi(m[2])
+
+		for _, line := range hunk.Lines {
+			hlContent := line.Content
+			if hlIndex < len(hlLines) {
+				hlContent = hlLines[hlIndex]
 			}
-			gutter := strings.Repeat(" ", digits) + " │ "
-			formatted.WriteString(numStyle.Render(gutter) + infoStyle.Render(lines[i]) + "\n")
-			continue
-		}
+			hlIndex++
 
-		rawContent := ""
-		if hlIndex < len(cleanLines) {
-			rawContent = cleanLines[hlIndex]
-		}
-		hlContent := rawContent
-		if hlIndex < len(hlLines) {
-			hlContent = hlLines[hlIndex]
-		}
-		hlIndex++
+			var numStr, lineContent string
 
-		var numStr, lineContent string
+			switch line.Type {
+			case EditLineAdd:
+				numStr = numStyle.Render(fmt.Sprintf("%*s │ %*d │ ", digits, "", digits, line.NewNum))
+				pfx := keepFgAndReapplyBg(addPrefixStyle.Render("+ "), "\x1b[48;2;22;51;32m")
+				lineContent = addBgStyle.Width(contentWidth).Render(
+					pfx + keepFgAndReapplyBg(hlContent, "\x1b[48;2;22;51;32m"),
+				)
+			case EditLineDel:
+				numStr = numStyle.Render(fmt.Sprintf("%*d │ %*s │ ", digits, line.OldNum, digits, ""))
+				pfx := keepFgAndReapplyBg(subPrefixStyle.Render("- "), "\x1b[48;2;61;26;26m")
+				lineContent = subBgStyle.Width(contentWidth).Render(
+					pfx + keepFgAndReapplyBg(hlContent, "\x1b[48;2;61;26;26m"),
+				)
+			case EditLineContext:
+				numStr = numStyle.Render(fmt.Sprintf("%*d │ %*d │ ", digits, line.OldNum, digits, line.NewNum))
+				lineContent = "  " + hlContent
+			}
 
-		switch lType {
-		case "+":
-			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, newLine))
-			newLine++
-			pfx := keepFgAndReapplyBg(addPrefixStyle.Render("+ "), "\x1b[48;2;22;51;32m")
-			lineContent = addBgStyle.Width(contentWidth).Render(
-				pfx + keepFgAndReapplyBg(hlContent, "\x1b[48;2;22;51;32m"),
-			)
-		case "-":
-			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, oldLine))
-			oldLine++
-			pfx := keepFgAndReapplyBg(subPrefixStyle.Render("- "), "\x1b[48;2;61;26;26m")
-			lineContent = subBgStyle.Width(contentWidth).Render(
-				pfx + keepFgAndReapplyBg(hlContent, "\x1b[48;2;61;26;26m"),
-			)
-		default:
-			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, newLine))
-			oldLine++
-			newLine++
-			lineContent = "  " + hlContent
+			formatted.WriteString(numStr + lineContent + "\n")
 		}
-
-		formatted.WriteString(numStr + lineContent + "\n")
 	}
 
 	content := strings.TrimRight(formatted.String(), "\n")
 
+	opTitle := " " + strings.ToUpper(operation) + ": " + displayPath(filePath) + " "
 	header := lipgloss.NewStyle().
 		Background(theme.PrimaryAccent).
 		Foreground(theme.AccentContrast).
 		Bold(true).
 		Padding(0, 1).
 		MarginLeft(2).
-		Render(" WRITE: " + displayPath(filePath) + " ")
+		Render(opTitle)
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

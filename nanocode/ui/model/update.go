@@ -334,12 +334,27 @@ func formatToolResult(name string, raw string, isErr bool, width int) string {
 			Diff     string `json:"diff"`
 		}
 		if json.Unmarshal([]byte(trimmed), &writeData) == nil && writeData.Diff != "" {
-			return messages.RenderDiff(writeData.FilePath, writeData.Diff, width)
+			return messages.RenderDiff(writeData.FilePath, writeData.Diff, width, "write")
 		}
 		if strings.Contains(trimmed, `"type":"create"`) {
 			return "File created"
 		}
 		return "File updated"
+	case "Edit":
+		var editData struct {
+			Type       string `json:"type"`
+			FilePath   string `json:"filePath"`
+			ReplaceAll bool  `json:"replaceAll"`
+			Diff       string `json:"diff"`
+		}
+		if json.Unmarshal([]byte(trimmed), &editData) == nil && editData.Diff != "" {
+			op := "edit"
+			if editData.ReplaceAll {
+				op = "replace"
+			}
+			return messages.RenderDiff(editData.FilePath, editData.Diff, width, op)
+		}
+		return "File edited"
 	case "Read":
 		return fmt.Sprintf("Read %d lines (%s)", lines, formatBytes(bytes))
 	case "Glob", "Grep":

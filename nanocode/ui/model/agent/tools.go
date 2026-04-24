@@ -27,8 +27,16 @@ import (
 const (
 	fileReadToolName  = "Read"
 	fileWriteToolName = "Write"
-	globToolName      = "Glob"
-	grepToolName      = "Grep"
+	fileEditToolName = "Edit"
+	globToolName   = "Glob"
+	grepToolName   = "Grep"
+)
+
+const (
+	leftSingleCurly  = "'"
+	rightSingleCurly = "'"
+	leftDoubleCurly  = "“"
+	rightDoubleCurly = "”"
 )
 
 const (
@@ -60,6 +68,7 @@ func NewDefaultToolRegistry() *ToolRegistry {
 	tools := []ToolDefinition{
 		r.newFileReadTool(),
 		r.newFileWriteTool(),
+		r.newFileEditTool(),
 		r.newGlobTool(),
 		r.newGrepTool(),
 	}
@@ -284,6 +293,39 @@ func isBinary(data []byte) bool {
 	return !utf8.Valid(data)
 }
 
+func normalizeQuotes(s string) string {
+	r := strings.NewReplacer(
+		leftSingleCurly, "'",
+		rightSingleCurly, "'",
+		leftDoubleCurly, "\"",
+		rightDoubleCurly, "\"",
+	)
+	return r.Replace(s)
+}
+
+func findActualString(fileContent, searchString string) string {
+	if strings.Contains(fileContent, searchString) {
+		return searchString
+	}
+
+	normFile := normalizeQuotes(fileContent)
+	normSearch := normalizeQuotes(searchString)
+
+	idx := strings.Index(normFile, normSearch)
+	if idx != -1 {
+		return fileContent[idx : idx+len(searchString)]
+	}
+
+	return ""
+}
+
+func applyEditToFile(original, old, new string, replaceAll bool) string {
+	if replaceAll {
+		return strings.ReplaceAll(original, old, new)
+	}
+	return strings.Replace(original, old, new, 1)
+}
+
 func (r *ToolRegistry) markAsRead(path string, mtime time.Time) {
 	r.readStateMu.Lock()
 	defer r.readStateMu.Unlock()
@@ -400,6 +442,123 @@ func (r *ToolRegistry) runFileWrite(_ context.Context, raw json.RawMessage) (str
 		return fmt.Sprintf(`{"type":"create","filePath":%q,"lines":%d,"diff":%s}`, absPath, lines, string(diffJSON)), nil
 	}
 	return fmt.Sprintf(`{"type":"update","filePath":%q,"lines":%d,"diff":%s}`, absPath, lines, string(diffJSON)), nil
+}
+
+func (r *ToolRegistry) newFileEditTool() ToolDefinition {
+	return ToolDefinition{
+		Name:     fileEditToolName,
+		ReadOnly: false,
+		Description: `Performs exact string replacements in files.
+
+Usage:
+- You must use the Read tool at least once before editing.
+- Ensure you preserve exact indentation.
+- The edit will FAIL if 'old_string' is not unique in the file. Use a larger string or 'replace_all'.
+- 'replace_all' is useful for renaming variables across the whole file.`,
+		Parameters: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"required":             []string{"file_path", "old_string", "new_string"},
+			"properties": map[string]any{
+				"file_path":   map[string]any{"type": "string", "description": "Absolute path to the file"},
+				"old_string": map[string]any{"type": "string", "description": "The exact text to replace"},
+				"new_string": map[string]any{"type": "string", "description": "The new text"},
+				"replace_all": map[string]any{"type": "boolean", "description": "Replace all occurrences", "default": false},
+			},
+		},
+		Handler: r.runFileEdit,
+	}
+}
+
+const MAX_EDIT_FILE_SIZE = 1024 * 1024 * 1024 // 1 GiB
+
+func (r *ToolRegistry) runFileEdit(_ context.Context, raw json.RawMessage) (string, error) {
+	var in fileEditInput
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+
+	absPath := in.FilePath
+	if !filepath.IsAbs(absPath) {
+		cwd, _ := os.Getwd()
+		absPath = filepath.Join(cwd, absPath)
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+
+	if err == nil && info.Size() > int64(MAX_EDIT_FILE_SIZE) {
+		return "", fmt.Errorf("File is too large to edit. Max size is 1GB.")
+	}
+
+	r.readStateMu.RLock()
+	readTime, hasRead := r.readState[absPath]
+	r.readStateMu.RUnlock()
+
+	if !hasRead {
+		return "", errors.New("File has not been read yet. Read it first before editing.")
+	}
+
+	if err == nil && info.ModTime().Unix() > readTime.Unix() {
+		return "", errors.New("FILE_UNEXPECTEDLY_MODIFIED_ERROR: File has been modified since read (stale edit). Read it again.")
+	}
+
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if in.OldString == "" {
+				return r.finalizeEdit(absPath, "", in.NewString, in.ReplaceAll)
+			}
+			return "", errors.New("Cannot create file: path does not exist.")
+		}
+		return "", err
+	}
+	content := string(data)
+
+	if in.OldString == "" {
+		if content != "" {
+			return "", errors.New("Cannot append to non-empty file via Edit. Use Write for full file write.")
+		}
+		return r.finalizeEdit(absPath, "", in.NewString, in.ReplaceAll)
+	}
+
+	actualOld := findActualString(content, in.OldString)
+	if actualOld == "" {
+		return "", fmt.Errorf("String to replace not found in file.\nString: %s", in.OldString)
+	}
+
+	count := strings.Count(content, actualOld)
+	if count > 1 && !in.ReplaceAll {
+		return "", fmt.Errorf("Found %d matches of the string, but replace_all is false. Provide more context.", count)
+	}
+
+	updatedContent := applyEditToFile(content, actualOld, in.NewString, in.ReplaceAll)
+
+	if updatedContent == content {
+		return "", errors.New("Edit produced no changes in the file.")
+	}
+
+	// Pass old and new content for proper diff generation
+	return r.finalizeEdit(absPath, content, updatedContent, in.ReplaceAll)
+}
+
+func (r *ToolRegistry) finalizeEdit(path, oldContent, newContent string, replaceAll bool) (string, error) {
+	if err := os.WriteFile(path, []byte(newContent), 0644); err != nil {
+		return "", err
+	}
+
+	newStat, _ := os.Stat(path)
+	if newStat != nil {
+		r.markAsRead(path, newStat.ModTime())
+	}
+
+	edits := myers.ComputeEdits(span.URIFromPath(path), oldContent, newContent)
+	diffText := fmt.Sprintf("%s", gotextdiff.ToUnified(filepath.Base(path), filepath.Base(path), oldContent, edits))
+	diffJSON, _ := json.Marshal(diffText)
+
+	return fmt.Sprintf(`{"type":"edit","filePath":%q,"replaceAll":%t,"diff":%s}`, path, replaceAll, string(diffJSON)), nil
 }
 
 type globInput struct {
@@ -556,6 +715,13 @@ type grepInput struct {
 	HeadLimit  *int   `json:"head_limit,omitempty"`
 	Offset     *int   `json:"offset,omitempty"`
 	Multiline  *bool  `json:"multiline,omitempty"`
+}
+
+type fileEditInput struct {
+	FilePath   string `json:"file_path"`
+	OldString string `json:"old_string"`
+	NewString string `json:"new_string"`
+	ReplaceAll bool   `json:"replace_all"`
 }
 
 const defaultHeadLimit = 250
