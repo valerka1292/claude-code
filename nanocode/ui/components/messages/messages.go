@@ -12,7 +12,7 @@ import (
 
 var (
 	panelStyle = lipgloss.NewStyle().Padding(0, 0, 1, 0).Background(theme.AppBackground)
-	userStyle  = lipgloss.NewStyle().Background(theme.SurfaceBackground).Foreground(theme.PrimaryText).Padding(0, 1)
+	userStyle  = lipgloss.NewStyle().Foreground(theme.PrimaryText).Padding(0, 1)
 	agentStyle = lipgloss.NewStyle().Foreground(theme.PrimaryText)
 	thinkStyle = lipgloss.NewStyle().Foreground(theme.MutedText).PaddingLeft(3)
 	dotStyle   = lipgloss.NewStyle().Foreground(theme.PrimaryAccent)
