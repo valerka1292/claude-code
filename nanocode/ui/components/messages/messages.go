@@ -92,7 +92,8 @@ func View(list []types.Message, width int, spinnerLine string, thinking string, 
 }
 
 func renderAssistantBlock(text string, width int, streaming bool) string {
-	rendered := renderMarkdown(text, availableWidth(width, horizontalFrame+2), streaming)
+	contentWidth := availableWidth(width, horizontalFrame+4)
+	rendered := renderMarkdown(text, contentWidth, streaming)
 	rendered = strings.Trim(rendered, "\n\r")
 
 	if rendered == "" {
