@@ -60,7 +60,7 @@ func (m *Model) scrollToMouseY(y int) {
 	if maxOffset == 0 {
 		return
 	}
-	target := trackY * maxOffset / mathutil.Max(1, height-1)
+	target := (trackY*maxOffset + (height-1)/2) / mathutil.Max(1, height-1)
 	m.viewport.SetYOffset(target)
 }
 
@@ -75,10 +75,14 @@ func (m Model) viewportWithScrollbar() string {
 }
 
 func (m Model) scrollbarColumnView(height int) string {
-	thumbSize := mathutil.Max(1, (height*height)/mathutil.Max(1, m.viewport.TotalLineCount()))
+	total := mathutil.Max(1, m.viewport.TotalLineCount())
+	thumbSize := mathutil.Max(1, (height*height)/total)
 	maxThumbTop := mathutil.Max(0, height-thumbSize)
-	maxOffset := mathutil.Max(1, m.viewport.TotalLineCount()-height)
-	thumbTop := m.viewport.YOffset * maxThumbTop / maxOffset
+	maxOffset := mathutil.Max(1, total-height)
+	thumbTop := (m.viewport.YOffset*maxThumbTop + maxOffset/2) / maxOffset
+	if thumbTop > maxThumbTop {
+		thumbTop = maxThumbTop
+	}
 	trackStyle := lipgloss.NewStyle().Foreground(theme.MutedText)
 	thumbStyle := lipgloss.NewStyle().Foreground(theme.PrimaryAccent)
 	rendered := make([]string, 0, height)
