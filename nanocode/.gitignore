@@ -1,0 +1,11 @@
+node_modules/
+build/
+dist/
+dist-electron/
+electron/
+coverage/
+collect_ts.py
+.DS_Store
+*.log
+.env*
+!/.env.example

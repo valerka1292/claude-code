@@ -1,5 +1,5 @@
-```
 # Dependencies
+node_modules/
 go.sum
 
 # Build artifacts
@@ -30,4 +30,9 @@ htmlcov/
 # Go-specific
 *.test
 *.prof
-```
+
+# Sub-projects
+nanocode/node_modules/
+nanocode/build/
+nanocode/dist/
+nanocode/coverage/
