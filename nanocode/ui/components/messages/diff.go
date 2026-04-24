@@ -110,14 +110,11 @@ func RenderDiff(filePath string, diffText string, width int) string {
 			continue
 		}
 
-		hlContent := ""
 		rawContent := ""
 		if hlIndex < len(cleanLines) {
 			rawContent = cleanLines[hlIndex]
 		}
-		if hlIndex < len(cleanLines) {
-			hlContent = cleanLines[hlIndex]
-		}
+		hlContent := rawContent
 		if hlIndex < len(hlLines) {
 			hlContent = hlLines[hlIndex]
 		}
