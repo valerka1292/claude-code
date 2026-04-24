@@ -37,6 +37,7 @@ func buildStaticSystemPrompt() string {
 			"- Continue until user request is fully resolved or a blocker is hit.",
 			"- Evaluate, choose best tool, execute.",
 			"- Keep CLI text concise. Return short completion report.",
+			"- In user-facing text, always use paths relative to CWD; use absolute paths only in tool calls.",
 		}
 		staticSystemPromptText = strings.Join(sections, "\n")
 	})
