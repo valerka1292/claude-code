@@ -15,25 +15,22 @@ import (
 )
 
 var hunkHeaderRegex = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
-
-// ansibgRe matches all ANSI background-color sequences:
-// \x1b[4Nm  (16-color)  \x1b[48;5;Nm  (256-color)  \x1b[48;2;R;G;Bm  (truecolor)
-var ansibgRe = regexp.MustCompile(`\x1b\[(4[0-9]|48;5;\d+|48;2;\d+;\d+;\d+)m`)
-
-// stripBg removes background-color codes from chroma ANSI output so that
-// an outer lipgloss background style is not overridden by chroma tokens.
-func stripBg(s string) string {
-	return ansibgRe.ReplaceAllString(s, "")
-}
+var ansiBgRe = regexp.MustCompile(`\x1b\[(4[0-9]|48;5;\d+|48;2;\d+;\d+;\d+)m`)
+var ansiResetRe = regexp.MustCompile(`\x1b\[0m`)
 
 var (
-	addBgStyle     = lipgloss.NewStyle().Background(lipgloss.Color("#163320")).Foreground(lipgloss.Color("#2EEA78"))
-	subBgStyle     = lipgloss.NewStyle().Background(lipgloss.Color("#3d1a1a")).Foreground(lipgloss.Color("#EA4646"))
+	addBgStyle     = lipgloss.NewStyle().Background(lipgloss.Color("#163320"))
+	subBgStyle     = lipgloss.NewStyle().Background(lipgloss.Color("#3d1a1a"))
 	addPrefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#2EEA78")).Bold(true)
 	subPrefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#EA4646")).Bold(true)
 	numStyle       = lipgloss.NewStyle().Foreground(theme.MutedText)
 	infoStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD")).Italic(true)
 )
+
+func keepFgAndReapplyBg(s string, bgANSI string) string {
+	withoutBg := ansiBgRe.ReplaceAllString(s, "")
+	return ansiResetRe.ReplaceAllString(withoutBg, "\x1b[0m"+bgANSI)
+}
 
 func RenderDiff(filePath string, diffText string, width int) string {
 	lines := strings.Split(diffText, "\n")
@@ -61,8 +58,9 @@ func RenderDiff(filePath string, diffText string, width int) string {
 		cleanLines = append(cleanLines, line)
 	}
 
-	// Syntax-highlight everything. For +/- lines we strip background codes
-	// so our own lipgloss background takes effect cleanly.
+	// Syntax-highlight all lines. For +/- rows, we keep foreground token colors,
+	// remove any embedded background codes, and re-apply row background after
+	// each ANSI reset so the diff stripe stays visually solid.
 	cleanText := strings.Join(cleanLines, "\n")
 	ext := strings.TrimPrefix(filepath.Ext(filePath), ".")
 	if ext == "" {
@@ -127,15 +125,17 @@ func RenderDiff(filePath string, diffText string, width int) string {
 		case "+":
 			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, newLine))
 			newLine++
-			// stripBg ensures chroma tokens don't override our green background.
-			// lipgloss Width() then pads to contentWidth so the bg fills the whole line.
 			pfx := addPrefixStyle.Render("+ ")
-			lineContent = addBgStyle.Width(contentWidth).Render(pfx + stripBg(hlContent))
+			lineContent = addBgStyle.Width(contentWidth).Render(
+				pfx + keepFgAndReapplyBg(hlContent, "\x1b[48;2;22;51;32m"),
+			)
 		case "-":
 			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, oldLine))
 			oldLine++
 			pfx := subPrefixStyle.Render("- ")
-			lineContent = subBgStyle.Width(contentWidth).Render(pfx + stripBg(hlContent))
+			lineContent = subBgStyle.Width(contentWidth).Render(
+				pfx + keepFgAndReapplyBg(hlContent, "\x1b[48;2;61;26;26m"),
+			)
 		default:
 			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, newLine))
 			oldLine++

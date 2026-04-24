@@ -11,10 +11,10 @@ import (
 )
 
 var (
-	panelStyle = lipgloss.NewStyle().Padding(0, 0, 1, 0).Background(theme.AppBackground)
-	userStyle  = lipgloss.NewStyle().Background(theme.SurfaceBackground).Foreground(theme.PrimaryText).Padding(0, 1)
-	agentStyle = lipgloss.NewStyle().Foreground(theme.PrimaryText)
-	thinkStyle = lipgloss.NewStyle().Foreground(theme.MutedText).PaddingLeft(3)
+	panelStyle = lipgloss.NewStyle().Padding(0, 0, 1, 0)
+	userStyle  = lipgloss.NewStyle().Foreground(theme.PrimaryText).Background(theme.SurfaceBackground).Padding(0, 1).MarginBottom(1)
+	agentStyle = lipgloss.NewStyle().Foreground(theme.PrimaryText).MarginBottom(1)
+	thinkStyle = lipgloss.NewStyle().Foreground(theme.MutedText).PaddingLeft(3).MarginBottom(1)
 	dotStyle   = lipgloss.NewStyle().Foreground(theme.PrimaryAccent)
 
 	toolRunIconStyle     = lipgloss.NewStyle().Foreground(theme.SecondaryAccent).Bold(true)
@@ -27,17 +27,18 @@ var (
 			Border(lipgloss.NormalBorder(), false, false, false, true).
 			BorderForeground(theme.SurfaceBackground).
 			PaddingLeft(1).
-			MarginLeft(2)
+			MarginLeft(2).
+			MarginBottom(1)
 )
 
 func View(list []types.Message, width int, spinnerLine string, thinking string, streamingText string) string {
-	var lines []string
+	var blocks []string
 	for _, msg := range list {
 		switch msg.Role {
 		case types.RoleUser:
-			lines = append(lines, userStyle.Width(mathutil.Max(width-2, 10)).Render("❯ "+msg.Text))
+			blocks = append(blocks, userStyle.Width(mathutil.Max(width-2, 10)).Render("❯ "+msg.Text))
 		case types.RoleAssistant:
-			lines = append(lines, agentStyle.Render(renderAssistantBlock(msg.Text, width, false)))
+			blocks = append(blocks, agentStyle.Render(renderAssistantBlock(msg.Text, width, false)))
 		case types.RoleTool:
 			text := msg.Text
 			formattedText := text
@@ -64,26 +65,25 @@ func View(list []types.Message, width int, spinnerLine string, thinking string, 
 				}
 			}
 
-			lines = append(lines, toolBoxStyle.Width(mathutil.Max(width-4, 10)).Render(formattedText))
+			blocks = append(blocks, toolBoxStyle.Width(mathutil.Max(width-4, 10)).Render(formattedText))
 		}
-		lines = append(lines, "")
 	}
 
 	if spinnerLine != "" {
-		lines = append(lines, agentStyle.Render(spinnerLine), "")
+		blocks = append(blocks, agentStyle.Render(spinnerLine))
 	}
 	if thinking != "" {
-		lines = append(lines, thinkStyle.Render("thinking: "+thinking), "")
+		blocks = append(blocks, thinkStyle.Render("thinking: "+thinking))
 	}
 	if streamingText != "" {
-		lines = append(lines, agentStyle.Render(renderAssistantBlock(streamingText, width, true)), "")
+		blocks = append(blocks, agentStyle.Render(renderAssistantBlock(streamingText, width, true)))
 	}
 
-	if len(lines) == 0 {
-		lines = append(lines, "")
+	if len(blocks) == 0 {
+		blocks = append(blocks, "")
 	}
 
-	return panelStyle.Width(width).Render(strings.Join(lines, "\n"))
+	return panelStyle.Width(width).Render(strings.Join(blocks, "\n"))
 }
 
 func renderAssistantBlock(text string, width int, streaming bool) string {
