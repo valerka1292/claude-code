@@ -38,7 +38,7 @@ func (m Model) hasScrollableContent() bool {
 	return m.viewport.TotalLineCount() > m.viewport.Height
 }
 
-const scrollbarRightOffset = 1
+const scrollbarRightOffset = 2
 
 func (m Model) isOnScrollbar(x, y int) bool {
 	if !m.hasScrollableContent() {
