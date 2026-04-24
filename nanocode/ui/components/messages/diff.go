@@ -20,7 +20,7 @@ var ansiSGRRe = regexp.MustCompile(`\x1b\[([0-9;]*)m`)
 var (
 	addBgStyle     = lipgloss.NewStyle().Background(lipgloss.Color("#163320"))
 	subBgStyle     = lipgloss.NewStyle().Background(lipgloss.Color("#3d1a1a"))
-	addPrefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#2EEA78")).Bold(true)
+	addPrefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#63FF47")).Bold(true)
 	subPrefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#EA4646")).Bold(true)
 	numStyle       = lipgloss.NewStyle().Foreground(theme.MutedText)
 	infoStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD")).Italic(true)
