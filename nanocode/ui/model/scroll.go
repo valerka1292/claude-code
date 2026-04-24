@@ -39,7 +39,7 @@ func (m Model) hasScrollableContent() bool {
 	return m.viewport.TotalLineCount() > m.viewport.Height
 }
 
-const scrollbarRightOffset = 1
+const scrollbarRightOffset = 2
 
 func (m Model) isOnScrollbar(x, y int) bool {
 	if !m.hasScrollableContent() {
@@ -88,12 +88,14 @@ func (m Model) viewportWithScrollbar() string {
 	trackStyle := lipgloss.NewStyle().Foreground(theme.MutedText)
 	thumbStyle := lipgloss.NewStyle().Foreground(theme.PrimaryAccent)
 	rendered := make([]string, 0, len(lines))
+	contentLineStyle := lipgloss.NewStyle().Width(m.viewport.Width)
 	for i, line := range lines {
 		bar := trackStyle.Render("│")
 		if i >= thumbTop && i < thumbTop+thumbSize {
 			bar = thumbStyle.Render("█")
 		}
-		rendered = append(rendered, line+bar)
+		contentColumn := contentLineStyle.Render(line)
+		rendered = append(rendered, lipgloss.JoinHorizontal(lipgloss.Top, contentColumn, bar))
 	}
 	return strings.Join(rendered, "\n")
 }
