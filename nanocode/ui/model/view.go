@@ -1,7 +1,6 @@
 package model
 
 import (
-	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -41,10 +40,7 @@ func (m Model) View() string {
 	headerView := header.View(m.layout.width, m.cwd, nobbyView, m.activeProviderName(), m.activeModelName())
 	inputView := prompt.InputBar(m.input.View(), m.layout.width)
 	footerView := prompt.Footer(m.layout.width, m.usageLine(), m.confirmationHint(), string(m.chat.mode))
-	headerHeight := lipgloss.Height(headerView)
-	inputHeight := lipgloss.Height(inputView)
-	footerHeight := lipgloss.Height(footerView)
-	totalReserved := headerHeight + inputHeight + footerHeight + 1
+	var totalReserved int
 	parts := []string{headerView, m.viewportWithScrollbar(), inputView}
 
 	if len(m.commands.suggestions) > 0 {
@@ -69,13 +65,6 @@ func (m Model) View() string {
 		parts = append(parts, providersView)
 	}
 
-	debugInfo = fmt.Sprintf(
-		"%s | Reserved+Panels:%d | V+R:%d",
-		debugInfo,
-		totalReserved,
-		m.viewport.Height+totalReserved,
-	)
-	parts[1] = debugInfo
 	parts = append(parts, footerView)
 	root := lipgloss.NewStyle().
 		Width(m.layout.width).
