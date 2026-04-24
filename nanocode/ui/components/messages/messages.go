@@ -94,6 +94,12 @@ func View(list []types.Message, width int, spinnerLine string, thinking string, 
 func renderAssistantBlock(text string, width int, streaming bool) string {
 	contentWidth := availableWidth(width, horizontalFrame+4)
 	rendered := renderMarkdown(text, contentWidth, streaming)
+	lines := strings.Split(rendered, "\n")
+	for _, line := range lines {
+		if lipgloss.Width(line) > contentWidth {
+			return "!!! OVERFLOW: " + line
+		}
+	}
 	rendered = strings.Trim(rendered, "\n\r")
 
 	if rendered == "" {

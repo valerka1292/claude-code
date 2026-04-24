@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -39,25 +40,56 @@ func (m Model) View() string {
 	nobbyView := nobby.Render(m.nobbyPose, m.nobbyStep)
 	headerView := header.View(m.layout.width, m.cwd, nobbyView, m.activeProviderName(), m.activeModelName())
 	inputView := prompt.InputBar(m.input.View(), m.layout.width)
-	parts := []string{headerView, "", m.viewportWithScrollbar(), inputView}
+	footerView := prompt.Footer(m.layout.width, m.usageLine(), m.confirmationHint(), string(m.chat.mode))
+	headerHeight := lipgloss.Height(headerView)
+	inputHeight := lipgloss.Height(inputView)
+	footerHeight := lipgloss.Height(footerView)
+	totalReserved := headerHeight + inputHeight + footerHeight + 1
+	debugInfo := fmt.Sprintf(
+		"RAW W:%d H:%d | HeaderH:%d InputH:%d FooterH:%d | ViewportW:%d ViewportH:%d ViewTop:%d | ScrollbarX:%d | Reserved:%d",
+		m.layout.width,
+		m.layout.height,
+		headerHeight,
+		inputHeight,
+		footerHeight,
+		m.viewport.Width,
+		m.viewport.Height,
+		m.layout.viewportTop,
+		m.scrollbarColumn(),
+		totalReserved,
+	)
+	parts := []string{headerView, debugInfo, m.viewportWithScrollbar(), inputView}
 
 	if len(m.commands.suggestions) > 0 {
-		parts = append(parts, suggestions.CommandList(m.layout.width, m.commands.suggestions, m.commands.selected))
+		suggestionsView := suggestions.CommandList(m.layout.width, m.commands.suggestions, m.commands.selected)
+		totalReserved += lipgloss.Height(suggestionsView)
+		parts = append(parts, suggestionsView)
 	}
 	if m.settings.open {
-		parts = append(parts, settings.Panel(
+		settingsView := settings.Panel(
 			m.layout.width,
 			m.settings.selectedRow,
 			m.settings.values.SpinnerStyle,
 			m.settings.values.APITimeoutSeconds,
-		))
+		)
+		totalReserved += lipgloss.Height(settingsView)
+		parts = append(parts, settingsView)
 	}
 	if m.providers.open {
 		title, desc, options, selected, inputView := m.providerPanelViewData()
-		parts = append(parts, providers.Panel(m.layout.width, title, desc, options, selected, inputView))
+		providersView := providers.Panel(m.layout.width, title, desc, options, selected, inputView)
+		totalReserved += lipgloss.Height(providersView)
+		parts = append(parts, providersView)
 	}
 
-	parts = append(parts, prompt.Footer(m.layout.width, m.usageLine(), m.confirmationHint(), string(m.chat.mode)))
+	debugInfo = fmt.Sprintf(
+		"%s | Reserved+Panels:%d | V+R:%d",
+		debugInfo,
+		totalReserved,
+		m.viewport.Height+totalReserved,
+	)
+	parts[1] = debugInfo
+	parts = append(parts, footerView)
 	root := lipgloss.NewStyle().
 		Width(m.layout.width).
 		Height(m.layout.height)
