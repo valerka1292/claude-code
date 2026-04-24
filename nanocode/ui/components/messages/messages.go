@@ -29,14 +29,19 @@ var (
 			PaddingLeft(1).
 			MarginLeft(2).
 			MarginBottom(1)
+	horizontalFrame = toolBoxStyle.GetHorizontalFrameSize()
 )
+
+func availableWidth(totalWidth int, frameSize int) int {
+	return mathutil.Max(10, totalWidth-frameSize)
+}
 
 func View(list []types.Message, width int, spinnerLine string, thinking string, streamingText string) string {
 	var blocks []string
 	for _, msg := range list {
 		switch msg.Role {
 		case types.RoleUser:
-			blocks = append(blocks, userStyle.Width(mathutil.Max(width-2, 10)).Render("❯ "+msg.Text))
+			blocks = append(blocks, userStyle.Width(availableWidth(width, horizontalFrame)).Render("❯ "+msg.Text))
 		case types.RoleAssistant:
 			blocks = append(blocks, agentStyle.Render(renderAssistantBlock(msg.Text, width, false)))
 		case types.RoleTool:
@@ -65,7 +70,7 @@ func View(list []types.Message, width int, spinnerLine string, thinking string, 
 				}
 			}
 
-			blocks = append(blocks, toolBoxStyle.Width(mathutil.Max(width-4, 10)).Render(formattedText))
+			blocks = append(blocks, toolBoxStyle.Width(availableWidth(width, horizontalFrame+2)).Render(formattedText))
 		}
 	}
 
@@ -87,7 +92,7 @@ func View(list []types.Message, width int, spinnerLine string, thinking string, 
 }
 
 func renderAssistantBlock(text string, width int, streaming bool) string {
-	rendered := renderMarkdown(text, mathutil.Max(width-4, minMarkdownWidth), streaming)
+	rendered := renderMarkdown(text, availableWidth(width, horizontalFrame+2), streaming)
 	rendered = strings.Trim(rendered, "\n\r")
 
 	if rendered == "" {

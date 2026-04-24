@@ -55,9 +55,13 @@ func (m *Model) scrollToMouseY(y int) {
 	if !m.hasScrollableContent() || m.viewport.Height <= 1 {
 		return
 	}
-	trackY := mathutil.Clamp(y-m.layout.viewportTop, 0, m.viewport.Height-1)
-	maxOffset := mathutil.Max(0, m.viewport.TotalLineCount()-m.viewport.Height)
-	target := int(math.Round(float64(trackY) / float64(m.viewport.Height-1) * float64(maxOffset)))
+	height := mathutil.Max(1, m.viewport.Height)
+	trackY := mathutil.Clamp(y-m.layout.viewportTop, 0, height-1)
+	maxOffset := mathutil.Max(0, m.viewport.TotalLineCount()-height)
+	if maxOffset == 0 {
+		return
+	}
+	target := int(math.Round(float64(trackY) / float64(height-1) * float64(maxOffset)))
 	m.viewport.SetYOffset(target)
 }
 
@@ -67,17 +71,18 @@ func (m Model) viewportWithScrollbar() string {
 		return content
 	}
 	lines := strings.Split(content, "\n")
-	if len(lines) > m.viewport.Height {
-		lines = lines[:m.viewport.Height]
+	height := mathutil.Max(1, m.viewport.Height)
+	if len(lines) > height {
+		lines = lines[:height]
 	}
-	if len(lines) < m.viewport.Height {
-		padding := make([]string, m.viewport.Height-len(lines))
+	if len(lines) < height {
+		padding := make([]string, height-len(lines))
 		lines = append(lines, padding...)
 	}
 
-	thumbSize := mathutil.Max(1, (m.viewport.Height*m.viewport.Height)/mathutil.Max(1, m.viewport.TotalLineCount()))
-	maxThumbTop := mathutil.Max(0, m.viewport.Height-thumbSize)
-	maxOffset := mathutil.Max(1, m.viewport.TotalLineCount()-m.viewport.Height)
+	thumbSize := mathutil.Max(1, (height*height)/mathutil.Max(1, m.viewport.TotalLineCount()))
+	maxThumbTop := mathutil.Max(0, height-thumbSize)
+	maxOffset := mathutil.Max(1, m.viewport.TotalLineCount()-height)
 	thumbTop := int(math.Round(float64(m.viewport.YOffset) / float64(maxOffset) * float64(maxThumbTop)))
 
 	trackStyle := lipgloss.NewStyle().Foreground(theme.MutedText)

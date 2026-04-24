@@ -276,10 +276,12 @@ func renderCodeUI(lang, content string, width int) string {
 		Render(headerText)
 
 	// Рамка вокруг кода
-	box := lipgloss.NewStyle().
+	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(theme.SurfaceBackground).
-		Width(mathutil.Max(20, width-2)).
+		BorderForeground(theme.SurfaceBackground)
+	horizontalFrame := boxStyle.GetHorizontalFrameSize()
+	box := boxStyle.
+		Width(mathutil.Max(20, width-horizontalFrame)).
 		Render(formatted.String())
 
 	return header + "\n" + box
