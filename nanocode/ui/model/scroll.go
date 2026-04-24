@@ -67,6 +67,9 @@ func (m Model) viewportWithScrollbar() string {
 		return content
 	}
 	lines := strings.Split(content, "\n")
+	if len(lines) > m.viewport.Height {
+		lines = lines[:m.viewport.Height]
+	}
 	if len(lines) < m.viewport.Height {
 		padding := make([]string, m.viewport.Height-len(lines))
 		lines = append(lines, padding...)
