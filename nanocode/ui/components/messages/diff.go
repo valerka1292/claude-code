@@ -16,16 +16,6 @@ import (
 
 var hunkHeaderRegex = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
 
-// ansibgRe matches all ANSI background-color sequences:
-// \x1b[4Nm  (16-color)  \x1b[48;5;Nm  (256-color)  \x1b[48;2;R;G;Bm  (truecolor)
-var ansibgRe = regexp.MustCompile(`\x1b\[(4[0-9]|48;5;\d+|48;2;\d+;\d+;\d+)m`)
-
-// stripBg removes background-color codes from chroma ANSI output so that
-// an outer lipgloss background style is not overridden by chroma tokens.
-func stripBg(s string) string {
-	return ansibgRe.ReplaceAllString(s, "")
-}
-
 var (
 	addBgStyle     = lipgloss.NewStyle().Background(lipgloss.Color("#163320")).Foreground(lipgloss.Color("#2EEA78"))
 	subBgStyle     = lipgloss.NewStyle().Background(lipgloss.Color("#3d1a1a")).Foreground(lipgloss.Color("#EA4646"))
@@ -113,6 +103,10 @@ func RenderDiff(filePath string, diffText string, width int) string {
 		}
 
 		hlContent := ""
+		rawContent := ""
+		if hlIndex < len(cleanLines) {
+			rawContent = cleanLines[hlIndex]
+		}
 		if hlIndex < len(cleanLines) {
 			hlContent = cleanLines[hlIndex]
 		}
@@ -127,15 +121,14 @@ func RenderDiff(filePath string, diffText string, width int) string {
 		case "+":
 			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, newLine))
 			newLine++
-			// stripBg ensures chroma tokens don't override our green background.
-			// lipgloss Width() then pads to contentWidth so the bg fills the whole line.
+			// Не используем chroma ANSI здесь: reset-коды ломают сплошной фон.
 			pfx := addPrefixStyle.Render("+ ")
-			lineContent = addBgStyle.Width(contentWidth).Render(pfx + stripBg(hlContent))
+			lineContent = addBgStyle.Width(contentWidth).Render(pfx + rawContent)
 		case "-":
 			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, oldLine))
 			oldLine++
 			pfx := subPrefixStyle.Render("- ")
-			lineContent = subBgStyle.Width(contentWidth).Render(pfx + stripBg(hlContent))
+			lineContent = subBgStyle.Width(contentWidth).Render(pfx + rawContent)
 		default:
 			numStr = numStyle.Render(fmt.Sprintf("%*d │ ", digits, newLine))
 			oldLine++
