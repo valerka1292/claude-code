@@ -67,16 +67,11 @@ func (m *Model) scrollToMouseY(y int) {
 func (m Model) viewportWithScrollbar() string {
 	content := m.viewport.View()
 	if !m.hasScrollableContent() {
-		return content
+		return lipgloss.JoinHorizontal(lipgloss.Top, content, " ")
 	}
 	height := mathutil.Max(1, m.viewport.Height)
-	contentColumn := lipgloss.NewStyle().
-		Width(m.viewport.Width).
-		Height(height).
-		MaxHeight(height).
-		Render(content)
 	scrollbarColumn := m.scrollbarColumnView(height)
-	return lipgloss.JoinHorizontal(lipgloss.Top, contentColumn, scrollbarColumn)
+	return lipgloss.JoinHorizontal(lipgloss.Top, content, " ", scrollbarColumn)
 }
 
 func (m Model) scrollbarColumnView(height int) string {

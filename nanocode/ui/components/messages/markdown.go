@@ -280,8 +280,10 @@ func renderCodeUI(lang, content string, width int) string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.SurfaceBackground)
 	horizontalFrame := boxStyle.GetHorizontalFrameSize()
+	boxWidth := mathutil.Max(20, width-horizontalFrame)
 	box := boxStyle.
-		Width(mathutil.Max(20, width-horizontalFrame)).
+		Width(boxWidth).
+		MaxWidth(boxWidth).
 		Render(formatted.String())
 
 	return header + "\n" + box
