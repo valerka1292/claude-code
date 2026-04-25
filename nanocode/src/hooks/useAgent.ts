@@ -3,12 +3,12 @@ import type { Mode } from "../types";
 import { useProviders } from "../contexts/ProvidersContext";
 import { useProject } from "../contexts/ProjectContext";
 import { useSession } from "../contexts/SessionContext";
-import { runAgentStream, type ChatMessage } from "../lib/agentLoop";
-import { buildSystemMessages } from "../lib/systemPrompt";
-import { generateSessionName, saveSession, type StoredMessage } from "../lib/sessions";
-import { storedToChat } from "../lib/converters";
+import { runAgentStream } from "../lib/agentLoop";
 import { useAbortController } from "./useAbortController";
 import { useMessageStream } from "./useMessageStream";
+import { useChatHistory } from "./useChatHistory";
+import { useSessionPersist } from "./useSessionPersist";
+import { useSessionRestore } from "./useSessionRestore";
 
 export function useAgent() {
   const { activeProvider } = useProviders();
@@ -34,9 +34,17 @@ export function useAgent() {
     appendContentChunk,
     appendToolCallLabel,
     resetMessageStream,
-  } = useMessageStream(activeSession);
+    replaceMessages,
+  } = useMessageStream();
   const { replaceActiveController, abortActiveRequest, resetAbortController } =
     useAbortController();
+  const { buildChatHistory } = useChatHistory();
+  const { startSessionNameGeneration, persistCompletedTurn } =
+    useSessionPersist();
+  const { resetSessionRestore } = useSessionRestore(
+    activeSession,
+    replaceMessages
+  );
 
   const projectKeyRef = useRef<string | null>(null);
   projectKeyRef.current = projectKey;
@@ -79,29 +87,23 @@ export function useAgent() {
         return;
       }
 
-      let sessionName = session.name;
-      if (isFirstMessage) {
-        generateSessionName(ap, value)
-          .then((name) => {
-            sessionName = name;
-            const current = getActiveSessionSnapshot();
-            if (!current || current.id !== session.id) return;
-            updateSession({ ...current, name });
-          })
-          .catch((error) => {
-            console.error("[agent] generateSessionName error:", error);
-          });
-      }
+      startSessionNameGeneration({
+        isFirstMessage,
+        sessionId: session.id,
+        sessionName: session.name,
+        provider: ap,
+        firstUserMessage: value,
+        getActiveSessionSnapshot,
+        updateSession,
+      });
 
-      const history: ChatMessage[] = [
-        ...buildSystemMessages({
-          cwd: fp,
-          projectName: folderNameRef.current ?? fp,
-          mode: modeRef.current,
-        }),
-        ...session.messages.map(storedToChat),
-        { role: "user", content: value },
-      ];
+      const history = buildChatHistory({
+        cwd: fp,
+        projectName: folderNameRef.current ?? fp,
+        mode: modeRef.current,
+        sessionMessages: session.messages,
+        userInput: value,
+      });
 
       let assistantContent = "";
       let assistantReasoning = "";
@@ -138,37 +140,17 @@ export function useAgent() {
             });
             setIsTyping(false);
 
-            const currentPk = projectKeyRef.current;
-            if (!currentPk) return;
-
-            const userStored: StoredMessage = {
-              role: "user",
-              content: value,
-              ts: sendTs,
-            };
-
-            const assistantStored: StoredMessage = {
-              role: "assistant",
-              content: assistantContent || null,
-              reasoning: assistantReasoning || undefined,
-              ts: Date.now(),
-            };
-
-            const latestSession = getActiveSessionSnapshot();
-            if (!latestSession || latestSession.id !== session.id) return;
-
-            const finalSession = {
-              ...latestSession,
-              name: sessionName,
-              messages: [...latestSession.messages, userStored, assistantStored],
-            };
-
-            try {
-              await saveSession(currentPk, finalSession);
-              updateSession(finalSession);
-            } catch (error) {
-              onSessionSaveError(error);
-            }
+            await persistCompletedTurn({
+              projectKey: projectKeyRef.current,
+              sessionId: session.id,
+              userInput: value,
+              sendTs,
+              assistantContent,
+              assistantReasoning,
+              getActiveSessionSnapshot,
+              updateSession,
+              onSessionSaveError,
+            });
           },
         },
         controller.signal
@@ -179,12 +161,15 @@ export function useAgent() {
       appendContentChunk,
       appendReasoningChunk,
       appendToolCallLabel,
+      buildChatHistory,
       getActiveSessionSnapshot,
       initSession,
       onSessionSaveError,
+      persistCompletedTurn,
       replaceActiveController,
       setUsedTokens,
       setIsTyping,
+      startSessionNameGeneration,
       updateMsg,
       updateSession,
     ]
@@ -192,8 +177,9 @@ export function useAgent() {
 
   const resetAgentUi = useCallback(() => {
     resetAbortController();
+    resetSessionRestore();
     resetMessageStream();
-  }, [resetAbortController, resetMessageStream]);
+  }, [resetAbortController, resetMessageStream, resetSessionRestore]);
 
   return {
     mode,

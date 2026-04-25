@@ -14,11 +14,8 @@ import {
 } from "react";
 import type { SessionData, SessionMeta } from "../types/session";
 import {
-  listSessions,
-  loadSession,
-  saveSession,
   createNewSession,
-  deleteSession,
+  sessionRepository,
 } from "../lib/sessions";
 import { useProject } from "./ProjectContext";
 
@@ -26,7 +23,7 @@ interface SessionContextValue {
   activeSession: SessionData | null;
   sessionList: SessionMeta[];
   isLoadingList: boolean;
-  startNewSession: () => void;
+  startNewSession: () => Promise<void>;
   openSession: (id: string) => Promise<void>;
   updateSession: (updated: SessionData) => void;
   initSession: (projectPath: string) => SessionData;
@@ -50,6 +47,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const projectKeyRef = useRef<string | null>(null);
   projectKeyRef.current = projectKey;
+  const isMountedRef = useRef(true);
 
   const onSessionSaveError = useCallback((error: unknown) => {
     console.error("[sessions] save error:", error);
@@ -57,39 +55,70 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     setActiveSession(null);
     setSessionList([]);
     if (!projectKey) return;
 
     setIsLoadingList(true);
-    listSessions(projectKey)
-      .then(setSessionList)
-      .finally(() => setIsLoadingList(false));
+    sessionRepository
+      .list(projectKey)
+      .then((list) => {
+        if (!cancelled && isMountedRef.current) {
+          setSessionList(list);
+        }
+      })
+      .finally(() => {
+        if (!cancelled && isMountedRef.current) {
+          setIsLoadingList(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [projectKey]);
 
   const reloadList = useCallback(async () => {
     const key = projectKeyRef.current;
     if (!key) return;
-    const list = await listSessions(key);
-    setSessionList(list);
+    const list = await sessionRepository.list(key);
+    if (isMountedRef.current) {
+      setSessionList(list);
+    }
   }, []);
 
-  const startNewSession = useCallback(() => {
+  const startNewSession = useCallback(async () => {
     const current = activeSessionRef.current;
     const key = projectKeyRef.current;
 
     if (current && key && current.messages.length > 0) {
-      saveSession(key, current).catch(onSessionSaveError);
+      try {
+        await sessionRepository.save(key, current);
+      } catch (error) {
+        onSessionSaveError(error);
+      }
     }
 
-    setActiveSession(null);
+    if (isMountedRef.current) {
+      setActiveSession(null);
+    }
   }, [onSessionSaveError]);
 
   const openSession = useCallback(async (id: string) => {
     const key = projectKeyRef.current;
     if (!key) return;
-    const session = await loadSession(key, id);
-    if (session) setActiveSession(session);
+    const session = await sessionRepository.load(key, id);
+    if (session && isMountedRef.current) {
+      setActiveSession(session);
+    }
   }, []);
 
   const initSession = useCallback((projectPath: string): SessionData => {
@@ -122,7 +151,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     async (id: string) => {
       const key = projectKeyRef.current;
       if (!key) return;
-      await deleteSession(key, id);
+      await sessionRepository.delete(key, id);
+      if (!isMountedRef.current) return;
       setSessionList((prev) => prev.filter((s) => s.id !== id));
       if (activeSessionRef.current?.id === id) setActiveSession(null);
     },
