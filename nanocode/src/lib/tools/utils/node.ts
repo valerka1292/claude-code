@@ -15,5 +15,13 @@ export async function importNodeModule<T>(specifier: string): Promise<T> {
 }
 
 export function hasNodeRuntime(): boolean {
+  if (
+    typeof window !== "undefined" &&
+    typeof (window as Window & { electronAPI?: unknown }).electronAPI !==
+      "undefined"
+  ) {
+    return true;
+  }
+
   return typeof process !== "undefined" && !!process.versions?.node;
 }

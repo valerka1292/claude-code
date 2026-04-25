@@ -26,7 +26,6 @@ export function useSessionRestore(
     lastRestoredIdRef.current = activeSession.id;
     replaceMessages(
       activeSession.messages
-        .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m, index) => {
           const normalizedId =
             typeof m.id === "string" && m.id.length > 0

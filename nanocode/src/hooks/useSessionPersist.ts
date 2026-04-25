@@ -22,6 +22,7 @@ interface PersistTurnOptions {
   sendTs: number;
   assistantContent: string;
   assistantReasoning: string;
+  turnMessages: StoredMessage[];
 }
 
 export function useSessionPersist() {
@@ -79,6 +80,7 @@ export function useSessionPersist() {
       sendTs,
       assistantContent,
       assistantReasoning,
+      turnMessages,
     }: PersistTurnOptions) => {
       if (!projectKey) {
         return;
@@ -97,21 +99,27 @@ export function useSessionPersist() {
         ts: sendTs,
       };
 
-      const assistantStored: StoredMessage = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: assistantContent || null,
-        reasoning: assistantReasoning || undefined,
-        ts: Date.now(),
-      };
-
       const latestSession = getActiveSessionSnapshot();
       if (!latestSession || latestSession.id !== sessionId) return;
+
+      let messagesToAdd: StoredMessage[];
+      if (turnMessages.length > 0) {
+        messagesToAdd = [userStored, ...turnMessages];
+      } else {
+        const assistantStored: StoredMessage = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: assistantContent || null,
+          reasoning: assistantReasoning || undefined,
+          ts: Date.now(),
+        };
+        messagesToAdd = [userStored, assistantStored];
+      }
 
       const finalSession = {
         ...latestSession,
         name: sessionNameByIdRef.current[sessionId] ?? latestSession.name,
-        messages: [...latestSession.messages, userStored, assistantStored],
+        messages: [...latestSession.messages, ...messagesToAdd],
       };
 
       try {

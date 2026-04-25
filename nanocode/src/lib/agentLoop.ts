@@ -29,6 +29,10 @@ export interface StreamCallbacks {
   onContentChunk: (chunk: string) => void;
   onToolCallStart: (id: string, name: string) => void;
   onToolCallDone: (id: string, args: string) => void;
+  onToolExecutionStart: (id: string, name: string, args: string) => void;
+  onToolExecutionDone: (id: string, result: string) => void;
+  onToolExecutionError: (id: string, error: string) => void;
+  onAssistantMessageWithTools: (content: string | null, toolCalls: ToolCall[]) => void;
   onUsage: (promptTokens: number, completionTokens: number, reasoningTokens: number) => void;
   onError: (err: Error) => void;
   onDone: () => void;
@@ -183,6 +187,17 @@ export async function runAgentStream(
     }
     history.push(assistantMsg);
 
+    if (toolCallsList.length > 0) {
+      callbacks.onAssistantMessageWithTools(
+        fullContent || null,
+        toolCallsList.map((tc) => ({
+          id: tc.id,
+          type: "function",
+          function: { name: tc.name, arguments: tc.arguments },
+        }))
+      );
+    }
+
     for (const tc of toolCallsList) {
       callbacks.onToolCallDone(tc.id, tc.arguments);
     }
@@ -196,10 +211,12 @@ export async function runAgentStream(
           }
 
           const args = JSON.parse(tc.arguments) as Record<string, unknown>;
+          callbacks.onToolExecutionStart(tc.id, tc.name, tc.arguments);
           const result = await tool.execute(args, {
             cwd,
             signal,
           });
+          callbacks.onToolExecutionDone(tc.id, result);
 
           history.push({
             role: "tool",
@@ -210,6 +227,7 @@ export async function runAgentStream(
         } catch (error) {
           const errorMsg =
             error instanceof Error ? error.message : "Unknown error";
+          callbacks.onToolExecutionError(tc.id, errorMsg);
           history.push({
             role: "tool",
             tool_call_id: tc.id,

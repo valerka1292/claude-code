@@ -4,9 +4,10 @@
  */
 
 import { motion } from "motion/react";
-import { User } from "lucide-react";
+import { CheckCircle, User, Wrench, XCircle } from "lucide-react";
 import { ReasoningBlock } from "./ReasoningBlock";
 import type { Message } from "../types/message";
+import { extractTag, isToolError } from "../lib/tools/utils/format";
 
 interface MessageItemProps {
   message: Message;
@@ -14,6 +15,7 @@ interface MessageItemProps {
 
 export function MessageItem({ message }: MessageItemProps) {
   const isUser = message.role === "user";
+  const isTool = message.role === "tool";
 
   if (isUser) {
     return (
@@ -38,6 +40,10 @@ export function MessageItem({ message }: MessageItemProps) {
         </div>
       </motion.div>
     );
+  }
+
+  if (isTool) {
+    return <ToolResultMessage message={message} />;
   }
 
   return (
@@ -65,6 +71,10 @@ export function MessageItem({ message }: MessageItemProps) {
           />
         )}
 
+        {message.toolCalls && message.toolCalls.length > 0 && (
+          <ToolCallsBlock toolCalls={message.toolCalls} />
+        )}
+
         {message.content ? (
           <div className="text-[0.88rem] text-white/70 leading-relaxed whitespace-pre-wrap break-words">
             {message.content}
@@ -83,6 +93,71 @@ export function MessageItem({ message }: MessageItemProps) {
             ))}
           </div>
         ) : null}
+      </div>
+    </motion.div>
+  );
+}
+
+function ToolCallsBlock({ toolCalls }: { toolCalls: Message["toolCalls"] }) {
+  if (!toolCalls || toolCalls.length === 0) return null;
+
+  return (
+    <div className="mb-2 space-y-1">
+      {toolCalls.map((tc) => (
+        <div
+          key={tc.id}
+          className="
+            flex items-start gap-2 px-3 py-2 rounded-lg
+            bg-white/[0.03] border border-white/[0.06]
+          "
+        >
+          <Wrench size={12} className="text-blue-400/60 mt-0.5 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[0.72rem] text-white/50 font-mono">
+              {tc.name}
+            </div>
+            <div className="text-[0.67rem] text-white/25 font-mono mt-0.5 whitespace-pre-wrap">
+              {JSON.stringify(tc.arguments, null, 2)}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ToolResultMessage({ message }: { message: Message }) {
+  const isError = isToolError(message.content);
+  const errorContent = isError
+    ? extractTag(message.content, "tool_use_error")
+    : null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.15 }}
+      className="flex w-full gap-3 py-2 px-5"
+    >
+      <div className="flex-shrink-0 mt-0.5">
+        {isError ? (
+          <XCircle size={14} className="text-red-400/60" />
+        ) : (
+          <CheckCircle size={14} className="text-emerald-400/60" />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-[0.67rem] font-mono text-white/25 mb-1">
+          {message.toolName || "tool"} result
+        </div>
+        <div
+          className={`
+            text-[0.75rem] font-mono leading-relaxed whitespace-pre-wrap break-words
+            ${isError ? "text-red-400/70" : "text-white/40"}
+          `}
+        >
+          {isError ? errorContent : message.content}
+        </div>
       </div>
     </motion.div>
   );
