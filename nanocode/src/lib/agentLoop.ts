@@ -4,6 +4,8 @@
  */
 
 import { Provider } from "./providers";
+import { getTool, getToolDefinitions } from "./tools";
+import { formatToolError } from "./tools/utils/format";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -42,6 +44,7 @@ export async function runAgentStream(
   provider: Provider,
   messages: ChatMessage[],
   callbacks: StreamCallbacks,
+  cwd: string,
   signal?: AbortSignal
 ): Promise<void> {
   const history: ChatMessage[] = [...messages];
@@ -72,6 +75,7 @@ export async function runAgentStream(
           messages: history,
           stream: true,
           stream_options: { include_usage: true },
+          tools: getToolDefinitions(),
         }),
       });
 
@@ -184,12 +188,38 @@ export async function runAgentStream(
     }
 
     if (finishReason === "tool_calls" && toolCallsList.length > 0) {
-      callbacks.onError(
-        new Error(
-          `Model requested tool calls (${toolCallsList.map((tc) => tc.name).join(", ")}) but tools are not implemented yet.`
-        )
-      );
-      return;
+      for (const tc of toolCallsList) {
+        try {
+          const tool = getTool(tc.name);
+          if (!tool) {
+            throw new Error(`Unknown tool: ${tc.name}`);
+          }
+
+          const args = JSON.parse(tc.arguments) as Record<string, unknown>;
+          const result = await tool.execute(args, {
+            cwd,
+            signal,
+          });
+
+          history.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            name: tc.name,
+            content: result,
+          });
+        } catch (error) {
+          const errorMsg =
+            error instanceof Error ? error.message : "Unknown error";
+          history.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            name: tc.name,
+            content: formatToolError(errorMsg),
+          });
+        }
+      }
+
+      continue;
     }
 
     break;
