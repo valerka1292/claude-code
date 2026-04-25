@@ -1,4 +1,4 @@
-import type { Message } from "../components/MessageItem";
+import type { Message } from "../types/message";
 import type { ChatMessage } from "./agentLoop";
 import type { StoredMessage } from "../types/session";
 
@@ -15,7 +15,7 @@ export function storedToChat(msg: StoredMessage): ChatMessage {
 
 export function storedToUiMessage(msg: StoredMessage): Message {
   return {
-    id: `${msg.ts}-${msg.role}`,
+    id: `${msg.ts}-${msg.role}-${Math.random().toString(36).slice(2, 7)}`,
     role: msg.role as "user" | "assistant",
     content: msg.content ?? "",
     reasoning: msg.reasoning,

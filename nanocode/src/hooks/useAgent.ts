@@ -6,9 +6,8 @@ import { useSession } from "../contexts/SessionContext";
 import { runAgentStream } from "../lib/agentLoop";
 import { useAbortController } from "./useAbortController";
 import { useMessageStream } from "./useMessageStream";
-import { useChatHistory } from "./useChatHistory";
+import { buildChatHistory } from "../lib/chatHistory";
 import { useSessionPersist } from "./useSessionPersist";
-import { useSessionRestore } from "./useSessionRestore";
 
 export function useAgent() {
   const { activeProvider } = useProviders();
@@ -16,9 +15,7 @@ export function useAgent() {
   const {
     activeSession,
     initSession,
-    updateSession,
     getActiveSessionSnapshot,
-    onSessionSaveError,
   } = useSession();
 
   const [mode, setMode] = useState<Mode>("Ask");
@@ -34,17 +31,12 @@ export function useAgent() {
     appendContentChunk,
     appendToolCallLabel,
     resetMessageStream,
-    replaceMessages,
-  } = useMessageStream();
+    resetSessionRestore,
+  } = useMessageStream(activeSession);
   const { replaceActiveController, abortActiveRequest, resetAbortController } =
     useAbortController();
-  const { buildChatHistory } = useChatHistory();
   const { startSessionNameGeneration, persistCompletedTurn } =
     useSessionPersist();
-  const { resetSessionRestore } = useSessionRestore(
-    activeSession,
-    replaceMessages
-  );
 
   const projectKeyRef = useRef<string | null>(null);
   projectKeyRef.current = projectKey;
@@ -93,8 +85,6 @@ export function useAgent() {
         sessionName: session.name,
         provider: ap,
         firstUserMessage: value,
-        getActiveSessionSnapshot,
-        updateSession,
       });
 
       const history = buildChatHistory({
@@ -147,9 +137,6 @@ export function useAgent() {
               sendTs,
               assistantContent,
               assistantReasoning,
-              getActiveSessionSnapshot,
-              updateSession,
-              onSessionSaveError,
             });
           },
         },
@@ -164,14 +151,12 @@ export function useAgent() {
       buildChatHistory,
       getActiveSessionSnapshot,
       initSession,
-      onSessionSaveError,
       persistCompletedTurn,
       replaceActiveController,
       setUsedTokens,
       setIsTyping,
       startSessionNameGeneration,
       updateMsg,
-      updateSession,
     ]
   );
 
