@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { promises as fs } from "fs";
 import type { ValidationResult } from "../types";
+import { importNodeModule } from "./node";
 import { expandPath, suggestPathUnderCwd } from "./path";
 
 export const FILE_NOT_FOUND_CWD_NOTE =
@@ -32,9 +32,10 @@ export async function validateDirectoryPath(
   }
 
   const absolutePath = expandPath(trimmed, cwd);
+  const fsModule = await importNodeModule<typeof import("node:fs/promises")>("node:fs/promises");
 
   try {
-    const stats = await fs.stat(absolutePath);
+    const stats = await fsModule.stat(absolutePath);
 
     if (!stats.isDirectory()) {
       return {

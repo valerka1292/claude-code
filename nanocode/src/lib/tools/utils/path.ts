@@ -5,8 +5,7 @@
  * Path utilities - ported from Claude Code
  */
 
-import path from "path";
-import { promises as fs } from "fs";
+import { importNodeModule } from "./node";
 
 export function expandPath(inputPath: string, cwd: string): string {
   const trimmed = inputPath.trim();
@@ -16,25 +15,29 @@ export function expandPath(inputPath: string, cwd: string): string {
   if (trimmed === "~" && homeDir) {
     expanded = homeDir;
   } else if (trimmed.startsWith("~/") && homeDir) {
-    expanded = path.join(homeDir, trimmed.slice(2));
+    expanded = `${homeDir}/${trimmed.slice(2)}`;
   }
 
-  if (path.isAbsolute(expanded)) {
-    return path.normalize(expanded);
+  if (expanded.startsWith("/") || /^[A-Za-z]:[\\/]/.test(expanded)) {
+    return expanded;
   }
 
-  return path.resolve(cwd, expanded);
+  const normalizedCwd = cwd.replace(/[\\/]+$/, "");
+  return `${normalizedCwd}/${expanded}`;
 }
 
 export function toRelativePath(absolutePath: string, cwd: string): string {
-  const relativePath = path.relative(cwd, absolutePath);
+  const normalize = (value: string): string => value.replace(/\\/g, "/").replace(/\/+$/, "");
 
-  if (
-    relativePath.length > 0 &&
-    !relativePath.startsWith("..") &&
-    !path.isAbsolute(relativePath)
-  ) {
-    return relativePath;
+  const base = normalize(cwd);
+  const target = normalize(absolutePath);
+
+  if (target === base) {
+    return target;
+  }
+
+  if (target.startsWith(`${base}/`)) {
+    return target.slice(base.length + 1);
   }
 
   return absolutePath;
@@ -49,15 +52,18 @@ export async function suggestPathUnderCwd(
   absolutePath: string,
   cwd: string
 ): Promise<string | null> {
-  const basename = path.basename(absolutePath);
+  const pathModule = await importNodeModule<typeof import("node:path")>("node:path");
+  const fsModule = await importNodeModule<typeof import("node:fs/promises")>("node:fs/promises");
+
+  const basename = pathModule.basename(absolutePath);
   if (!basename) {
     return null;
   }
 
-  const candidate = path.join(cwd, basename);
+  const candidate = pathModule.join(cwd, basename);
 
   try {
-    await fs.access(candidate);
+    await fsModule.access(candidate);
     return `./${basename}`;
   } catch {
     return null;
