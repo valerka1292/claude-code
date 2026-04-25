@@ -139,6 +139,7 @@ export function useAgent() {
             });
           },
         },
+        fp,
         controller.signal
       );
     },
