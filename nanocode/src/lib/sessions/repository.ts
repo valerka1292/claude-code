@@ -15,10 +15,40 @@ export function createSessionRepository(
   transport: SessionTransport
 ): SessionRepository {
   return {
-    list: (projectKey) => transport.list(projectKey),
-    load: (projectKey, id) => transport.load(projectKey, id),
-    save: (projectKey, session) => transport.save(projectKey, session),
-    delete: (projectKey, id) => transport.delete(projectKey, id),
+    async list(projectKey) {
+      if (!projectKey) {
+        throw new Error("projectKey is required");
+      }
+      const sessions = await transport.list(projectKey);
+      return [...sessions].sort((a, b) => b.createdAt - a.createdAt);
+    },
+    async load(projectKey, id) {
+      if (!projectKey) {
+        throw new Error("projectKey is required");
+      }
+      if (!id) {
+        throw new Error("session id is required");
+      }
+      return transport.load(projectKey, id);
+    },
+    async save(projectKey, session) {
+      if (!projectKey) {
+        throw new Error("projectKey is required");
+      }
+      if (!session.id) {
+        throw new Error("session id is required");
+      }
+      return transport.save(projectKey, session);
+    },
+    async delete(projectKey, id) {
+      if (!projectKey) {
+        throw new Error("projectKey is required");
+      }
+      if (!id) {
+        throw new Error("session id is required");
+      }
+      return transport.delete(projectKey, id);
+    },
   };
 }
 

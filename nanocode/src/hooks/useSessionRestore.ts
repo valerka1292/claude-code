@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import type { Message } from "../components/MessageItem";
+import type { Message } from "../types/message";
 import { storedToUiMessage } from "../lib/converters";
 import type { SessionData } from "../types/session";
 

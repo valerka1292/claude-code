@@ -3,9 +3,9 @@ import {
   generateSessionName,
   sessionRepository,
   type StoredMessage,
-} from "../lib/sessions";
+} from "../lib/sessions/index";
 import type { Provider } from "../lib/providers";
-import type { SessionData } from "../types/session";
+import { useSession } from "../contexts/SessionContext";
 
 interface StartSessionNameGenerationOptions {
   isFirstMessage: boolean;
@@ -13,8 +13,6 @@ interface StartSessionNameGenerationOptions {
   sessionName: string;
   provider: Provider | null;
   firstUserMessage: string;
-  getActiveSessionSnapshot: () => SessionData | null;
-  updateSession: (session: SessionData) => void;
 }
 
 interface PersistTurnOptions {
@@ -24,12 +22,14 @@ interface PersistTurnOptions {
   sendTs: number;
   assistantContent: string;
   assistantReasoning: string;
-  getActiveSessionSnapshot: () => SessionData | null;
-  updateSession: (session: SessionData) => void;
-  onSessionSaveError: (error: unknown) => void;
 }
 
 export function useSessionPersist() {
+  const {
+    getActiveSessionSnapshot,
+    updateSession,
+    onSessionSaveError,
+  } = useSession();
   const sessionNameByIdRef = useRef<Record<string, string>>({});
   const pendingNameGenerationByIdRef = useRef<Record<string, Promise<string>>>(
     {}
@@ -42,8 +42,6 @@ export function useSessionPersist() {
       sessionName,
       provider,
       firstUserMessage,
-      getActiveSessionSnapshot,
-      updateSession,
     }: StartSessionNameGenerationOptions) => {
       sessionNameByIdRef.current[sessionId] = sessionName;
 
@@ -70,7 +68,7 @@ export function useSessionPersist() {
 
       pendingNameGenerationByIdRef.current[sessionId] = pendingGeneration;
     },
-    []
+    [getActiveSessionSnapshot, updateSession]
   );
 
   const persistCompletedTurn = useCallback(
@@ -81,9 +79,6 @@ export function useSessionPersist() {
       sendTs,
       assistantContent,
       assistantReasoning,
-      getActiveSessionSnapshot,
-      updateSession,
-      onSessionSaveError,
     }: PersistTurnOptions) => {
       if (!projectKey) {
         return;
@@ -124,7 +119,7 @@ export function useSessionPersist() {
         onSessionSaveError(error);
       }
     },
-    []
+    [getActiveSessionSnapshot, onSessionSaveError, updateSession]
   );
 
   return {

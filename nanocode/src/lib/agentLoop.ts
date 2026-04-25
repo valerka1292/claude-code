@@ -183,15 +183,12 @@ export async function runAgentStream(
     }
 
     if (finishReason === "tool_calls" && toolCallsList.length > 0) {
-      for (const tc of toolCallsList) {
-        history.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          name: tc.name,
-          content: JSON.stringify({ error: "Tool not implemented yet" }),
-        });
-      }
-      continue;
+      callbacks.onError(
+        new Error(
+          `Model requested tool calls (${toolCallsList.map((tc) => tc.name).join(", ")}) but tools are not implemented yet.`
+        )
+      );
+      return;
     }
 
     break;

@@ -1,7 +1,9 @@
 import { useCallback, useState } from "react";
-import type { Message } from "../components/MessageItem";
+import type { Message } from "../types/message";
+import type { SessionData } from "../types/session";
+import { useSessionRestore } from "./useSessionRestore";
 
-export function useMessageStream() {
+export function useMessageStream(activeSession: SessionData | null) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [usedTokens, setUsedTokens] = useState(0);
@@ -81,6 +83,7 @@ export function useMessageStream() {
   const replaceMessages = useCallback((nextMessages: Message[]) => {
     setMessages(nextMessages);
   }, []);
+  const { resetSessionRestore } = useSessionRestore(activeSession, replaceMessages);
 
   return {
     messages,
@@ -95,5 +98,6 @@ export function useMessageStream() {
     appendToolCallLabel,
     resetMessageStream,
     replaceMessages,
+    resetSessionRestore,
   };
 }

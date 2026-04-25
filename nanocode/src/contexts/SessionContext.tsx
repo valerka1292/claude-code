@@ -16,7 +16,7 @@ import type { SessionData, SessionMeta } from "../types/session";
 import {
   createNewSession,
   sessionRepository,
-} from "../lib/sessions";
+} from "../lib/sessions/index";
 import { useProject } from "./ProjectContext";
 
 interface SessionContextValue {

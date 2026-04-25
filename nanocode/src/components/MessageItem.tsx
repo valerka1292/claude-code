@@ -6,15 +6,7 @@
 import { motion } from "motion/react";
 import { User } from "lucide-react";
 import { ReasoningBlock } from "./ReasoningBlock";
-
-export interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  reasoning?: string;
-  isStreaming?: boolean;
-  isReasoningStreaming?: boolean;
-}
+import type { Message } from "../types/message";
 
 interface MessageItemProps {
   message: Message;
