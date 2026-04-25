@@ -1,5 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import type { Message } from "../components/MessageItem";
+import { useRef, useCallback, useState } from "react";
 import type { Mode } from "../types";
 import { useProviders } from "../contexts/ProvidersContext";
 import { useProject } from "../contexts/ProjectContext";
@@ -7,7 +6,9 @@ import { useSession } from "../contexts/SessionContext";
 import { runAgentStream, type ChatMessage } from "../lib/agentLoop";
 import { buildSystemMessages } from "../lib/systemPrompt";
 import { generateSessionName, saveSession, type StoredMessage } from "../lib/sessions";
-import { storedToChat, storedToUiMessage } from "../lib/converters";
+import { storedToChat } from "../lib/converters";
+import { useAbortController } from "./useAbortController";
+import { useMessageStream } from "./useMessageStream";
 
 export function useAgent() {
   const { activeProvider } = useProviders();
@@ -21,12 +22,21 @@ export function useAgent() {
   } = useSession();
 
   const [mode, setMode] = useState<Mode>("Ask");
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isTyping, setIsTyping] = useState(false);
-  const [usedTokens, setUsedTokens] = useState(0);
-
-  const abortRef = useRef<AbortController | null>(null);
-  const lastRestoredIdRef = useRef<string | null>(null);
+  const {
+    messages,
+    isTyping,
+    setIsTyping,
+    usedTokens,
+    setUsedTokens,
+    addPendingTurn,
+    updateMsg,
+    appendReasoningChunk,
+    appendContentChunk,
+    appendToolCallLabel,
+    resetMessageStream,
+  } = useMessageStream(activeSession);
+  const { replaceActiveController, abortActiveRequest, resetAbortController } =
+    useAbortController();
 
   const projectKeyRef = useRef<string | null>(null);
   projectKeyRef.current = projectKey;
@@ -43,36 +53,6 @@ export function useAgent() {
   const modeRef = useRef(mode);
   modeRef.current = mode;
 
-  useEffect(() => {
-    if (!activeSession) {
-      setMessages([]);
-      lastRestoredIdRef.current = null;
-      return;
-    }
-
-    if (
-      lastRestoredIdRef.current === activeSession.id ||
-      activeSession.messages.length === 0
-    ) {
-      return;
-    }
-
-    lastRestoredIdRef.current = activeSession.id;
-    setMessages(
-      activeSession.messages
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .map(storedToUiMessage)
-    );
-  }, [activeSession]);
-
-  const updateMsg = useCallback(
-    (id: string, patch: Partial<Message>) =>
-      setMessages((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, ...patch } : m))
-      ),
-    []
-  );
-
   const handleSend = useCallback(
     async (value: string) => {
       const fp = folderPathRef.current;
@@ -81,30 +61,11 @@ export function useAgent() {
 
       if (!value.trim() || !fp || !pk) return;
 
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-
+      const controller = replaceActiveController();
       const sendTs = Date.now();
       const isFirstMessage = !getActiveSessionSnapshot();
-
       const session = getActiveSessionSnapshot() ?? initSession(fp);
-
-      const userMsgId = `${sendTs}-user`;
-      const assistantId = `${sendTs + 1}-assistant`;
-
-      setMessages((prev) => [
-        ...prev,
-        { id: userMsgId, role: "user", content: value },
-        {
-          id: assistantId,
-          role: "assistant",
-          content: "",
-          reasoning: "",
-          isStreaming: true,
-          isReasoningStreaming: false,
-        },
-      ]);
+      const assistantId = addPendingTurn(value, sendTs);
       setIsTyping(true);
 
       if (!ap) {
@@ -132,14 +93,11 @@ export function useAgent() {
           });
       }
 
-      const fn = folderNameRef.current;
-      const md = modeRef.current;
-
       const history: ChatMessage[] = [
         ...buildSystemMessages({
           cwd: fp,
-          projectName: fn ?? fp,
-          mode: md,
+          projectName: folderNameRef.current ?? fp,
+          mode: modeRef.current,
         }),
         ...session.messages.map(storedToChat),
         { role: "user", content: value },
@@ -154,49 +112,17 @@ export function useAgent() {
         {
           onReasoningChunk: (chunk) => {
             assistantReasoning += chunk;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantId
-                  ? {
-                      ...m,
-                      reasoning: (m.reasoning ?? "") + chunk,
-                      isReasoningStreaming: true,
-                    }
-                  : m
-              )
-            );
+            appendReasoningChunk(assistantId, chunk);
           },
-
           onContentChunk: (chunk) => {
             assistantContent += chunk;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantId
-                  ? {
-                      ...m,
-                      content: (m.content ?? "") + chunk,
-                      isReasoningStreaming: false,
-                      isStreaming: true,
-                    }
-                  : m
-              )
-            );
+            appendContentChunk(assistantId, chunk);
           },
-
           onToolCallStart: (_id, name) => {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantId
-                  ? { ...m, content: (m.content ?? "") + `\n[Tool: ${name}]` }
-                  : m
-              )
-            );
+            appendToolCallLabel(assistantId, name);
           },
-
           onToolCallDone: () => {},
-
           onUsage: (prompt, completion) => setUsedTokens(prompt + completion),
-
           onError: (err) => {
             updateMsg(assistantId, {
               content: `⚠ Error: ${err.message}`,
@@ -205,7 +131,6 @@ export function useAgent() {
             });
             setIsTyping(false);
           },
-
           onDone: async () => {
             updateMsg(assistantId, {
               isStreaming: false,
@@ -249,15 +174,26 @@ export function useAgent() {
         controller.signal
       );
     },
-    [getActiveSessionSnapshot, initSession, onSessionSaveError, updateMsg, updateSession]
+    [
+      addPendingTurn,
+      appendContentChunk,
+      appendReasoningChunk,
+      appendToolCallLabel,
+      getActiveSessionSnapshot,
+      initSession,
+      onSessionSaveError,
+      replaceActiveController,
+      setUsedTokens,
+      setIsTyping,
+      updateMsg,
+      updateSession,
+    ]
   );
 
   const resetAgentUi = useCallback(() => {
-    abortRef.current?.abort();
-    setMessages([]);
-    setUsedTokens(0);
-    lastRestoredIdRef.current = null;
-  }, []);
+    resetAbortController();
+    resetMessageStream();
+  }, [resetAbortController, resetMessageStream]);
 
   return {
     mode,
@@ -267,6 +203,6 @@ export function useAgent() {
     usedTokens,
     handleSend,
     resetAgentUi,
-    abortActiveRequest: () => abortRef.current?.abort(),
+    abortActiveRequest,
   };
 }
