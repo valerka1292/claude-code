@@ -8,6 +8,7 @@ import { useAbortController } from "./useAbortController";
 import { useMessageStream } from "./useMessageStream";
 import { buildChatHistory } from "../lib/chatHistory";
 import { useSessionPersist } from "./useSessionPersist";
+import type { StoredMessage } from "../types/session";
 
 export function useAgent() {
   const { activeProvider } = useProviders();
@@ -96,6 +97,7 @@ export function useAgent() {
 
       let assistantContent = "";
       let assistantReasoning = "";
+      const turnMessages: StoredMessage[] = [];
 
       runAgentStream(
         ap,
@@ -113,6 +115,53 @@ export function useAgent() {
             appendToolCallLabel(assistantId, name);
           },
           onToolCallDone: () => {},
+          onAssistantMessageWithTools: (content, toolCalls) => {
+            turnMessages.push({
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content,
+              tool_calls: toolCalls,
+              reasoning: assistantReasoning || undefined,
+              ts: Date.now(),
+            });
+          },
+          onToolExecutionStart: () => {},
+          onToolExecutionDone: (id, result) => {
+            const toolCall = turnMessages
+              .flatMap((m) => m.tool_calls ?? [])
+              .find((tc) => tc.id === id);
+
+            if (!toolCall) {
+              return;
+            }
+
+            turnMessages.push({
+              id: crypto.randomUUID(),
+              role: "tool",
+              content: result,
+              tool_call_id: id,
+              name: toolCall.function.name,
+              ts: Date.now(),
+            });
+          },
+          onToolExecutionError: (id, error) => {
+            const toolCall = turnMessages
+              .flatMap((m) => m.tool_calls ?? [])
+              .find((tc) => tc.id === id);
+
+            if (!toolCall) {
+              return;
+            }
+
+            turnMessages.push({
+              id: crypto.randomUUID(),
+              role: "tool",
+              content: `<tool_use_error>${error}</tool_use_error>`,
+              tool_call_id: id,
+              name: toolCall.function.name,
+              ts: Date.now(),
+            });
+          },
           onUsage: (prompt, completion) => setUsedTokens(prompt + completion),
           onError: (err) => {
             updateMsg(assistantId, {
@@ -136,6 +185,7 @@ export function useAgent() {
               sendTs,
               assistantContent,
               assistantReasoning,
+              turnMessages,
             });
           },
         },
