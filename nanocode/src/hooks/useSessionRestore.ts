@@ -27,7 +27,17 @@ export function useSessionRestore(
     replaceMessages(
       activeSession.messages
         .filter((m) => m.role === "user" || m.role === "assistant")
-        .map(storedToUiMessage)
+        .map((m, index) => {
+          const normalizedId =
+            typeof m.id === "string" && m.id.length > 0
+              ? m.id
+              : `${m.ts}-${m.role}-${index}`;
+
+          return storedToUiMessage({
+            ...m,
+            id: normalizedId,
+          });
+        })
     );
   }, [activeSession, replaceMessages]);
 

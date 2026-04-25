@@ -59,21 +59,33 @@ export function ProvidersProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  const addProvider = (p: Omit<Provider, "id">) => {
-    update((s) => createProvider(s, p));
-  };
+  const addProvider = useCallback(
+    (p: Omit<Provider, "id">) => {
+      update((s) => createProvider(s, p));
+    },
+    [update]
+  );
 
-  const editProvider = (id: string, patch: Partial<Omit<Provider, "id">>) => {
-    update((s) => updateProvider(s, id, patch));
-  };
+  const editProvider = useCallback(
+    (id: string, patch: Partial<Omit<Provider, "id">>) => {
+      update((s) => updateProvider(s, id, patch));
+    },
+    [update]
+  );
 
-  const removeProvider = (id: string) => {
-    update((s) => deleteProvider(s, id));
-  };
+  const removeProvider = useCallback(
+    (id: string) => {
+      update((s) => deleteProvider(s, id));
+    },
+    [update]
+  );
 
-  const switchProvider = (id: string) => {
-    update((s) => setActiveProvider(s, id));
-  };
+  const switchProvider = useCallback(
+    (id: string) => {
+      update((s) => setActiveProvider(s, id));
+    },
+    [update]
+  );
 
   return (
     <ProvidersContext.Provider
