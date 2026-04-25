@@ -8,7 +8,7 @@
 
 import type { Tool, ToolExecutionContext } from "../types";
 import { formatToolError } from "../utils/format";
-import { hasNodeRuntime, importNodeModule } from "../utils/node";
+import { hasNodeRuntime } from "../utils/node";
 import { expandPath, toRelativePath } from "../utils/path";
 import { validateDirectoryPath } from "../utils/validation";
 import {
@@ -41,8 +41,14 @@ async function execute(
   context: ToolExecutionContext
 ): Promise<string> {
   try {
-    if (!hasNodeRuntime()) {
-      return formatToolError("Glob tool is unavailable in browser-only runtime");
+    const electronApi =
+      typeof window !== "undefined" ? window.electronAPI : undefined;
+
+    if (
+      !hasNodeRuntime() &&
+      (!electronApi?.glob || !electronApi?.stat)
+    ) {
+      return formatToolError("Glob tool is unavailable: electronAPI not initialized");
     }
 
     const pattern = typeof input.pattern === "string" ? input.pattern.trim() : "";
@@ -63,22 +69,18 @@ async function execute(
 
     const startedAt = Date.now();
 
-    const globModule = await importNodeModule<typeof import("glob")>("glob");
-    const fsModule = await importNodeModule<typeof import("node:fs/promises")>("node:fs/promises");
-
-    const files = await globModule.glob(pattern, {
+    const files = await electronApi!.glob!(pattern, {
       cwd: searchDir,
       absolute: true,
       nodir: true,
       dot: true,
       follow: false,
-      signal: context.signal,
     });
 
     const filesWithMtime = await Promise.all(
       files.map(async (file) => {
         try {
-          const stats = await fsModule.stat(file);
+          const stats = await electronApi!.stat!(file);
           return { file, mtime: stats.mtimeMs };
         } catch {
           return { file, mtime: 0 };

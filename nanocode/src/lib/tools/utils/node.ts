@@ -3,15 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-type DynamicImport = <T>(specifier: string) => Promise<T>;
-
-const dynamicImport = new Function(
-  "specifier",
-  "return import(specifier);"
-) as DynamicImport;
-
 export async function importNodeModule<T>(specifier: string): Promise<T> {
-  return dynamicImport<T>(specifier);
+  if (!hasNodeRuntime()) {
+    throw new Error(`Cannot import ${specifier}: Node.js runtime not available`);
+  }
+
+  return import(specifier) as Promise<T>;
 }
 
 export function hasNodeRuntime(): boolean {

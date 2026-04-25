@@ -1,15 +1,11 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
- *
- * Path utilities - ported from Claude Code
  */
-
-import { importNodeModule } from "./node";
 
 export function expandPath(inputPath: string, cwd: string): string {
   const trimmed = inputPath.trim();
-  const homeDir = process.env.HOME;
+  const homeDir = process.env.HOME || process.env.USERPROFILE;
 
   let expanded = trimmed;
   if (trimmed === "~" && homeDir) {
@@ -52,18 +48,22 @@ export async function suggestPathUnderCwd(
   absolutePath: string,
   cwd: string
 ): Promise<string | null> {
-  const pathModule = await importNodeModule<typeof import("node:path")>("node:path");
-  const fsModule = await importNodeModule<typeof import("node:fs/promises")>("node:fs/promises");
-
-  const basename = pathModule.basename(absolutePath);
+  const basename = absolutePath.split(/[\\/]/).pop();
   if (!basename) {
     return null;
   }
 
-  const candidate = pathModule.join(cwd, basename);
+  const candidate = `${cwd}/${basename}`;
+
+  const electronApi =
+    typeof window !== "undefined" ? window.electronAPI : undefined;
+
+  if (!electronApi?.stat) {
+    return null;
+  }
 
   try {
-    await fsModule.access(candidate);
+    await electronApi.stat(candidate);
     return `./${basename}`;
   } catch {
     return null;

@@ -4,18 +4,18 @@
  */
 
 import type { ValidationResult } from "../types";
-import { importNodeModule } from "./node";
 import { expandPath, suggestPathUnderCwd } from "./path";
 
 export const FILE_NOT_FOUND_CWD_NOTE =
   "Note: paths are relative to the current working directory:";
 
 export function isENOENT(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    "code" in error &&
-    (error as NodeJS.ErrnoException).code === "ENOENT"
-  );
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const code = (error as { code?: unknown }).code;
+  return code === "ENOENT" || error.message.includes("ENOENT");
 }
 
 export async function validateDirectoryPath(
@@ -32,12 +32,17 @@ export async function validateDirectoryPath(
   }
 
   const absolutePath = expandPath(trimmed, cwd);
-  const fsModule = await importNodeModule<typeof import("node:fs/promises")>("node:fs/promises");
+  const electronApi =
+    typeof window !== "undefined" ? window.electronAPI : undefined;
+
+  if (!electronApi?.stat) {
+    return { result: false, message: "Filesystem API not available" };
+  }
 
   try {
-    const stats = await fsModule.stat(absolutePath);
+    const stats = await electronApi.stat(absolutePath);
 
-    if (!stats.isDirectory()) {
+    if (!stats.isDirectory) {
       return {
         result: false,
         errorCode: 2,
