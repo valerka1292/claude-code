@@ -14,10 +14,34 @@ export function storedToChat(msg: StoredMessage): ChatMessage {
 }
 
 export function storedToUiMessage(msg: StoredMessage): Message {
-  return {
+  const base: Message = {
     id: msg.id,
-    role: msg.role as "user" | "assistant",
+    role: msg.role,
     content: msg.content ?? "",
     reasoning: msg.reasoning,
   };
+
+  if (msg.role === "assistant" && msg.tool_calls) {
+    base.toolCalls = msg.tool_calls.map((tc) => {
+      let parsedArgs: Record<string, unknown> = {};
+      try {
+        parsedArgs = JSON.parse(tc.function.arguments) as Record<string, unknown>;
+      } catch {
+        parsedArgs = { raw: tc.function.arguments };
+      }
+      return {
+        id: tc.id,
+        name: tc.function.name,
+        arguments: parsedArgs,
+        status: "success",
+      };
+    });
+  }
+
+  if (msg.role === "tool") {
+    base.toolCallId = msg.tool_call_id;
+    base.toolName = msg.name;
+  }
+
+  return base;
 }

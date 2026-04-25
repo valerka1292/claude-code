@@ -13,9 +13,18 @@ export interface StoredMessage {
   id: string;
   role: "user" | "assistant" | "tool";
   content: string | null;
-  tool_calls?: unknown[];
+  tool_calls?: ToolCallData[];
   tool_call_id?: string;
   name?: string;
   reasoning?: string;
   ts: number;
+}
+
+export interface ToolCallData {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
 }

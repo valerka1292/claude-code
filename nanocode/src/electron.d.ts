@@ -20,6 +20,19 @@ declare global {
       loadSession: (projectKey: string, id: string) => Promise<SessionData | null>;
       saveSession: (projectKey: string, session: SessionData) => Promise<boolean>;
       deleteSession: (projectKey: string, id: string) => Promise<boolean>;
+
+      glob?: (pattern: string, options: {
+        cwd: string;
+        absolute?: boolean;
+        nodir?: boolean;
+        dot?: boolean;
+        follow?: boolean;
+      }) => Promise<string[]>;
+
+      stat?: (filePath: string) => Promise<{
+        mtimeMs: number;
+        isDirectory: boolean;
+      }>;
     };
   }
 }
