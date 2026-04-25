@@ -1,35 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import type { Message } from "../components/MessageItem";
-import type { SessionData } from "../types/session";
-import { storedToUiMessage } from "../lib/converters";
 
-export function useMessageStream(activeSession: SessionData | null) {
+export function useMessageStream() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [usedTokens, setUsedTokens] = useState(0);
-  const lastRestoredIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!activeSession) {
-      setMessages([]);
-      lastRestoredIdRef.current = null;
-      return;
-    }
-
-    if (
-      lastRestoredIdRef.current === activeSession.id ||
-      activeSession.messages.length === 0
-    ) {
-      return;
-    }
-
-    lastRestoredIdRef.current = activeSession.id;
-    setMessages(
-      activeSession.messages
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .map(storedToUiMessage)
-    );
-  }, [activeSession]);
 
   const addPendingTurn = useCallback((value: string, sendTs: number) => {
     const userMsgId = `${sendTs}-user`;
@@ -101,7 +76,10 @@ export function useMessageStream(activeSession: SessionData | null) {
   const resetMessageStream = useCallback(() => {
     setMessages([]);
     setUsedTokens(0);
-    lastRestoredIdRef.current = null;
+  }, []);
+
+  const replaceMessages = useCallback((nextMessages: Message[]) => {
+    setMessages(nextMessages);
   }, []);
 
   return {
@@ -116,5 +94,6 @@ export function useMessageStream(activeSession: SessionData | null) {
     appendContentChunk,
     appendToolCallLabel,
     resetMessageStream,
+    replaceMessages,
   };
 }

@@ -5,6 +5,22 @@
 
 import type { CSSProperties } from "react";
 
+const WINDOW_ACTIONS = {
+  minimize: () => window.electronAPI?.minimize(),
+  maximize: () => window.electronAPI?.maximize(),
+  close: () => window.electronAPI?.close(),
+} as const;
+
+const WINDOW_BUTTONS: Array<{
+  label: string;
+  action: keyof typeof WINDOW_ACTIONS;
+  hover: string;
+}> = [
+  { label: "−", action: "minimize", hover: "hover:bg-white/[0.08]" },
+  { label: "□", action: "maximize", hover: "hover:bg-white/[0.08]" },
+  { label: "×", action: "close", hover: "hover:bg-red-500/60" },
+];
+
 export function TitleBar() {
   const isElectron = typeof window !== "undefined" && !!window.electronAPI;
 
@@ -31,14 +47,10 @@ export function TitleBar() {
           className="flex items-center gap-1"
           style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
         >
-          {[
-            { label: "−", action: "minimize", hover: "hover:bg-white/[0.08]" },
-            { label: "□", action: "maximize", hover: "hover:bg-white/[0.08]" },
-            { label: "×", action: "close",    hover: "hover:bg-red-500/60" },
-          ].map(({ label, action, hover }) => (
+          {WINDOW_BUTTONS.map(({ label, action, hover }) => (
             <button
               key={action}
-              onClick={() => window.electronAPI?.[action]?.()}
+              onClick={WINDOW_ACTIONS[action]}
               className={`
                 w-7 h-6 flex items-center justify-center
                 text-[0.75rem] text-white/30 hover:text-white/80
