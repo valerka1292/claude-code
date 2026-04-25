@@ -75,15 +75,16 @@ export function useMessageStream(activeSession: SessionData | null) {
     );
   }, []);
 
-  const resetMessageStream = useCallback(() => {
-    setMessages([]);
-    setUsedTokens(0);
-  }, []);
-
   const replaceMessages = useCallback((nextMessages: Message[]) => {
     setMessages(nextMessages);
   }, []);
   const { resetSessionRestore } = useSessionRestore(activeSession, replaceMessages);
+
+  const resetMessageStream = useCallback(() => {
+    resetSessionRestore();
+    setMessages([]);
+    setUsedTokens(0);
+  }, [resetSessionRestore]);
 
   return {
     messages,
@@ -97,7 +98,5 @@ export function useMessageStream(activeSession: SessionData | null) {
     appendContentChunk,
     appendToolCallLabel,
     resetMessageStream,
-    replaceMessages,
-    resetSessionRestore,
   };
 }

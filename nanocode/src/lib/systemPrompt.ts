@@ -24,10 +24,6 @@ const STATIC_SYSTEM_PROMPT = [
   "  and never print absolute paths unless the user explicitly asks.",
 ].join("\n");
 
-export function buildStaticSystemPrompt(): string {
-  return STATIC_SYSTEM_PROMPT;
-}
-
 export interface DynamicPromptOptions {
   cwd: string;
   projectName: string;
@@ -67,7 +63,7 @@ export function buildDynamicSystemPrompt(opts: DynamicPromptOptions): string {
 
 export function buildSystemMessages(opts: DynamicPromptOptions): ChatMessage[] {
   return [
-    { role: "system", content: buildStaticSystemPrompt() },
+    { role: "system", content: STATIC_SYSTEM_PROMPT },
     { role: "system", content: buildDynamicSystemPrompt(opts) },
   ];
 }
