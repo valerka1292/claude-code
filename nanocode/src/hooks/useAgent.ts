@@ -31,7 +31,6 @@ export function useAgent() {
     appendContentChunk,
     appendToolCallLabel,
     resetMessageStream,
-    resetSessionRestore,
   } = useMessageStream(activeSession);
   const { replaceActiveController, abortActiveRequest, resetAbortController } =
     useAbortController();
@@ -148,7 +147,6 @@ export function useAgent() {
       appendContentChunk,
       appendReasoningChunk,
       appendToolCallLabel,
-      buildChatHistory,
       getActiveSessionSnapshot,
       initSession,
       persistCompletedTurn,
@@ -162,9 +160,8 @@ export function useAgent() {
 
   const resetAgentUi = useCallback(() => {
     resetAbortController();
-    resetSessionRestore();
     resetMessageStream();
-  }, [resetAbortController, resetMessageStream, resetSessionRestore]);
+  }, [resetAbortController, resetMessageStream]);
 
   return {
     mode,

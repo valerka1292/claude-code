@@ -51,7 +51,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const onSessionSaveError = useCallback((error: unknown) => {
     console.error("[sessions] save error:", error);
-    window.alert("Failed to save the current session.");
+    // TODO: surface this through non-blocking UI notification.
   }, []);
 
   useEffect(() => {

@@ -50,6 +50,7 @@ export async function runAgentStream(
   const MAX_ITERATIONS = 10;
 
   while (iterationSafety < MAX_ITERATIONS) {
+    if (signal?.aborted) return;
     iterationSafety++;
 
     let fullContent = "";
