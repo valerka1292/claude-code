@@ -10,6 +10,7 @@ export interface SessionData extends SessionMeta {
 }
 
 export interface StoredMessage {
+  id: string;
   role: "user" | "assistant" | "tool";
   content: string | null;
   tool_calls?: unknown[];

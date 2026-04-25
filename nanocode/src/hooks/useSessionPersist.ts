@@ -91,12 +91,14 @@ export function useSessionPersist() {
       }
 
       const userStored: StoredMessage = {
+        id: crypto.randomUUID(),
         role: "user",
         content: userInput,
         ts: sendTs,
       };
 
       const assistantStored: StoredMessage = {
+        id: crypto.randomUUID(),
         role: "assistant",
         content: assistantContent || null,
         reasoning: assistantReasoning || undefined,
