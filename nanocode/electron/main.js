@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
+import os from 'os';
 import { promises as fs, existsSync, statSync } from 'fs';
 import { glob } from 'glob';
 import { fileURLToPath } from 'url';
@@ -8,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const isDev = process.argv.includes('--dev');
-const userDataPath = app.getPath('userData');
+const userDataPath = path.join(os.homedir(), '.nanocode');
 const settingsFile = path.join(userDataPath, 'settings.json');
 const sessionsDir = path.join(userDataPath, 'sessions');
 
