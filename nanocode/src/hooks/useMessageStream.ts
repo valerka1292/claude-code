@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { Message, ToolCallDisplay, ContentBlock } from "../types/message";
 import type { SessionData } from "../types/session";
 import { useSessionRestore } from "./useSessionRestore";
@@ -25,6 +25,7 @@ export function useMessageStream(activeSession: SessionData | null) {
   const [liveTurn, setLiveTurn] = useState<Message[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [usedTokens, setUsedTokens] = useState(0);
+  const sessionRestoreSuspendedRef = useRef(false);
   const messages = useMemo(
     () => [...archiveMessages, ...liveTurn],
     [archiveMessages, liveTurn]
@@ -177,7 +178,8 @@ export function useMessageStream(activeSession: SessionData | null) {
   }, []);
   const { resetSessionRestore } = useSessionRestore(
     activeSession,
-    replaceArchiveMessages
+    replaceArchiveMessages,
+    () => sessionRestoreSuspendedRef.current
   );
 
   const finalizeAndCommitLiveTurn = useCallback(() => {
@@ -197,6 +199,14 @@ export function useMessageStream(activeSession: SessionData | null) {
     setUsedTokens(0);
   }, [resetSessionRestore]);
 
+  const suspendSessionRestore = useCallback(() => {
+    sessionRestoreSuspendedRef.current = true;
+  }, []);
+
+  const resumeSessionRestore = useCallback(() => {
+    sessionRestoreSuspendedRef.current = false;
+  }, []);
+
   return {
     messages,
     archiveMessages,
@@ -215,5 +225,7 @@ export function useMessageStream(activeSession: SessionData | null) {
     appendBlock,
     finalizeAndCommitLiveTurn,
     resetMessageStream,
+    suspendSessionRestore,
+    resumeSessionRestore,
   };
 }

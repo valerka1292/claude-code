@@ -5,7 +5,8 @@ import type { SessionData } from "../types/session";
 
 export function useSessionRestore(
   activeSession: SessionData | null,
-  replaceArchiveMessages: (nextMessages: Message[]) => void
+  replaceArchiveMessages: (nextMessages: Message[]) => void,
+  shouldSkipRestore?: () => boolean
 ) {
   const lastRestoredSignatureRef = useRef<string | null>(null);
 
@@ -26,10 +27,18 @@ export function useSessionRestore(
     if (lastRestoredSignatureRef.current === signature) {
       return;
     }
+    if (shouldSkipRestore?.()) {
+      return;
+    }
 
     lastRestoredSignatureRef.current = signature;
     replaceArchiveMessages(turnsToMessages(activeSession.messages));
-  }, [activeSession, activeSession?.messages.length, replaceArchiveMessages]);
+  }, [
+    activeSession,
+    activeSession?.messages.length,
+    replaceArchiveMessages,
+    shouldSkipRestore,
+  ]);
 
   const resetSessionRestore = useCallback(() => {
     lastRestoredSignatureRef.current = null;
