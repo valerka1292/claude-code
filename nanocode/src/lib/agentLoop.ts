@@ -44,6 +44,22 @@ interface ToolCallBuffer {
   arguments: string;
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
 export async function runAgentStream(
   provider: Provider,
   messages: ChatMessage[],
@@ -169,7 +185,7 @@ export async function runAgentStream(
       }
     } catch (err) {
       if ((err as DOMException)?.name === "AbortError") return;
-      callbacks.onError(err as Error);
+      callbacks.onError(err instanceof Error ? err : new Error(getErrorMessage(err)));
       return;
     }
 
@@ -225,8 +241,7 @@ export async function runAgentStream(
             content: result,
           });
         } catch (error) {
-          const errorMsg =
-            error instanceof Error ? error.message : "Unknown error";
+          const errorMsg = getErrorMessage(error);
           callbacks.onToolExecutionError(tc.id, errorMsg);
           history.push({
             role: "tool",
@@ -234,6 +249,10 @@ export async function runAgentStream(
             name: tc.name,
             content: formatToolError(errorMsg),
           });
+
+          if (signal?.aborted) {
+            return;
+          }
         }
       }
 
@@ -243,5 +262,7 @@ export async function runAgentStream(
     break;
   }
 
-  callbacks.onDone();
+  if (!signal?.aborted) {
+    callbacks.onDone();
+  }
 }

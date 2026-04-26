@@ -7,28 +7,31 @@ export function useSessionRestore(
   activeSession: SessionData | null,
   replaceMessages: (nextMessages: Message[]) => void
 ) {
-  const lastRestoredIdRef = useRef<string | null>(null);
+  const lastRestoredSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!activeSession) {
       replaceMessages([]);
-      lastRestoredIdRef.current = null;
+      lastRestoredSignatureRef.current = null;
       return;
     }
 
-    if (
-      lastRestoredIdRef.current === activeSession.id ||
-      activeSession.messages.length === 0
-    ) {
+    if (activeSession.messages.length === 0) {
+      lastRestoredSignatureRef.current = `${activeSession.id}:0`;
       return;
     }
 
-    lastRestoredIdRef.current = activeSession.id;
+    const signature = `${activeSession.id}:${activeSession.messages.length}`;
+    if (lastRestoredSignatureRef.current === signature) {
+      return;
+    }
+
+    lastRestoredSignatureRef.current = signature;
     replaceMessages(turnsToMessages(activeSession.messages));
-  }, [activeSession, replaceMessages]);
+  }, [activeSession, activeSession?.messages.length, replaceMessages]);
 
   const resetSessionRestore = useCallback(() => {
-    lastRestoredIdRef.current = null;
+    lastRestoredSignatureRef.current = null;
   }, []);
 
   return { resetSessionRestore };

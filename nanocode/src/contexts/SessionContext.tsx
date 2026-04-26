@@ -99,16 +99,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const current = activeSessionRef.current;
     const key = projectKeyRef.current;
 
+    if (isMountedRef.current) {
+      setActiveSession(null);
+    }
+
     if (current && key && current.messages.length > 0) {
       try {
         await sessionRepository.save(key, current);
       } catch (error) {
         onSessionSaveError(error);
       }
-    }
-
-    if (isMountedRef.current) {
-      setActiveSession(null);
     }
   }, [onSessionSaveError]);
 

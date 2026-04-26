@@ -55,14 +55,17 @@ export function useAgent() {
 
   const modeRef = useRef(mode);
   modeRef.current = mode;
+  const isProcessingRef = useRef(false);
 
   const handleSend = useCallback(
     async (value: string) => {
       const fp = folderPathRef.current;
       const pk = projectKeyRef.current;
       const ap = activeProviderRef.current;
+      const normalizedValue = value.trim();
 
-      if (!value.trim() || !fp || !pk) return;
+      if (!normalizedValue || !fp || !pk || isProcessingRef.current) return;
+      isProcessingRef.current = true;
 
       const controller = replaceActiveController();
       const sendTs = Date.now();
@@ -78,6 +81,7 @@ export function useAgent() {
             isStreaming: false,
           });
           setIsTyping(false);
+          isProcessingRef.current = false;
         }, 300);
         return;
       }
@@ -102,10 +106,11 @@ export function useAgent() {
       let assistantReasoning = "";
       const turnMessages: StoredMessage[] = [];
 
-      runAgentStream(
-        ap,
-        history,
-        {
+      try {
+        await runAgentStream(
+          ap,
+          history,
+          {
           onReasoningChunk: (chunk) => {
             assistantReasoning += chunk;
             appendReasoningChunk(assistantId, chunk);
@@ -123,8 +128,16 @@ export function useAgent() {
               arguments: {},
               status: "pending" as const,
             };
-            addToolCall(assistantId, toolCall);
-            appendBlock(assistantId, { type: "tool_call", call: toolCall });
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId) return m;
+                return {
+                  ...m,
+                  toolCalls: [...(m.toolCalls ?? []), toolCall],
+                  blocks: [...(m.blocks ?? []), { type: "tool_call", call: toolCall }],
+                };
+              })
+            );
           },
           onToolCallDone: (id, args) => {
             setMessages((prev) =>
@@ -164,8 +177,18 @@ export function useAgent() {
             });
           },
           onToolExecutionStart: (id) => {
-            updateToolCallStatus(assistantId, id, "running");
-            appendBlock(assistantId, { type: "tool_result", callId: id, status: "running" });
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId) return m;
+                return {
+                  ...m,
+                  toolCalls: m.toolCalls?.map((tc) =>
+                    tc.id === id ? { ...tc, status: "running" } : tc
+                  ),
+                  blocks: [...(m.blocks ?? []), { type: "tool_result", callId: id, status: "running" }],
+                };
+              })
+            );
           },
           onToolExecutionDone: (id, result) => {
             updateToolCallStatus(assistantId, id, "success", result);
@@ -239,6 +262,7 @@ export function useAgent() {
               isReasoningStreaming: false,
             });
             setIsTyping(false);
+            isProcessingRef.current = false;
           },
           onDone: async () => {
             setMessages((prev) =>
@@ -264,19 +288,21 @@ export function useAgent() {
               assistantReasoning,
               turnMessages,
             });
+            isProcessingRef.current = false;
           },
         },
-        fp,
-        controller.signal
-      );
+          fp,
+          controller.signal
+        );
+      } finally {
+        isProcessingRef.current = false;
+      }
     },
     [
       addPendingTurn,
       appendContentChunk,
-      appendReasoningChunk,
-      addToolCall,
-      updateToolCallStatus,
       appendBlock,
+      appendReasoningChunk,
       getActiveSessionSnapshot,
       initSession,
       persistCompletedTurn,
@@ -285,6 +311,7 @@ export function useAgent() {
       setIsTyping,
       setMessages,
       startSessionNameGeneration,
+      updateToolCallStatus,
       updateMsg,
     ]
   );

@@ -12,6 +12,32 @@ const isDev = process.argv.includes('--dev');
 const userDataPath = path.join(os.homedir(), '.nanocode');
 const settingsFile = path.join(userDataPath, 'settings.json');
 const sessionsDir = path.join(userDataPath, 'sessions');
+const sessionsDirResolved = path.resolve(sessionsDir);
+
+function ensureString(value, fieldName) {
+  if (typeof value !== 'string') {
+    throw new Error(`${fieldName} must be a string`);
+  }
+  return value;
+}
+
+function getSafeProjectDir(projectKey) {
+  const key = ensureString(projectKey, 'projectKey').trim();
+  if (!key) {
+    throw new Error('projectKey cannot be empty');
+  }
+
+  const projectDir = path.resolve(sessionsDirResolved, key);
+  const isInsideSessionsDir =
+    projectDir === sessionsDirResolved ||
+    projectDir.startsWith(`${sessionsDirResolved}${path.sep}`);
+
+  if (!isInsideSessionsDir) {
+    throw new Error('Invalid project key');
+  }
+
+  return projectDir;
+}
 
 async function ensureDir(dir) {
   try {
@@ -37,7 +63,7 @@ async function saveSettings(settings) {
 }
 
 async function listSessions(projectKey) {
-  const projectDir = path.join(sessionsDir, projectKey);
+  const projectDir = getSafeProjectDir(projectKey);
   try {
     const files = await fs.readdir(projectDir);
     const sessions = [];
@@ -61,7 +87,9 @@ async function listSessions(projectKey) {
 }
 
 async function loadSession(projectKey, id) {
-  const filePath = path.join(sessionsDir, projectKey, `${id}.json`);
+  const projectDir = getSafeProjectDir(projectKey);
+  const safeId = ensureString(id, 'id');
+  const filePath = path.join(projectDir, `${safeId}.json`);
   try {
     const raw = await fs.readFile(filePath, 'utf-8');
     return JSON.parse(raw);
@@ -71,14 +99,20 @@ async function loadSession(projectKey, id) {
 }
 
 async function saveSession(projectKey, session) {
-  const projectDir = path.join(sessionsDir, projectKey);
+  const projectDir = getSafeProjectDir(projectKey);
+  if (!session || typeof session !== 'object') {
+    throw new Error('session must be an object');
+  }
+  const safeId = ensureString(session.id, 'session.id');
   await ensureDir(projectDir);
-  const filePath = path.join(projectDir, `${session.id}.json`);
+  const filePath = path.join(projectDir, `${safeId}.json`);
   await fs.writeFile(filePath, JSON.stringify(session, null, 2), 'utf-8');
 }
 
 async function deleteSession(projectKey, id) {
-  const filePath = path.join(sessionsDir, projectKey, `${id}.json`);
+  const projectDir = getSafeProjectDir(projectKey);
+  const safeId = ensureString(id, 'id');
+  const filePath = path.join(projectDir, `${safeId}.json`);
   try {
     await fs.unlink(filePath);
   } catch (err) {
@@ -123,6 +157,7 @@ function setupIPC() {
   });
 
   ipcMain.handle('resolve-path', async (_event, p) => {
+    if (typeof p !== 'string') return null;
     try {
       if (path.isAbsolute(p) && existsSync(p)) return p;
       return null;
@@ -139,6 +174,9 @@ function setupIPC() {
   ipcMain.handle('delete-session', (_event, pk, id) => deleteSession(pk, id));
 
   ipcMain.handle('glob', async (_event, pattern, options) => {
+    if (typeof pattern !== 'string') {
+      return [];
+    }
     try {
       const files = await glob(pattern, {
         ...options,
@@ -152,6 +190,9 @@ function setupIPC() {
   });
 
   ipcMain.handle('stat', async (_event, filePath) => {
+    if (typeof filePath !== 'string') {
+      throw new Error('filePath must be a string');
+    }
     const stats = statSync(filePath);
     return {
       mtimeMs: stats.mtimeMs,
