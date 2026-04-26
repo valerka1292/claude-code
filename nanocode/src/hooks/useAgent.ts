@@ -33,7 +33,6 @@ export function useAgent() {
     updateMsg,
     appendReasoningChunk,
     appendContentChunk,
-    addToolCall,
     appendBlock,
     finalizeAndCommitLiveTurn,
     resetMessageStream,
@@ -195,22 +194,16 @@ export function useAgent() {
             );
           },
           onToolExecutionDone: (id, result) => {
-            updateToolCallStatus(assistantId, id, "success", result);
             updateLiveTurn((prev) =>
-              prev.map((m) => {
-                if (m.id !== assistantId || !m.toolCalls) return m;
-                const blocks = m.blocks ?? [];
-                const lastBlockIdx = blocks.length - 1;
-                if (lastBlockIdx >= 0 && blocks[lastBlockIdx].type === "tool_result" && (blocks[lastBlockIdx] as { callId: string }).callId === id) {
-                  const updatedBlocks = [...blocks];
-                  updatedBlocks[lastBlockIdx] = { type: "tool_result", callId: id, status: "success", result };
-                  return { ...m, blocks: updatedBlocks };
-                }
-                return m;
-              })
-            setMessages((prev) =>
-              applyToolExecutionResultToMessages(prev, assistantId, id, "success", result)
+              applyToolExecutionResultToMessages(
+                prev,
+                assistantId,
+                id,
+                "success",
+                result
+              )
             );
+
             const toolCall = turnMessages
               .flatMap((m) => m.tool_calls ?? [])
               .find((tc) => tc.id === id);
@@ -229,22 +222,16 @@ export function useAgent() {
             });
           },
           onToolExecutionError: (id, error) => {
-            updateToolCallStatus(assistantId, id, "error", error);
             updateLiveTurn((prev) =>
-              prev.map((m) => {
-                if (m.id !== assistantId || !m.toolCalls) return m;
-                const blocks = m.blocks ?? [];
-                const lastBlockIdx = blocks.length - 1;
-                if (lastBlockIdx >= 0 && blocks[lastBlockIdx].type === "tool_result" && (blocks[lastBlockIdx] as { callId: string }).callId === id) {
-                  const updatedBlocks = [...blocks];
-                  updatedBlocks[lastBlockIdx] = { type: "tool_result", callId: id, status: "error", result: error };
-                  return { ...m, blocks: updatedBlocks };
-                }
-                return m;
-              })
-            setMessages((prev) =>
-              applyToolExecutionResultToMessages(prev, assistantId, id, "error", error)
+              applyToolExecutionResultToMessages(
+                prev,
+                assistantId,
+                id,
+                "error",
+                error
+              )
             );
+
             const toolCall = turnMessages
               .flatMap((m) => m.tool_calls ?? [])
               .find((tc) => tc.id === id);
@@ -313,7 +300,6 @@ export function useAgent() {
       finalizeAndCommitLiveTurn,
       startSessionNameGeneration,
       setTurnActive,
-      updateToolCallStatus,
       updateMsg,
     ]
   );
