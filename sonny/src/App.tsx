@@ -17,6 +17,7 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [contextTokensUsed, setContextTokensUsed] = useState(0);
   const { activeProvider } = useProviders();
 
   useEffect(() => {
@@ -93,8 +94,11 @@ export default function App() {
             }),
           );
         },
-        onDone: () => {
+        onDone: (usage) => {
           setIsTyping(false);
+          if (usage?.total_tokens) {
+            setContextTokensUsed(usage.total_tokens);
+          }
           setLlmHistory((prev) => [...prev, { role: 'assistant', content: finalAssistantContent }]);
         },
         onError: (error) => {
@@ -112,6 +116,7 @@ export default function App() {
   const handleNewChat = () => {
     setMessages([]);
     setLlmHistory([]);
+    setContextTokensUsed(0);
   };
 
   return (
@@ -135,6 +140,8 @@ export default function App() {
           isAgentRunning={isAgentRunning}
           onToggleAgent={() => setIsAgentRunning(!isAgentRunning)}
           activeModel={(activeProvider ?? MOCK_PROVIDERS[0]).model}
+          contextTokensUsed={contextTokensUsed}
+          contextWindow={(activeProvider ?? MOCK_PROVIDERS[0]).contextWindowSize}
         />
 
         <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />

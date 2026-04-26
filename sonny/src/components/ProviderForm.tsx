@@ -25,6 +25,9 @@ const DEFAULT_VALUES: ProviderFormValues = {
   model: '',
   contextWindowSize: 128000,
 };
+const BASE_URL_PATTERN = /^(https?:\/\/)[\w.-]+(?:\.[a-zA-Z]{2,})(\/.*)?$/;
+const MODEL_PATTERN = /^[a-zA-Z0-9_/-]+$/;
+const MAX_CONTEXT_WINDOW = 2_000_000;
 
 export default function ProviderForm({
   initialValues,
@@ -53,14 +56,42 @@ export default function ProviderForm({
 
   const onFieldChange =
     (field: keyof ProviderFormValues) => (event: React.ChangeEvent<HTMLInputElement>) => {
-      const value = field === 'contextWindowSize' ? Number(event.target.value) : event.target.value;
+      const value = field === 'contextWindowSize' ? event.target.value : event.target.value;
       setValues((prev) => ({
         ...prev,
-        [field]: value,
+        [field]: field === 'contextWindowSize' ? Number(value) || 0 : value,
       }));
     };
 
-  const isInvalid = !values.visualName || !values.baseUrl || !values.model || values.contextWindowSize <= 0;
+  const visualName = values.visualName.trim();
+  const baseUrl = values.baseUrl.trim();
+  const apiKey = values.apiKey.trim();
+  const model = values.model.trim();
+  const contextRaw = String(values.contextWindowSize);
+  const contextValue = Number(contextRaw);
+
+  const errors = {
+    visualName: visualName ? '' : 'Visual name is required.',
+    baseUrl: !baseUrl
+      ? 'Base URL is required.'
+      : !BASE_URL_PATTERN.test(baseUrl)
+        ? 'Base URL must start with http(s):// and include a valid domain.'
+        : '',
+    apiKey: apiKey ? '' : 'API key is required.',
+    model: !model
+      ? 'Model is required.'
+      : !MODEL_PATTERN.test(model)
+        ? 'Model can contain only letters, numbers, _, -, /.'
+        : '',
+    contextWindowSize:
+      !/^\d+$/.test(contextRaw) || contextValue <= 0
+        ? 'Context window size must be a positive integer.'
+        : contextValue > MAX_CONTEXT_WINDOW
+          ? `Context window size must be <= ${MAX_CONTEXT_WINDOW.toLocaleString()}.`
+          : '',
+  };
+
+  const isInvalid = Object.values(errors).some(Boolean);
 
   return (
     <form
@@ -76,24 +107,28 @@ export default function ProviderForm({
         value={values.visualName}
         onChange={onFieldChange('visualName')}
       />
+      {errors.visualName && <p className="text-xs text-error">{errors.visualName}</p>}
       <input
         className="w-full rounded-md border border-border bg-bg-0 px-3 py-2 text-sm text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         placeholder="Base URL"
         value={values.baseUrl}
         onChange={onFieldChange('baseUrl')}
       />
+      {errors.baseUrl && <p className="text-xs text-error">{errors.baseUrl}</p>}
       <input
         className="w-full rounded-md border border-border bg-bg-0 px-3 py-2 text-sm text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         placeholder="Model"
         value={values.model}
         onChange={onFieldChange('model')}
       />
+      {errors.model && <p className="text-xs text-error">{errors.model}</p>}
       <input
         className="w-full rounded-md border border-border bg-bg-0 px-3 py-2 text-sm text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         placeholder="API key"
         value={values.apiKey}
         onChange={onFieldChange('apiKey')}
       />
+      {errors.apiKey && <p className="text-xs text-error">{errors.apiKey}</p>}
       <input
         className="w-full rounded-md border border-border bg-bg-0 px-3 py-2 text-sm text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         placeholder="Context window size"
@@ -102,6 +137,7 @@ export default function ProviderForm({
         value={values.contextWindowSize}
         onChange={onFieldChange('contextWindowSize')}
       />
+      {errors.contextWindowSize && <p className="text-xs text-error">{errors.contextWindowSize}</p>}
       <div className="flex items-center justify-end gap-2 pt-2">
         <button
           type="button"
