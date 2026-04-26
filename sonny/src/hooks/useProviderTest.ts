@@ -10,21 +10,45 @@ interface ProviderTestResult {
 export function useProviderTest() {
   const [testing, setTesting] = React.useState(false);
   const [result, setResult] = React.useState<ProviderTestResult | null>(null);
+  const mountedRef = React.useRef(true);
+  const abortRef = React.useRef<AbortController | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      abortRef.current?.abort();
+    };
+  }, []);
 
   const test = React.useCallback(async (provider: Provider) => {
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+    if (!mountedRef.current) {
+      return;
+    }
     setTesting(true);
     setResult(null);
 
-    const ok = await testProviderStream(provider);
-    setResult({
-      ok,
-      message: ok ? 'Connection successful' : 'Connection failed',
-    });
-    setTesting(false);
+    try {
+      const ok = await testProviderStream(provider, abortRef.current.signal);
+      if (!mountedRef.current) {
+        return;
+      }
+      setResult({
+        ok,
+        message: ok ? 'Connection successful' : 'Connection failed',
+      });
+    } finally {
+      if (mountedRef.current) {
+        setTesting(false);
+      }
+    }
   }, []);
 
   const clear = React.useCallback(() => {
-    setResult(null);
+    if (mountedRef.current) {
+      setResult(null);
+    }
   }, []);
 
   return { test, testing, result, clear };

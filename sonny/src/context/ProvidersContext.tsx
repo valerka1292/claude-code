@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import type { Provider, ProvidersData } from '../types';
 import { useProviderStorage } from './StorageContext';
+import { OperationQueue } from '../services/operationQueue';
 
 interface ProvidersContextValue {
   data: ProvidersData;
@@ -24,6 +25,12 @@ export function ProvidersProvider({ children }: { children: React.ReactNode }) {
   const [data, setData] = useState<ProvidersData>(defaultProvidersData);
   const [isLoaded, setIsLoaded] = useState(false);
   const providerStorage = useProviderStorage();
+  const queueRef = React.useRef(new OperationQueue());
+  const dataRef = React.useRef(data);
+
+  React.useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
 
   const refresh = useCallback(async () => {
     if (!providerStorage) {
@@ -41,36 +48,42 @@ export function ProvidersProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   const saveAndReplace = useCallback(async (nextData: ProvidersData) => {
-    if (!providerStorage) {
-      setData(nextData);
-      return;
-    }
+    return queueRef.current.enqueue(async () => {
+      if (!providerStorage) {
+        setData(nextData);
+        dataRef.current = nextData;
+        return;
+      }
 
-    const saved = await providerStorage.save(nextData);
-    setData(saved);
+      const saved = await providerStorage.save(nextData);
+      setData(saved);
+      dataRef.current = saved;
+    });
   }, [providerStorage]);
 
   const addProvider = useCallback(async (provider: Provider) => {
+    const currentData = dataRef.current;
     const nextData: ProvidersData = {
-      activeProviderId: data.activeProviderId ?? provider.id,
+      activeProviderId: currentData.activeProviderId ?? provider.id,
       providers: {
-        ...data.providers,
+        ...currentData.providers,
         [provider.id]: provider,
       },
     };
     await saveAndReplace(nextData);
-  }, [data, saveAndReplace]);
+  }, [saveAndReplace]);
 
   const updateProvider = useCallback(async (providerId: string, patch: Partial<Provider>) => {
-    const current = data.providers[providerId];
+    const currentData = dataRef.current;
+    const current = currentData.providers[providerId];
     if (!current) {
       return;
     }
 
     const nextData: ProvidersData = {
-      ...data,
+      ...currentData,
       providers: {
-        ...data.providers,
+        ...currentData.providers,
         [providerId]: {
           ...current,
           ...patch,
@@ -78,29 +91,31 @@ export function ProvidersProvider({ children }: { children: React.ReactNode }) {
       },
     };
     await saveAndReplace(nextData);
-  }, [data, saveAndReplace]);
+  }, [saveAndReplace]);
 
   const deleteProvider = useCallback(async (providerId: string) => {
-    const { [providerId]: _removed, ...restProviders } = data.providers;
+    const currentData = dataRef.current;
+    const { [providerId]: _removed, ...restProviders } = currentData.providers;
     const fallbackId = Object.keys(restProviders)[0] ?? null;
     const nextData: ProvidersData = {
-      activeProviderId: data.activeProviderId === providerId ? fallbackId : data.activeProviderId,
+      activeProviderId: currentData.activeProviderId === providerId ? fallbackId : currentData.activeProviderId,
       providers: restProviders,
     };
     await saveAndReplace(nextData);
-  }, [data, saveAndReplace]);
+  }, [saveAndReplace]);
 
   const setActiveProvider = useCallback(async (providerId: string) => {
-    if (!data.providers[providerId]) {
+    const currentData = dataRef.current;
+    if (!currentData.providers[providerId]) {
       return;
     }
 
     const nextData: ProvidersData = {
-      ...data,
+      ...currentData,
       activeProviderId: providerId,
     };
     await saveAndReplace(nextData);
-  }, [data, saveAndReplace]);
+  }, [saveAndReplace]);
 
   const activeProvider = useMemo(() => {
     if (!data.activeProviderId) {

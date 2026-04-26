@@ -12,6 +12,7 @@ import { useChats } from './hooks/useChats';
 export default function App() {
   const {
     chats,
+    isLoading,
     activeChatId,
     activeChatIdRef,
     messages,
@@ -29,6 +30,7 @@ export default function App() {
     renameChat,
     deleteChat,
     persistChatData,
+    scheduleAutoSave,
   } = useChats();
 
   const [mode, setMode] = useState<AgentMode>('Chat');
@@ -36,11 +38,6 @@ export default function App() {
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const { activeProvider } = useProviders();
   const pendingRequestControllerRef = useRef<AbortController | null>(null);
-  const messagesRef = useRef(messages);
-
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
 
   const cancelPendingRequest = useCallback(() => {
     pendingRequestControllerRef.current?.abort();
@@ -70,8 +67,8 @@ export default function App() {
       }
 
       const chatIdSnapshot = chatId;
-      const existingMessages = messagesRef.current;
-      const isFirstMessage = existingMessages.length === 0;
+      const existingMessages = messages;
+      const isFirstMessage = messages.length === 0;
 
       const userMsg: Message = {
         id: Date.now().toString(),
@@ -112,6 +109,7 @@ export default function App() {
 
             finalAssistantContent += text;
             setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + text } : m)));
+            scheduleAutoSave();
           },
           onThinking: (text) => {
             if (activeChatIdRef.current !== chatIdSnapshot) {
@@ -122,6 +120,7 @@ export default function App() {
             setMessages((prev) =>
               prev.map((m) => (m.id === assistantId ? { ...m, thinking: (m.thinking ?? '') + text } : m)),
             );
+            scheduleAutoSave();
           },
           onToolCall: (toolCall) => {
             if (activeChatIdRef.current !== chatIdSnapshot) {
@@ -148,6 +147,7 @@ export default function App() {
                 return { ...m, toolCalls: existingToolCalls };
               }),
             );
+            scheduleAutoSave();
           },
           onDone: async (usage) => {
             if (pendingRequestControllerRef.current === requestController) {
@@ -187,7 +187,7 @@ export default function App() {
               }
             }
           },
-          onError: (error) => {
+          onError: async (error) => {
             if (pendingRequestControllerRef.current === requestController) {
               pendingRequestControllerRef.current = null;
             }
@@ -198,9 +198,17 @@ export default function App() {
 
             setIsTyping(false);
             const errorMessage = error instanceof Error ? error.message : String(error);
-            setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, content: `Error: ${errorMessage}` } : m)),
+            const erroredMessages = messages.concat(
+              userMsg,
+              {
+                ...assistantMsg,
+                content: finalAssistantContent || `Error: ${errorMessage}`,
+                thinking: finalAssistantThinking,
+                toolCalls: Array.from(finalToolCalls.values()),
+              },
             );
+            setMessages(erroredMessages);
+            await persistChatData(chatIdSnapshot, erroredMessages, nextLlmHistory, contextTokensUsed);
           },
         },
         requestController.signal,
@@ -212,10 +220,12 @@ export default function App() {
       cancelPendingRequest,
       createChat,
       llmHistory,
+      messages,
       loadChat,
       contextTokensUsed,
       persistChatData,
       renameChat,
+      scheduleAutoSave,
       setContextTokensUsed,
       setIsTyping,
       setLlmHistory,
@@ -245,6 +255,7 @@ export default function App() {
       <Sidebar
         activeChatId={activeChatId ?? ''}
         chats={chats}
+        isLoading={isLoading}
         onNewChat={handleNewChat}
         onSelectChat={handleSwitchChat}
         onDeleteChat={handleDeleteChat}

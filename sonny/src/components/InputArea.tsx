@@ -28,6 +28,7 @@ export default function InputArea({
   const [text, setText] = React.useState('');
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const canSend = Boolean(text.trim()) && hasProvider;
+  const isModeLocked = true;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -53,7 +54,14 @@ export default function InputArea({
     <div className="sticky bottom-0 left-0 right-0 bg-gradient-to-t from-bg-0 via-bg-0 to-transparent pt-4 pb-6">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4">
         <div className="mb-0 flex items-center justify-between px-1">
-          <Select.Root value={mode} onValueChange={(val) => onModeChange(val as AgentMode)}>
+          <Select.Root
+            value={mode}
+            onValueChange={(val) => {
+              if (!isModeLocked || val === 'Chat') {
+                onModeChange(val as AgentMode);
+              }
+            }}
+          >
             <Select.Trigger
               aria-label="Agent Mode"
               className="flex items-center gap-2 rounded-lg border border-border bg-bg-2 px-3 py-1.5 text-sm font-medium text-text-primary outline-none transition-colors hover:bg-bg-3 focus-visible:ring-2 focus-visible:ring-focus-ring"
@@ -77,7 +85,13 @@ export default function InputArea({
                     <Select.Item
                       key={m.id}
                       value={m.id}
-                      className="flex cursor-pointer select-none flex-col gap-0.5 px-4 py-2 text-[13px] outline-none hover:bg-bg-3 data-[highlighted]:bg-bg-3 data-[state=checked]:bg-bg-3"
+                      disabled={isModeLocked && m.id !== 'Chat'}
+                      className={cn(
+                        'flex select-none flex-col gap-0.5 px-4 py-2 text-[13px] outline-none',
+                        isModeLocked && m.id !== 'Chat'
+                          ? 'cursor-not-allowed opacity-40'
+                          : 'cursor-pointer hover:bg-bg-3 data-[highlighted]:bg-bg-3 data-[state=checked]:bg-bg-3',
+                      )}
                     >
                       <Select.ItemText>
                         <span className={`font-medium ${mode === m.id ? 'text-text-primary' : 'text-text-secondary'}`}>{m.label}</span>
