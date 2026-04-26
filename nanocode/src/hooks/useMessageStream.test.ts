@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { finalizeLiveTurnMessages } from "./useMessageStream";
 import { turnsToMessages } from "../lib/turnsToMessages";
+import { areMessageListsEquivalent } from "./useSessionRestore";
 import type { Message } from "../types/message";
 import type { StoredMessage } from "../types/session";
 
@@ -101,5 +102,84 @@ describe("message stream state transitions", () => {
       type: "text",
       content: "answer",
     });
+  });
+
+  it("treats finalized live archive and restored archive as equivalent", () => {
+    const finalizedArchive: Message[] = [
+      { id: "user-live", role: "user", content: "new" },
+      {
+        id: "assistant-live",
+        role: "assistant",
+        content: "answer",
+        toolCalls: [
+          {
+            id: "tool-1",
+            name: "search",
+            arguments: { q: "nanocode" },
+            status: "success",
+            result: "{\"ok\":true}",
+          },
+        ],
+        blocks: [
+          { type: "reasoning", content: "thinking" },
+          {
+            type: "tool_call",
+            call: {
+              id: "tool-1",
+              name: "search",
+              arguments: { q: "nanocode" },
+              status: "success",
+            },
+          },
+          {
+            type: "tool_result",
+            callId: "tool-1",
+            status: "success",
+            result: "{\"ok\":true}",
+          },
+          { type: "text", content: "answer" },
+        ],
+      },
+    ];
+
+    const restoredArchive = turnsToMessages([
+      { id: "stored-user", role: "user", content: "new", ts: 1 },
+      {
+        id: "stored-assistant-tools",
+        role: "assistant",
+        content: "",
+        reasoning: "thinking",
+        tool_calls: [
+          {
+            id: "tool-1",
+            type: "function",
+            function: {
+              name: "search",
+              arguments: "{\"q\":\"nanocode\"}",
+            },
+          },
+        ],
+        ts: 2,
+      },
+      {
+        id: "stored-tool",
+        role: "tool",
+        content: "{\"ok\":true}",
+        tool_call_id: "tool-1",
+        name: "search",
+        ts: 3,
+      },
+      {
+        id: "stored-assistant-final",
+        role: "assistant",
+        content: "answer",
+        ts: 4,
+      },
+    ]);
+
+    assert.equal(
+      areMessageListsEquivalent(finalizedArchive, restoredArchive),
+      true
+    );
   });
 });

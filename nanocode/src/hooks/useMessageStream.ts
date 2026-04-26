@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Message, ToolCallDisplay, ContentBlock } from "../types/message";
 import type { SessionData } from "../types/session";
 import { useSessionRestore } from "./useSessionRestore";
@@ -26,10 +26,14 @@ export function useMessageStream(activeSession: SessionData | null) {
   const [isTyping, setIsTyping] = useState(false);
   const [usedTokens, setUsedTokens] = useState(0);
   const sessionRestoreSuspendedRef = useRef(false);
+  const archiveMessagesRef = useRef<Message[]>([]);
   const messages = useMemo(
     () => [...archiveMessages, ...liveTurn],
     [archiveMessages, liveTurn]
   );
+  useEffect(() => {
+    archiveMessagesRef.current = archiveMessages;
+  }, [archiveMessages]);
 
   const updateLiveTurn = useCallback(
     (updater: (prev: Message[]) => Message[]) => {
@@ -179,7 +183,8 @@ export function useMessageStream(activeSession: SessionData | null) {
   const { resetSessionRestore } = useSessionRestore(
     activeSession,
     replaceArchiveMessages,
-    () => sessionRestoreSuspendedRef.current
+    () => sessionRestoreSuspendedRef.current,
+    () => archiveMessagesRef.current
   );
 
   const finalizeAndCommitLiveTurn = useCallback(() => {
@@ -195,17 +200,24 @@ export function useMessageStream(activeSession: SessionData | null) {
   const resetMessageStream = useCallback(() => {
     resetSessionRestore();
     setArchiveMessages([]);
+    archiveMessagesRef.current = [];
     setLiveTurn([]);
     setUsedTokens(0);
   }, [resetSessionRestore]);
 
-  const suspendSessionRestore = useCallback(() => {
-    sessionRestoreSuspendedRef.current = true;
-  }, []);
-
-  const resumeSessionRestore = useCallback(() => {
-    sessionRestoreSuspendedRef.current = false;
-  }, []);
+  const commitLiveTurnAndPersist = useCallback(
+    async (persist: () => Promise<void>) => {
+      sessionRestoreSuspendedRef.current = true;
+      try {
+        const finalizedTurn = finalizeAndCommitLiveTurn();
+        await persist();
+        return finalizedTurn;
+      } finally {
+        sessionRestoreSuspendedRef.current = false;
+      }
+    },
+    [finalizeAndCommitLiveTurn]
+  );
 
   return {
     messages,
@@ -224,8 +236,7 @@ export function useMessageStream(activeSession: SessionData | null) {
     updateToolCallStatus,
     appendBlock,
     finalizeAndCommitLiveTurn,
+    commitLiveTurnAndPersist,
     resetMessageStream,
-    suspendSessionRestore,
-    resumeSessionRestore,
   };
 }
