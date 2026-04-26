@@ -1,0 +1,9 @@
+{
+  "profile": "openai",
+  "env": {
+    "OPENAI_BASE_URL": "http://localhost:20128/v1",
+    "OPENAI_MODEL": "nvidia/openai/gpt-oss-120b",
+    "OPENAI_API_KEY": "key"
+  },
+  "createdAt": "2026-04-26T15:52:45.687Z"
+}
