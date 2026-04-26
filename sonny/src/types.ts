@@ -1,10 +1,21 @@
 export type AgentMode = 'Chat' | 'Autonomy' | 'Improve' | 'Dream';
 
+export interface ToolCall {
+  index: number;
+  id?: string;
+  function?: {
+    name?: string;
+    arguments?: string;
+  };
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  thinking?: string;
+  toolCalls?: ToolCall[];
 }
 
 export interface ChatSession {
