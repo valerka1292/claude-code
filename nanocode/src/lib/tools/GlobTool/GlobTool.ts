@@ -69,7 +69,11 @@ async function execute(
 
     const startedAt = Date.now();
 
-    const files = await electronApi!.glob!(pattern, {
+    if (!electronApi?.glob || !electronApi?.stat) {
+      return formatToolError("Filesystem API is not available in this environment.");
+    }
+
+    const files = await electronApi.glob(pattern, {
       cwd: searchDir,
       absolute: true,
       nodir: true,
@@ -80,7 +84,7 @@ async function execute(
     const filesWithMtime = await Promise.all(
       files.map(async (file) => {
         try {
-          const stats = await electronApi!.stat!(file);
+          const stats = await electronApi.stat(file);
           return { file, mtime: stats.mtimeMs };
         } catch {
           return { file, mtime: 0 };

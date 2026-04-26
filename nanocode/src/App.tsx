@@ -13,8 +13,12 @@ import { SettingsModal } from "./components/settings/SettingsModal";
 import { motion } from "motion/react";
 import { useSession } from "./contexts/SessionContext";
 import { useAgent } from "./hooks/useAgent";
+import { useProviders } from "./contexts/ProvidersContext";
+import { Loader2 } from "lucide-react";
 
 export default function App() {
+  const { isLoading: isProvidersLoading } = useProviders();
+
   const {
     activeSession,
     startNewSession,
@@ -38,9 +42,20 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<InputContainerHandle>(null);
 
+  if (isProvidersLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen w-screen bg-[#0d0d0d] text-white font-mono">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="animate-spin text-white/20" size={24} />
+          <span className="text-[0.7rem] text-white/20 uppercase tracking-widest">Loading Environment</span>
+        </div>
+      </div>
+    );
+  }
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isTyping]);
+  }, [messages.length, isTyping, messages.at(-1)?.content?.length]);
 
   const handleNewSession = useCallback(() => {
     resetAgentUi();

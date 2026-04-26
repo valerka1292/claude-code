@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { Message } from "../types/message";
-import { storedToUiMessage } from "../lib/converters";
+import { turnsToMessages } from "../lib/turnsToMessages";
 import type { SessionData } from "../types/session";
 
 export function useSessionRestore(
@@ -24,20 +24,7 @@ export function useSessionRestore(
     }
 
     lastRestoredIdRef.current = activeSession.id;
-    replaceMessages(
-      activeSession.messages
-        .map((m, index) => {
-          const normalizedId =
-            typeof m.id === "string" && m.id.length > 0
-              ? m.id
-              : `${m.ts}-${m.role}-${index}`;
-
-          return storedToUiMessage({
-            ...m,
-            id: normalizedId,
-          });
-        })
-    );
+    replaceMessages(turnsToMessages(activeSession.messages));
   }, [activeSession, replaceMessages]);
 
   const resetSessionRestore = useCallback(() => {

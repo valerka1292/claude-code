@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import type { Message } from "../types/message";
+import type { Message, ToolCallDisplay, ContentBlock } from "../types/message";
 import type { SessionData } from "../types/session";
 import { useSessionRestore } from "./useSessionRestore";
 
@@ -22,6 +22,7 @@ export function useMessageStream(activeSession: SessionData | null) {
         reasoning: "",
         isStreaming: true,
         isReasoningStreaming: false,
+        blocks: [],
       },
     ]);
 
@@ -65,13 +66,80 @@ export function useMessageStream(activeSession: SessionData | null) {
     );
   }, []);
 
-  const appendToolCallLabel = useCallback((id: string, name: string) => {
+  const addToolCall = useCallback(
+    (msgId: string, call: ToolCallDisplay) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId
+            ? {
+                ...m,
+                toolCalls: [...(m.toolCalls ?? []), call],
+              }
+            : m
+        )
+      );
+    },
+    []
+  );
+
+  const updateToolCallStatus = useCallback(
+    (
+      msgId: string,
+      callId: string,
+      status: ToolCallDisplay["status"],
+      result?: string
+    ) => {
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.id !== msgId || !m.toolCalls) return m;
+          return {
+            ...m,
+            toolCalls: m.toolCalls.map((tc) =>
+              tc.id === callId ? { ...tc, status, result } : tc
+            ),
+          };
+        })
+      );
+    },
+    []
+  );
+
+  const appendBlock = useCallback((msgId: string, block: ContentBlock) => {
     setMessages((prev) =>
-      prev.map((m) =>
-        m.id === id
-          ? { ...m, content: (m.content ?? "") + `\n[Tool: ${name}]` }
-          : m
-      )
+      prev.map((m) => {
+        if (m.id !== msgId) return m;
+        const blocks = m.blocks ?? [];
+
+        if (block.type === "reasoning") {
+          const last = blocks[blocks.length - 1];
+          if (last && last.type === "reasoning" && last.streaming) {
+            return {
+              ...m,
+              blocks: [
+                ...blocks.slice(0, -1),
+                { ...last, content: last.content + block.content },
+              ],
+            };
+          }
+          return { ...m, blocks: [...blocks, block] };
+        }
+
+        if (block.type === "text") {
+          const last = blocks[blocks.length - 1];
+          if (last && last.type === "text" && last.streaming) {
+            return {
+              ...m,
+              blocks: [
+                ...blocks.slice(0, -1),
+                { ...last, content: last.content + block.content },
+              ],
+            };
+          }
+          return { ...m, blocks: [...blocks, block] };
+        }
+
+        return { ...m, blocks: [...blocks, block] };
+      })
     );
   }, []);
 
@@ -88,6 +156,7 @@ export function useMessageStream(activeSession: SessionData | null) {
 
   return {
     messages,
+    setMessages,
     isTyping,
     setIsTyping,
     usedTokens,
@@ -96,7 +165,9 @@ export function useMessageStream(activeSession: SessionData | null) {
     updateMsg,
     appendReasoningChunk,
     appendContentChunk,
-    appendToolCallLabel,
+    addToolCall,
+    updateToolCallStatus,
+    appendBlock,
     resetMessageStream,
   };
 }

@@ -7,6 +7,7 @@ import { type ReactNode, type RefObject } from "react";
 import { Terminal } from "lucide-react";
 import { useProject } from "../contexts/ProjectContext";
 import type { InputContainerHandle } from "./InputContainer";
+import { APP_VERSION, RELEASE_CHANNEL, CHANNEL_STYLES } from "../lib/version";
 
 interface MainAreaProps {
   children?: ReactNode;
@@ -33,8 +34,9 @@ export function MainArea({ children, hasMessages, input, inputRef }: MainAreaPro
           </span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400/60" />
-          <span className="text-[0.65rem] text-white/25 font-mono">ready</span>
+          <span className={`text-[0.65rem] px-1.5 py-0.5 rounded border font-mono ${CHANNEL_STYLES[RELEASE_CHANNEL]}`}>
+            {APP_VERSION}
+          </span>
         </div>
       </div>
 

@@ -5,7 +5,9 @@
 
 export function expandPath(inputPath: string, cwd: string): string {
   const trimmed = inputPath.trim();
-  const homeDir = process.env.HOME || process.env.USERPROFILE;
+  const homeDir = typeof process !== "undefined"
+    ? (process.env.HOME || process.env.USERPROFILE)
+    : undefined;
 
   let expanded = trimmed;
   if (trimmed === "~" && homeDir) {

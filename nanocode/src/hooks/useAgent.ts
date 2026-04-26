@@ -22,6 +22,7 @@ export function useAgent() {
   const [mode, setMode] = useState<Mode>("Ask");
   const {
     messages,
+    setMessages,
     isTyping,
     setIsTyping,
     usedTokens,
@@ -30,7 +31,9 @@ export function useAgent() {
     updateMsg,
     appendReasoningChunk,
     appendContentChunk,
-    appendToolCallLabel,
+    addToolCall,
+    updateToolCallStatus,
+    appendBlock,
     resetMessageStream,
   } = useMessageStream(activeSession);
   const { replaceActiveController, abortActiveRequest, resetAbortController } =
@@ -106,15 +109,50 @@ export function useAgent() {
           onReasoningChunk: (chunk) => {
             assistantReasoning += chunk;
             appendReasoningChunk(assistantId, chunk);
+            appendBlock(assistantId, { type: "reasoning", content: chunk, streaming: true });
           },
           onContentChunk: (chunk) => {
             assistantContent += chunk;
             appendContentChunk(assistantId, chunk);
+            appendBlock(assistantId, { type: "text", content: chunk, streaming: true });
           },
-          onToolCallStart: (_id, name) => {
-            appendToolCallLabel(assistantId, name);
+          onToolCallStart: (id, name) => {
+            const toolCall = {
+              id,
+              name,
+              arguments: {},
+              status: "pending" as const,
+            };
+            addToolCall(assistantId, toolCall);
+            appendBlock(assistantId, { type: "tool_call", call: toolCall });
           },
-          onToolCallDone: () => {},
+          onToolCallDone: (id, args) => {
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId) return m;
+
+                let parsedArgs: Record<string, unknown> = {};
+                try {
+                  parsedArgs = JSON.parse(args);
+                } catch {
+                  parsedArgs = { raw: args };
+                }
+
+                const updatedToolCalls = m.toolCalls?.map((tc) =>
+                  tc.id === id ? { ...tc, arguments: parsedArgs } : tc
+                );
+
+                const updatedBlocks = m.blocks?.map((b) => {
+                  if (b.type === "tool_call" && b.call.id === id) {
+                    return { ...b, call: { ...b.call, arguments: parsedArgs } };
+                  }
+                  return b;
+                });
+
+                return { ...m, toolCalls: updatedToolCalls, blocks: updatedBlocks };
+              })
+            );
+          },
           onAssistantMessageWithTools: (content, toolCalls) => {
             turnMessages.push({
               id: crypto.randomUUID(),
@@ -125,8 +163,25 @@ export function useAgent() {
               ts: Date.now(),
             });
           },
-          onToolExecutionStart: () => {},
+          onToolExecutionStart: (id) => {
+            updateToolCallStatus(assistantId, id, "running");
+            appendBlock(assistantId, { type: "tool_result", callId: id, status: "running" });
+          },
           onToolExecutionDone: (id, result) => {
+            updateToolCallStatus(assistantId, id, "success", result);
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId || !m.toolCalls) return m;
+                const blocks = m.blocks ?? [];
+                const lastBlockIdx = blocks.length - 1;
+                if (lastBlockIdx >= 0 && blocks[lastBlockIdx].type === "tool_result" && (blocks[lastBlockIdx] as { callId: string }).callId === id) {
+                  const updatedBlocks = [...blocks];
+                  updatedBlocks[lastBlockIdx] = { type: "tool_result", callId: id, status: "success", result };
+                  return { ...m, blocks: updatedBlocks };
+                }
+                return m;
+              })
+            );
             const toolCall = turnMessages
               .flatMap((m) => m.tool_calls ?? [])
               .find((tc) => tc.id === id);
@@ -145,6 +200,20 @@ export function useAgent() {
             });
           },
           onToolExecutionError: (id, error) => {
+            updateToolCallStatus(assistantId, id, "error", error);
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId || !m.toolCalls) return m;
+                const blocks = m.blocks ?? [];
+                const lastBlockIdx = blocks.length - 1;
+                if (lastBlockIdx >= 0 && blocks[lastBlockIdx].type === "tool_result" && (blocks[lastBlockIdx] as { callId: string }).callId === id) {
+                  const updatedBlocks = [...blocks];
+                  updatedBlocks[lastBlockIdx] = { type: "tool_result", callId: id, status: "error", result: error };
+                  return { ...m, blocks: updatedBlocks };
+                }
+                return m;
+              })
+            );
             const toolCall = turnMessages
               .flatMap((m) => m.tool_calls ?? [])
               .find((tc) => tc.id === id);
@@ -156,7 +225,7 @@ export function useAgent() {
             turnMessages.push({
               id: crypto.randomUUID(),
               role: "tool",
-              content: `<tool_use_error>${error}</tool_use_error>`,
+              content: error,
               tool_call_id: id,
               name: toolCall.function.name,
               ts: Date.now(),
@@ -172,10 +241,18 @@ export function useAgent() {
             setIsTyping(false);
           },
           onDone: async () => {
-            updateMsg(assistantId, {
-              isStreaming: false,
-              isReasoningStreaming: false,
-            });
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId) return m;
+                const blocks = m.blocks ?? [];
+                const updatedBlocks = blocks.map((b) => {
+                  if (b.type === "reasoning") return { ...b, streaming: false };
+                  if (b.type === "text") return { ...b, streaming: false };
+                  return b;
+                });
+                return { ...m, blocks: updatedBlocks, isStreaming: false, isReasoningStreaming: false };
+              })
+            );
             setIsTyping(false);
 
             await persistCompletedTurn({
@@ -197,13 +274,16 @@ export function useAgent() {
       addPendingTurn,
       appendContentChunk,
       appendReasoningChunk,
-      appendToolCallLabel,
+      addToolCall,
+      updateToolCallStatus,
+      appendBlock,
       getActiveSessionSnapshot,
       initSession,
       persistCompletedTurn,
       replaceActiveController,
       setUsedTokens,
       setIsTyping,
+      setMessages,
       startSessionNameGeneration,
       updateMsg,
     ]

@@ -1,0 +1,4899 @@
+.gitignore
+node_modules/
+build/
+dist/
+dist-electron/
+coverage/
+collect_ts.py
+.DS_Store
+*.log
+.env*
+!/.env.example
+
+README.md
+<div align="center">
+<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+</div>
+
+# Run and deploy your AI Studio app
+
+This contains everything you need to run your app locally.
+
+View your app in AI Studio: https://ai.studio/apps/f2e0d804-28f6-414d-81e1-5e5b4768c4d7
+
+## Run Locally
+
+**Prerequisites:**  Node.js
+
+
+1. Install dependencies:
+   `npm install`
+2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+3. Run the app:
+   `npm run dev`
+
+index.html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NanoCode — AI Coding Tool</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
+
+metadata.json
+{
+  "name": "NanoCode",
+  "description": "Minimalist AI coding interface with split panels and context-aware input.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
+
+package.json
+{
+  "name": "nanocode",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "electron/main.js",
+  "description": "NanoCode - Electron Desktop App",
+  "author": "NanoCode <nanocode@example.com>",
+  "homepage": "https://github.com/nanocode/nanocode",
+  "scripts": {
+    "dev": "concurrently \"vite --port=5173\" \"wait-on http://localhost:5173 && electron . --dev\"",
+    "build": "vite build && electron-builder",
+    "build:linux": "vite build && electron-builder --linux",
+    "build:win": "vite build && electron-builder --win",
+    "build:win:portable": "vite build && electron-builder --win portable",
+    "preview": "vite preview",
+    "clean": "rm -rf dist dist-electron",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google/genai": "^1.29.0",
+    "@tailwindcss/vite": "^4.1.14",
+    "@vitejs/plugin-react": "^5.0.4",
+    "clsx": "^2.1.1",
+    "dotenv": "^17.2.3",
+    "electron": "^41.3.0",
+    "express": "^4.21.2",
+    "glob": "^10.3.10",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^3.5.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/glob": "^8.1.0",
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.2.14",
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^9.2.1",
+    "electron-builder": "^26.8.1",
+    "tailwindcss": "^4.1.14",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0",
+    "wait-on": "^9.0.5"
+  },
+  "build": {
+    "appId": "com.nanocode.app",
+    "productName": "NanoCode",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
+
+tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
+    "module": "ESNext",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  }
+}
+
+vite.config.ts
+import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
+import {defineConfig} from 'vite';
+
+export default defineConfig(({mode}) => {
+  void mode;
+  return {
+    base: './',
+    plugins: [react(), tailwindcss()],
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, '.'),
+      },
+    },
+    build: {
+      rollupOptions: {
+        external: ['glob', 'node:fs/promises', 'node:fs', 'node:path'],
+      },
+    },
+    optimizeDeps: {
+      exclude: ['glob', 'node:fs/promises', 'node:fs', 'node:path'],
+    },
+    server: {
+      // HMR is disabled in AI Studio via DISABLE_HMR env var.
+      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
+      hmr: process.env.DISABLE_HMR !== 'true',
+    },
+  };
+});
+
+electron\main.js
+import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import path from 'path';
+import os from 'os';
+import { promises as fs, existsSync, statSync } from 'fs';
+import { glob } from 'glob';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const isDev = process.argv.includes('--dev');
+const userDataPath = path.join(os.homedir(), '.nanocode');
+const settingsFile = path.join(userDataPath, 'settings.json');
+const sessionsDir = path.join(userDataPath, 'sessions');
+
+async function ensureDir(dir) {
+  try {
+    await fs.mkdir(dir, { recursive: true });
+  } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
+  }
+}
+
+async function loadSettings() {
+  try {
+    await ensureDir(userDataPath);
+    const raw = await fs.readFile(settingsFile, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return { providers: {}, activeProviderId: null };
+  }
+}
+
+async function saveSettings(settings) {
+  await ensureDir(userDataPath);
+  await fs.writeFile(settingsFile, JSON.stringify(settings, null, 2), 'utf-8');
+}
+
+async function listSessions(projectKey) {
+  const projectDir = path.join(sessionsDir, projectKey);
+  try {
+    const files = await fs.readdir(projectDir);
+    const sessions = [];
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue;
+      const id = path.basename(file, '.json');
+      const filePath = path.join(projectDir, file);
+      const raw = await fs.readFile(filePath, 'utf-8');
+      const data = JSON.parse(raw);
+      sessions.push({
+        id: data.id,
+        name: data.name,
+        createdAt: data.createdAt,
+        projectPath: data.projectPath,
+      });
+    }
+    return sessions.sort((a, b) => b.createdAt - a.createdAt);
+  } catch {
+    return [];
+  }
+}
+
+async function loadSession(projectKey, id) {
+  const filePath = path.join(sessionsDir, projectKey, `${id}.json`);
+  try {
+    const raw = await fs.readFile(filePath, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function saveSession(projectKey, session) {
+  const projectDir = path.join(sessionsDir, projectKey);
+  await ensureDir(projectDir);
+  const filePath = path.join(projectDir, `${session.id}.json`);
+  await fs.writeFile(filePath, JSON.stringify(session, null, 2), 'utf-8');
+}
+
+async function deleteSession(projectKey, id) {
+  const filePath = path.join(sessionsDir, projectKey, `${id}.json`);
+  try {
+    await fs.unlink(filePath);
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+}
+
+function createWindow() {
+  const mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 800,
+    minHeight: 600,
+    frame: false,
+    backgroundColor: '#0d0d0d',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+  }
+
+  ipcMain.on('minimize', () => mainWindow.minimize());
+  ipcMain.on('maximize', () => {
+    mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
+  });
+  ipcMain.on('close', () => mainWindow.close());
+}
+
+function setupIPC() {
+  ipcMain.handle('select-folder', async () => {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
+
+  ipcMain.handle('resolve-path', async (_event, p) => {
+    try {
+      if (path.isAbsolute(p) && existsSync(p)) return p;
+      return null;
+    } catch {
+      return null;
+    }
+  });
+
+  ipcMain.handle('load-settings', loadSettings);
+  ipcMain.handle('save-settings', (_event, s) => saveSettings(s));
+  ipcMain.handle('list-sessions', (_event, pk) => listSessions(pk));
+  ipcMain.handle('load-session', (_event, pk, id) => loadSession(pk, id));
+  ipcMain.handle('save-session', (_event, pk, s) => saveSession(pk, s));
+  ipcMain.handle('delete-session', (_event, pk, id) => deleteSession(pk, id));
+
+  ipcMain.handle('glob', async (_event, pattern, options) => {
+    try {
+      const files = await glob(pattern, {
+        ...options,
+        windowsPathsNoEscape: true,
+      });
+      return files;
+    } catch (err) {
+      console.error('Glob error:', err);
+      return [];
+    }
+  });
+
+  ipcMain.handle('stat', async (_event, filePath) => {
+    const stats = statSync(filePath);
+    return {
+      mtimeMs: stats.mtimeMs,
+      isDirectory: stats.isDirectory(),
+    };
+  });
+
+  ipcMain.handle('get-platform', () => process.platform);
+}
+
+app.whenReady().then(() => {
+  setupIPC();
+  createWindow();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
+electron\preload.cjs
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  minimize: () => ipcRenderer.send('minimize'),
+  maximize: () => ipcRenderer.send('maximize'),
+  close: () => ipcRenderer.send('close'),
+  platform: ipcRenderer.invoke('get-platform'),
+
+  selectFolder: () => ipcRenderer.invoke('select-folder'),
+  resolvePath: (p) => ipcRenderer.invoke('resolve-path', p),
+
+  loadSettings: () => ipcRenderer.invoke('load-settings'),
+  saveSettings: (data) => ipcRenderer.invoke('save-settings', data),
+
+  listSessions: (projectKey) => ipcRenderer.invoke('list-sessions', projectKey),
+  loadSession: (projectKey, id) => ipcRenderer.invoke('load-session', projectKey, id),
+  saveSession: (projectKey, session) => ipcRenderer.invoke('save-session', projectKey, session),
+  deleteSession: (projectKey, id) => ipcRenderer.invoke('delete-session', projectKey, id),
+
+  glob: (pattern, options) => ipcRenderer.invoke('glob', pattern, options),
+
+  stat: (filePath) => ipcRenderer.invoke('stat', filePath),
+});
+src\App.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useRef, useEffect, useCallback, useState } from "react";
+import { TitleBar } from "./components/TitleBar";
+import { Sidebar } from "./components/Sidebar";
+import { MainArea } from "./components/MainArea";
+import { InputContainer, type InputContainerHandle } from "./components/InputContainer";
+import { MessageItem } from "./components/MessageItem";
+import { SettingsModal } from "./components/settings/SettingsModal";
+import { motion } from "motion/react";
+import { useSession } from "./contexts/SessionContext";
+import { useAgent } from "./hooks/useAgent";
+import { useProviders } from "./contexts/ProvidersContext";
+import { Loader2 } from "lucide-react";
+
+export default function App() {
+  const { isLoading: isProvidersLoading } = useProviders();
+
+  const {
+    activeSession,
+    startNewSession,
+    openSession,
+    sessionList,
+    isLoadingList,
+    removeSession,
+  } = useSession();
+
+  const {
+    mode,
+    setMode,
+    messages,
+    isTyping,
+    usedTokens,
+    handleSend,
+    resetAgentUi,
+  } = useAgent();
+
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<InputContainerHandle>(null);
+
+  if (isProvidersLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen w-screen bg-[#0d0d0d] text-white font-mono">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="animate-spin text-white/20" size={24} />
+          <span className="text-[0.7rem] text-white/20 uppercase tracking-widest">Loading Environment</span>
+        </div>
+      </div>
+    );
+  }
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length, isTyping, messages.at(-1)?.content?.length]);
+
+  const handleNewSession = useCallback(() => {
+    resetAgentUi();
+    startNewSession();
+  }, [resetAgentUi, startNewSession]);
+
+  const handleOpenSession = useCallback(
+    async (id: string) => {
+      resetAgentUi();
+      await openSession(id);
+    },
+    [openSession, resetAgentUi]
+  );
+
+  const inputNode = (
+    <InputContainer
+      ref={inputRef}
+      mode={mode}
+      setMode={setMode}
+      onSend={handleSend}
+      usedTokens={usedTokens}
+    />
+  );
+
+  return (
+    <div className="flex flex-col h-screen w-screen bg-[#0d0d0d] text-white overflow-hidden select-none font-mono">
+      <TitleBar />
+
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar
+          onSettingsClick={() => setSettingsOpen(true)}
+          onNewSession={handleNewSession}
+          onOpenSession={handleOpenSession}
+          onDeleteSession={removeSession}
+          sessionList={sessionList}
+          activeSessionId={activeSession?.id ?? null}
+          isLoadingList={isLoadingList}
+        />
+
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <MainArea
+            hasMessages={messages.length > 0}
+            input={inputNode}
+            inputRef={inputRef}
+          >
+            {messages.map((msg) => (
+              <MessageItem key={msg.id} message={msg} />
+            ))}
+
+            {isTyping && messages.at(-1)?.role !== "assistant" && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="flex gap-3 py-3 px-5"
+              >
+                <div className="w-5 h-5 rounded-md bg-white flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <div className="w-2 h-2 bg-black rounded-full" />
+                </div>
+                <div className="flex-1">
+                  <div className="text-[0.68rem] font-mono text-white/20 mb-1 uppercase tracking-wider">
+                    nanocode
+                  </div>
+                  <div className="flex gap-1 items-center h-5">
+                    {[0, 0.15, 0.3].map((delay, i) => (
+                      <span
+                        key={i}
+                        className="w-1 h-1 rounded-full bg-white/30 animate-pulse"
+                        style={{ animationDelay: `${delay}s` }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </MainArea>
+        </div>
+      </div>
+
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+    </div>
+  );
+}
+
+src\electron.d.ts
+import type { SessionData, SessionMeta } from "./types/session";
+
+export {};
+
+declare global {
+  interface Window {
+    electronAPI?: {
+      minimize: () => void;
+      maximize: () => void;
+      close: () => void;
+      platform: string;
+
+      selectFolder: () => Promise<string | null>;
+      resolvePath: (p: string) => Promise<string | null>;
+
+      loadSettings: () => Promise<{ providers: Record<string, unknown>; activeProviderId: string | null }>;
+      saveSettings: (data: unknown) => Promise<boolean>;
+
+      listSessions: (projectKey: string) => Promise<SessionMeta[]>;
+      loadSession: (projectKey: string, id: string) => Promise<SessionData | null>;
+      saveSession: (projectKey: string, session: SessionData) => Promise<boolean>;
+      deleteSession: (projectKey: string, id: string) => Promise<boolean>;
+
+      glob?: (pattern: string, options: {
+        cwd: string;
+        absolute?: boolean;
+        nodir?: boolean;
+        dot?: boolean;
+        follow?: boolean;
+      }) => Promise<string[]>;
+
+      stat?: (filePath: string) => Promise<{
+        mtimeMs: number;
+        isDirectory: boolean;
+      }>;
+    };
+  }
+}
+
+src\index.css
+@import "tailwindcss";
+
+* {
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: #0d0d0d;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.08);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.15);
+}
+
+textarea::-webkit-scrollbar { width: 2px; }
+src\main.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App.tsx";
+import { ProvidersProvider } from "./contexts/ProvidersContext.tsx";
+import { ProjectProvider } from "./contexts/ProjectContext.tsx";
+import { SessionProvider } from "./contexts/SessionContext.tsx";
+import "./index.css";
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <ProvidersProvider>
+      <ProjectProvider>
+        <SessionProvider>
+          <App />
+        </SessionProvider>
+      </ProjectProvider>
+    </ProvidersProvider>
+  </StrictMode>
+);
+src\components\ContextIndicator.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useProviders } from "../contexts/ProvidersContext";
+
+interface ContextIndicatorProps {
+  usedTokens?: number;
+}
+
+export function ContextIndicator({ usedTokens = 0 }: ContextIndicatorProps) {
+  const { activeProvider } = useProviders();
+
+  const contextWindow = activeProvider?.contextWindow ?? 128000;
+  const modelName     = activeProvider?.model ?? "no model";
+
+  const raw        = (usedTokens / contextWindow) * 100;
+  const percentage = Math.min(100, raw);
+  const percentDisplay = percentage.toFixed(2);
+
+  const radius       = 7;
+  const circumference = 2 * Math.PI * radius;
+  const offset       = circumference - (percentage / 100) * circumference;
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
+        <div
+          className="relative w-5 h-5 flex items-center justify-center group/ctx cursor-default"
+          title={`Context: ${percentDisplay}% used (${usedTokens.toLocaleString()} / ${contextWindow.toLocaleString()} tokens)`}
+        >
+          <svg className="w-full h-full -rotate-90">
+            <circle
+              cx="10"
+              cy="10"
+              r={radius}
+              stroke="white"
+              strokeWidth="1.5"
+              fill="transparent"
+              strokeOpacity="0.1"
+            />
+            <circle
+              cx="10"
+              cy="10"
+              r={radius}
+              stroke="white"
+              strokeWidth="1.5"
+              fill="transparent"
+              strokeDasharray={circumference}
+              strokeDashoffset={offset}
+              strokeOpacity="0.8"
+              strokeLinecap="round"
+            />
+          </svg>
+          <div
+            className="
+              pointer-events-none absolute bottom-full right-0 mb-1.5
+              px-2 py-1 rounded-md
+              bg-[#1e1e1e] border border-white/[0.08]
+              text-[0.65rem] font-mono text-white/50
+              whitespace-nowrap
+              opacity-0 group-hover/ctx:opacity-100
+              transition-opacity duration-150
+              z-50
+            "
+          >
+            {percentDisplay}% · {usedTokens.toLocaleString()} / {contextWindow.toLocaleString()} tokens
+          </div>
+        </div>
+
+        <span
+          className="text-[0.75rem] font-medium text-neutral-500 uppercase tracking-wider truncate max-w-[140px]"
+          title={modelName}
+        >
+          {modelName}
+        </span>
+      </div>
+    </div>
+  );
+}
+src\components\Icons.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+interface IconProps {
+  active?: boolean;
+  className?: string;
+}
+
+export function FolderIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M1.5 3.5A1 1 0 0 1 2.5 2.5H6L7.5 4H13.5A1 1 0 0 1 14.5 5V12.5A1 1 0 0 1 13.5 13.5H2.5A1 1 0 0 1 1.5 12.5V3.5Z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function SendIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M8 13V3M8 3L3.5 7.5M8 3L12.5 7.5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function AskIcon({ active }: IconProps) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <circle
+        cx="8"
+        cy="8"
+        r="6.5"
+        stroke={active ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.35)"}
+        strokeWidth="1.3"
+      />
+      <path
+        d="M6.2 6.2C6.2 5.09 7.09 4.2 8 4.2C8.91 4.2 9.8 5.09 9.8 6.2C9.8 7.31 8.91 7.8 8 8V9"
+        stroke={active ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.35)"}
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
+      <circle
+        cx="8"
+        cy="11.5"
+        r="0.7"
+        fill={active ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.35)"}
+      />
+    </svg>
+  );
+}
+
+export function CodeIcon({ active }: IconProps) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M10.5 4.5L13.5 8L10.5 11.5"
+        stroke={active ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.35)"}
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5.5 4.5L2.5 8L5.5 11.5"
+        stroke={active ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.35)"}
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+src\components\InputContainer.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  useState,
+  useRef,
+  useEffect,
+  type KeyboardEvent,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
+import { FolderIcon } from "./Icons";
+import { ModeDropdown } from "./ModeDropdown";
+import type { Mode } from "../types";
+import { ContextIndicator } from "./ContextIndicator";
+import { CornerDownLeft } from "lucide-react";
+import { useProject } from "../contexts/ProjectContext";
+
+interface InputContainerProps {
+  mode: Mode;
+  setMode: (m: Mode) => void;
+  onSend: (value: string) => void;
+  usedTokens?: number;
+}
+
+export interface InputContainerHandle {
+  setValue: (text: string) => void;
+}
+
+export const InputContainer = forwardRef<
+  InputContainerHandle,
+  InputContainerProps
+>(function InputContainer({ mode, setMode, onSend, usedTokens = 0 }, ref) {
+  const [inputValue, setInputValue] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { folderPath, folderName: _folderName, selectFolder } = useProject();
+
+  const canSend = !!folderPath && !!inputValue.trim();
+
+  useImperativeHandle(ref, () => ({
+    setValue: (text: string) => {
+      setInputValue(text);
+      setTimeout(() => textareaRef.current?.focus(), 0);
+    },
+  }));
+
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 140) + "px";
+  }, [inputValue]);
+
+  const handleSend = () => {
+    if (!canSend) return;
+    onSend(inputValue);
+    setInputValue("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const folderLabel = folderPath ?? "no folder selected";
+
+  return (
+    <div className="px-5 pb-5 pt-0 w-full flex flex-col items-center">
+      <div
+        className="
+          w-full max-w-[760px]
+          rounded-xl overflow-hidden
+          bg-[#121212]
+          border border-white/[0.07]
+          shadow-[0_8px_32px_rgba(0,0,0,0.6)]
+          focus-within:border-white/[0.14]
+          transition-all duration-200
+        "
+      >
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/[0.04]">
+          <button
+            onClick={selectFolder}
+            title={folderPath ? folderPath : "Select project folder"}
+            className="
+              flex items-center gap-1.5 px-2 py-0.5 rounded-md
+              text-[0.65rem] font-mono text-white/25
+              hover:text-white/50 hover:bg-white/[0.04]
+              transition-all duration-150
+            "
+          >
+            <FolderIcon />
+            <span className="truncate max-w-[340px]">{folderLabel}</span>
+          </button>
+        </div>
+
+        <div className="flex items-start gap-2 px-3 pt-2.5 pb-2">
+          <span className="text-[0.8rem] font-mono text-white/20 mt-0.5 flex-shrink-0 select-none">
+            &gt;
+          </span>
+          <textarea
+            ref={textareaRef}
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={!folderPath}
+            placeholder={
+              folderPath ? "describe a task..." : "select a project folder first..."
+            }
+            rows={1}
+            className="
+              flex-1 resize-none bg-transparent
+              text-[0.88rem] font-mono text-white/80
+              placeholder-white/15
+              outline-none leading-relaxed
+              min-h-[26px] max-h-[140px]
+              disabled:cursor-not-allowed
+            "
+          />
+          <div className="relative group/send self-start mt-0.5">
+            <button
+              onClick={handleSend}
+              disabled={!canSend}
+              className="
+                flex-shrink-0 flex items-center gap-1
+                px-2 py-1 rounded-md
+                text-[0.65rem] font-mono text-white/25
+                hover:text-white/60 hover:bg-white/[0.06]
+                disabled:opacity-20 disabled:cursor-not-allowed
+                border border-transparent hover:border-white/[0.08]
+                disabled:hover:bg-transparent disabled:hover:border-transparent
+                transition-all duration-150
+              "
+            >
+              <CornerDownLeft size={11} />
+            </button>
+            {!folderPath && (
+              <div
+                className="
+                  pointer-events-none absolute bottom-full right-0 mb-1.5
+                  px-2 py-1 rounded-md
+                  bg-[#1e1e1e] border border-white/[0.08]
+                  text-[0.65rem] font-mono text-white/50
+                  whitespace-nowrap
+                  opacity-0 group-hover/send:opacity-100
+                  transition-opacity duration-150
+                  z-50
+                "
+              >
+                Select a project folder first
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between px-3 py-1.5 border-t border-white/[0.04] bg-black/10">
+          <ModeDropdown mode={mode} setMode={setMode} />
+          <ContextIndicator usedTokens={usedTokens} />
+        </div>
+      </div>
+    </div>
+  );
+});
+src\components\MainArea.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { type ReactNode, type RefObject } from "react";
+import { Terminal } from "lucide-react";
+import { useProject } from "../contexts/ProjectContext";
+import type { InputContainerHandle } from "./InputContainer";
+import { APP_VERSION, RELEASE_CHANNEL, CHANNEL_STYLES } from "../lib/version";
+
+interface MainAreaProps {
+  children?: ReactNode;
+  hasMessages?: boolean;
+  input?: ReactNode;
+  inputRef?: RefObject<InputContainerHandle>;
+}
+
+export function MainArea({ children, hasMessages, input, inputRef }: MainAreaProps) {
+  const { folderName } = useProject();
+
+  const displayName = folderName ?? "no project";
+
+  return (
+    <main className="flex flex-col flex-1 h-full overflow-hidden relative">
+
+      <div className="
+        h-10 flex-shrink-0 flex items-center justify-between
+        px-5 border-b border-white/[0.05] bg-[#0d0d0d]
+      ">
+        <div className="flex items-center gap-3">
+          <span className="text-[0.72rem] text-white/20 font-mono">
+            {displayName}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className={`text-[0.65rem] px-1.5 py-0.5 rounded border font-mono ${CHANNEL_STYLES[RELEASE_CHANNEL]}`}>
+            {APP_VERSION}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto relative flex flex-col scroll-smooth min-h-0">
+        {!hasMessages ? (
+          <EmptyState inputRef={inputRef} />
+        ) : (
+          <div className="w-full max-w-[780px] mx-auto flex flex-col pb-2">
+            {children}
+          </div>
+        )}
+      </div>
+
+      {input && (
+        <div className="flex-shrink-0 bg-gradient-to-t from-[#0d0d0d] via-[#0d0d0d]/95 to-transparent pt-3">
+          {input}
+        </div>
+      )}
+    </main>
+  );
+}
+
+interface EmptyStateProps {
+  inputRef?: RefObject<InputContainerHandle>;
+}
+
+const QUICK_PROMPTS = [
+  "Explain this codebase",
+  "Fix TypeScript errors",
+  "Write unit tests",
+  "Refactor for readability",
+];
+
+function EmptyState({ inputRef }: EmptyStateProps) {
+  const handleQuickPrompt = (prompt: string) => {
+    inputRef?.current?.setValue(prompt);
+  };
+
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center gap-6 pb-16 px-8">
+
+      <div className="flex flex-col items-center gap-3">
+        <div className="
+          w-10 h-10 rounded-xl bg-white/[0.05] border border-white/[0.08]
+          flex items-center justify-center
+        ">
+          <Terminal size={18} className="text-white/40" />
+        </div>
+        <div className="text-center">
+          <h1 className="text-[1.5rem] font-semibold text-white/80 leading-tight tracking-tight">
+            What are we building?
+          </h1>
+          <p className="mt-1.5 text-[0.82rem] text-white/25">
+            Describe a task, ask a question, or paste code
+          </p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 justify-center max-w-sm">
+        {QUICK_PROMPTS.map((prompt) => (
+          <button
+            key={prompt}
+            onClick={() => handleQuickPrompt(prompt)}
+            className="
+              px-3 py-1.5 rounded-lg
+              bg-white/[0.03] border border-white/[0.06]
+              text-[0.72rem] text-white/35
+              hover:bg-white/[0.06] hover:text-white/60 hover:border-white/[0.1]
+              transition-all duration-150
+            "
+          >
+            {prompt}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+src\components\MessageItem.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { motion } from "motion/react";
+import { User } from "lucide-react";
+import { ReasoningBlock } from "./ReasoningBlock";
+import { ToolCallBlock } from "./ToolCallBlock";
+import type { Message, ContentBlock, ToolCallDisplay } from "../types/message";
+
+interface MessageItemProps {
+  message: Message;
+}
+
+export function MessageItem({ message }: MessageItemProps) {
+  const isUser = message.role === "user";
+
+  if (isUser) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.15 }}
+        className="flex w-full gap-3 py-3 px-5 group"
+      >
+        <div className="flex-shrink-0 mt-0.5">
+          <div className="w-5 h-5 rounded-md bg-white/[0.07] border border-white/[0.1] flex items-center justify-center">
+            <User size={11} className="text-white/40" />
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-[0.68rem] font-mono text-white/20 mb-1 uppercase tracking-wider">
+            you
+          </div>
+          <div className="text-[0.88rem] text-white/75 leading-relaxed whitespace-pre-wrap break-words">
+            {message.content}
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
+
+  const hasBlocks = message.blocks && message.blocks.length > 0;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.15 }}
+      className="flex w-full gap-3 py-3 px-5 group"
+    >
+      <div className="flex-shrink-0 mt-0.5">
+        <div className="w-5 h-5 rounded-md bg-white flex items-center justify-center shadow-[0_0_8px_rgba(255,255,255,0.15)]">
+          <div className="w-2 h-2 bg-black rounded-full" />
+        </div>
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <div className="text-[0.68rem] font-mono text-white/20 mb-1 uppercase tracking-wider">
+          nanocode
+        </div>
+
+        {hasBlocks ? (
+          <BlocksRenderer blocks={message.blocks!} />
+        ) : (
+          <>
+            {(message.reasoning || message.isReasoningStreaming) && (
+              <ReasoningBlock
+                content={message.reasoning ?? ""}
+                isStreaming={message.isReasoningStreaming}
+              />
+            )}
+
+            {message.toolCalls && message.toolCalls.length > 0 && (
+              <div className="space-y-2 mb-2">
+                {message.toolCalls.map((tc) => (
+                  <ToolCallBlock key={tc.id} toolCall={tc} />
+                ))}
+              </div>
+            )}
+
+            {message.content ? (
+              <div className="text-[0.88rem] text-white/70 leading-relaxed whitespace-pre-wrap break-words">
+                {message.content}
+                {message.isStreaming && (
+                  <span className="inline-block w-0.5 h-3.5 bg-white/40 ml-0.5 align-middle animate-pulse" />
+                )}
+              </div>
+            ) : message.isStreaming && !message.isReasoningStreaming ? (
+              <div className="flex gap-1 items-center h-5">
+                {[0, 0.15, 0.3].map((delay, i) => (
+                  <span
+                    key={i}
+                    className="w-1 h-1 rounded-full bg-white/30 animate-pulse"
+                    style={{ animationDelay: `${delay}s` }}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+function BlocksRenderer({ blocks }: { blocks: ContentBlock[] }) {
+  const toolResultMap = new Map<string, { status: string; result?: string }>();
+  for (const block of blocks) {
+    if (block.type === "tool_result") {
+      toolResultMap.set(block.callId, {
+        status: block.status,
+        result: block.result,
+      });
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      {blocks.map((block, i) => {
+        switch (block.type) {
+          case "reasoning":
+            return (
+              <ReasoningBlock
+                key={i}
+                content={block.content}
+                isStreaming={block.streaming}
+              />
+            );
+          case "text":
+            return (
+              <div
+                key={i}
+                className="text-[0.88rem] text-white/70 leading-relaxed whitespace-pre-wrap break-words"
+              >
+                {block.content}
+                {block.streaming && (
+                  <span className="inline-block w-0.5 h-3.5 bg-white/40 ml-0.5 align-middle animate-pulse" />
+                )}
+              </div>
+            );
+          case "tool_call": {
+            const resultInfo = toolResultMap.get(block.call.id);
+            return (
+              <ToolCallBlock
+                key={block.call.id}
+                toolCall={block.call}
+                statusOverride={resultInfo?.status as ToolCallDisplay["status"]}
+                resultOverride={resultInfo?.result}
+              />
+            );
+          }
+          case "tool_result":
+            return null;
+          default:
+            return null;
+        }
+      })}
+    </div>
+  );
+}
+src\components\ModeDropdown.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useState, useRef, useEffect } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { ChevronDown, MessageSquare, Code } from "lucide-react";
+
+import type { Mode } from "../types";
+
+interface ModeDropdownProps {
+  mode: Mode;
+  setMode: (m: Mode) => void;
+}
+
+export function ModeDropdown({ mode, setMode }: ModeDropdownProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const modes: Mode[] = ["Ask", "Code"];
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="
+          flex items-center gap-1.5
+          px-2 py-1 rounded-md
+          bg-white/[0.03] border border-white/[0.05]
+          text-[0.72rem] font-medium text-neutral-400
+          hover:bg-white/[0.06] hover:text-neutral-200
+          transition-all duration-150
+        "
+      >
+        {mode === "Ask" ? (
+          <MessageSquare size={12} className="opacity-70" />
+        ) : (
+          <Code size={12} className="opacity-70" />
+        )}
+        <span>{mode}</span>
+        <ChevronDown 
+          size={10} 
+          className={`opacity-50 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} 
+        />
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 4, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.95 }}
+            className="
+              absolute bottom-full left-0 mb-1.5
+              w-28 bg-[#1a1a1a] border border-[#2e2e2e]
+              rounded-lg shadow-2xl p-1 z-50
+            "
+          >
+            {modes.map((m) => (
+              <button
+                key={m}
+                onClick={() => {
+                  setMode(m);
+                  setIsOpen(false);
+                }}
+                className={`
+                  w-full flex items-center gap-2 px-2 py-1.5 rounded-md 
+                  text-[0.72rem] transition-colors
+                  ${mode === m 
+                    ? "bg-white/[0.08] text-white" 
+                    : "text-neutral-400 hover:bg-white/[0.04] hover:text-white/80"
+                  }
+                `}
+              >
+                {m === "Ask" ? <MessageSquare size={12} /> : <Code size={12} />}
+                {m}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+src\components\ReasoningBlock.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useState } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { ChevronDown, Brain } from "lucide-react";
+
+interface ReasoningBlockProps {
+  content: string;
+  isStreaming?: boolean;
+}
+
+export function ReasoningBlock({ content, isStreaming = false }: ReasoningBlockProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="
+          flex items-center gap-2 px-2 py-1 rounded-lg
+          text-[0.67rem] font-mono text-white/25
+          hover:text-white/50 hover:bg-white/[0.04]
+          transition-all duration-150
+        "
+      >
+        <Brain
+          size={11}
+          className={
+            isStreaming ? "animate-pulse text-violet-400/60" : "text-white/20"
+          }
+        />
+        <span>{isStreaming ? "Thinking..." : "Reasoning"}</span>
+        <ChevronDown
+          size={10}
+          className={`opacity-50 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.18 }}
+            className="overflow-hidden"
+          >
+            <div
+              className="
+                mt-1 ml-2 pl-3 border-l border-violet-500/20
+                text-[0.75rem] text-white/30 font-mono leading-relaxed
+                whitespace-pre-wrap break-words max-h-60 overflow-y-auto
+              "
+            >
+              {content}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+src\components\Sidebar.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useState } from "react";
+import { Plus, Settings, Trash2 } from "lucide-react";
+import { useProject } from "../contexts/ProjectContext";
+import type { SessionMeta } from "../types/session";
+import { formatRelativeTime } from "../lib/utils";
+
+interface SidebarProps {
+  onSettingsClick: () => void;
+  onNewSession: () => void;
+  onOpenSession: (id: string) => void;
+  onDeleteSession: (id: string) => void;
+  sessionList: SessionMeta[];
+  activeSessionId: string | null;
+  isLoadingList: boolean;
+}
+
+export function Sidebar({
+  onSettingsClick,
+  onNewSession,
+  onOpenSession,
+  onDeleteSession,
+  sessionList,
+  activeSessionId,
+  isLoadingList,
+}: SidebarProps) {
+  const { folderPath } = useProject();
+  const hasProject = !!folderPath;
+
+  return (
+    <aside className="w-[210px] min-w-[210px] h-full bg-[#0f0f0f] border-r border-white/[0.05] flex flex-col overflow-hidden">
+      {hasProject && (
+        <div className="px-3 py-3">
+          <button
+            onClick={onNewSession}
+            className="
+              w-full flex items-center gap-2 px-3 py-2
+              rounded-lg bg-white/[0.04] border border-white/[0.06]
+              text-[0.75rem] text-white/50 hover:text-white/80
+              hover:bg-white/[0.07] hover:border-white/[0.1]
+              transition-all duration-150 group
+            "
+          >
+            <Plus size={13} className="opacity-50 group-hover:opacity-80" />
+            New session
+          </button>
+        </div>
+      )}
+
+      {hasProject && <div className="mx-3 border-t border-white/[0.04]" />}
+
+      <div className="flex-1 overflow-y-auto py-2 px-2 space-y-0.5">
+        {hasProject ? (
+          <>
+            <div className="px-2 py-1.5">
+              <span className="text-[0.6rem] font-semibold text-white/20 uppercase tracking-[0.15em]">
+                Recent
+              </span>
+            </div>
+
+            {isLoadingList && (
+              <div className="px-2 py-3 text-[0.65rem] text-white/15 font-mono">
+                loading...
+              </div>
+            )}
+
+            {!isLoadingList && sessionList.length === 0 && (
+              <div className="px-2 py-3 text-[0.65rem] text-white/15 font-mono">
+                no sessions yet
+              </div>
+            )}
+
+            {sessionList.map((s) => (
+              <SessionRow
+                key={s.id}
+                session={s}
+                isActive={s.id === activeSessionId}
+                onOpen={() => onOpenSession(s.id)}
+                onDelete={() => onDeleteSession(s.id)}
+              />
+            ))}
+          </>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full pb-8 gap-2">
+            <span className="text-[0.65rem] font-mono text-white/15 text-center leading-relaxed px-4">
+              Select a project<br />to see sessions
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="px-3 py-3 border-t border-white/[0.04]">
+        <button
+          onClick={onSettingsClick}
+          className="
+            w-full flex items-center gap-2 px-2.5 py-2 rounded-lg
+            text-[0.72rem] text-white/30 hover:text-white/60
+            hover:bg-white/[0.04] transition-all duration-150
+          "
+        >
+          <Settings size={13} />
+          Settings
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+interface SessionRowProps {
+  session: SessionMeta;
+  isActive: boolean;
+  onOpen: () => void;
+  onDelete: () => void;
+}
+
+function SessionRow({ session, isActive, onOpen, onDelete }: SessionRowProps) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const timeLabel = formatRelativeTime(session.createdAt);
+
+  return (
+    <div
+      className={`
+        group/row w-full flex items-start gap-1
+        px-2.5 py-2 rounded-lg transition-all duration-100 cursor-pointer
+        ${
+          isActive
+            ? "bg-white/[0.07] text-white/90"
+            : "text-white/40 hover:bg-white/[0.04] hover:text-white/70"
+        }
+      `}
+      onClick={() => !confirmDelete && onOpen()}
+    >
+      <div className="flex-1 min-w-0">
+        <div className="text-[0.75rem] font-medium truncate leading-snug">
+          {session.name}
+        </div>
+        <div className="text-[0.62rem] text-white/20">{timeLabel}</div>
+      </div>
+
+      {confirmDelete ? (
+        <div
+          className="flex items-center gap-1 flex-shrink-0"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => onDelete()}
+            className="text-[0.6rem] text-red-400/80 hover:text-red-400 px-1"
+          >
+            del
+          </button>
+          <button
+            onClick={() => setConfirmDelete(false)}
+            className="text-[0.6rem] text-white/25 hover:text-white/50 px-1"
+          >
+            ✕
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setConfirmDelete(true);
+          }}
+          className="
+            flex-shrink-0 p-0.5 rounded
+            text-white/0 group-hover/row:text-white/20
+            hover:!text-white/50 hover:bg-white/[0.06]
+            transition-all duration-100
+          "
+        >
+          <Trash2 size={11} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+src\components\TitleBar.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import type { CSSProperties } from "react";
+
+const WINDOW_ACTIONS = {
+  minimize: () => window.electronAPI?.minimize(),
+  maximize: () => window.electronAPI?.maximize(),
+  close: () => window.electronAPI?.close(),
+} as const;
+
+const WINDOW_BUTTONS: Array<{
+  label: string;
+  action: keyof typeof WINDOW_ACTIONS;
+  hover: string;
+}> = [
+  { label: "−", action: "minimize", hover: "hover:bg-white/[0.08]" },
+  { label: "□", action: "maximize", hover: "hover:bg-white/[0.08]" },
+  { label: "×", action: "close", hover: "hover:bg-red-500/60" },
+];
+
+export function TitleBar() {
+  const isElectron = typeof window !== "undefined" && !!window.electronAPI;
+
+  return (
+    <div
+      className="
+        h-9 flex items-center justify-between
+        px-3 bg-[#0a0a0a] border-b border-white/[0.04]
+        select-none
+      "
+      style={{ WebkitAppRegion: "drag" } as CSSProperties}
+    >
+      <div className="flex items-center gap-2">
+        <div className="w-3.5 h-3.5 bg-white rounded-[3px] flex items-center justify-center">
+          <div className="w-1.5 h-1.5 bg-black rounded-full" />
+        </div>
+        <span className="text-[0.65rem] font-bold tracking-[0.25em] text-white/40 uppercase">
+          NanoCode
+        </span>
+      </div>
+
+      {isElectron && (
+        <div
+          className="flex items-center gap-1"
+          style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
+        >
+          {WINDOW_BUTTONS.map(({ label, action, hover }) => (
+            <button
+              key={action}
+              onClick={WINDOW_ACTIONS[action]}
+              className={`
+                w-7 h-6 flex items-center justify-center
+                text-[0.75rem] text-white/30 hover:text-white/80
+                rounded transition-colors duration-100 ${hover}
+              `}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+src\components\ToolCallBlock.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { motion } from "motion/react";
+import { AlertTriangle, File, Loader2, Search, Wrench } from "lucide-react";
+import type { ToolCallDisplay } from "../types/message";
+
+interface ToolCallBlockProps {
+  toolCall: ToolCallDisplay;
+  statusOverride?: ToolCallDisplay["status"];
+  resultOverride?: string;
+}
+
+export function ToolCallBlock({ toolCall, statusOverride, resultOverride }: ToolCallBlockProps) {
+  const { name } = toolCall;
+
+  if (name === "Glob") {
+    return <GlobBlock toolCall={toolCall} statusOverride={statusOverride} resultOverride={resultOverride} />;
+  }
+
+  return <GenericToolBlock toolCall={toolCall} statusOverride={statusOverride} resultOverride={resultOverride} />;
+}
+
+function GlobBlock({
+  toolCall,
+  statusOverride,
+  resultOverride,
+}: {
+  toolCall: ToolCallDisplay;
+  statusOverride?: ToolCallDisplay["status"];
+  resultOverride?: string;
+}) {
+  const { arguments: args } = toolCall;
+  const pattern = args.pattern as string | undefined;
+  const path = args.path as string | undefined;
+
+  const effectiveStatus = statusOverride ?? toolCall.status;
+  const effectiveResult = resultOverride ?? toolCall.result;
+
+  const searching = effectiveStatus === "pending" || effectiveStatus === "running";
+
+  const patternDisplay = pattern ?? "";
+  const pathDisplay = path ? ` in ${path}/` : "";
+  const verb = searching
+    ? `Searching for ${patternDisplay}${pathDisplay}`
+    : `Searched for ${patternDisplay}${pathDisplay}`;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="my-2 rounded-lg bg-[#0f0f0f] border border-white/[0.06] overflow-hidden"
+    >
+      <div className="flex items-center gap-2 px-3 py-2 text-[0.7rem] text-white/40">
+        {searching ? (
+          <Loader2 size={12} className="animate-spin text-white/30" />
+        ) : (
+          <Search size={12} className="text-white/30" />
+        )}
+        <span>{verb}</span>
+      </div>
+
+      {effectiveStatus !== "pending" && effectiveStatus !== "running" && effectiveResult !== undefined && (
+        <div className="border-t border-white/[0.06] mx-3" />
+      )}
+
+      {effectiveStatus === "success" && effectiveResult !== undefined && (
+        <div className="px-3 pb-2 pt-1.5 text-[0.75rem] font-mono leading-relaxed text-white/60">
+          {renderGlobResult(effectiveResult)}
+        </div>
+      )}
+
+      {effectiveStatus === "error" && effectiveResult !== undefined && (
+        <div className="px-3 pb-2 pt-1.5 text-[0.75rem] text-red-400/80 flex items-start gap-1.5">
+          <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
+          <span>{formatGlobError(effectiveResult)}</span>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function renderGlobResult(rawOutput: string) {
+  const lines = rawOutput.trim().split("\n").filter(Boolean);
+  if (lines.length === 0 || rawOutput === "No files found") {
+    return <div className="text-white/30 italic">No files found matching the pattern.</div>;
+  }
+
+  const lastLine = lines[lines.length - 1];
+  const truncated = lastLine.startsWith("(Results are truncated");
+  const fileLines = truncated ? lines.slice(0, -1) : lines;
+
+  const SHOW_MAX = 10;
+  const visible = fileLines.slice(0, SHOW_MAX);
+  const hidden = fileLines.length - visible.length;
+
+  return (
+    <div className="space-y-0.5">
+      {visible.map((file, i) => (
+        <div key={i} className="flex items-center gap-1.5">
+          <File size={11} className="text-white/20 flex-shrink-0" />
+          <span className="truncate">{file}</span>
+        </div>
+      ))}
+      {hidden > 0 && (
+        <div className="text-white/25 pl-4 mt-1 text-[0.65rem]">
+          ... and {hidden} more files
+        </div>
+      )}
+      {truncated && (
+        <div className="text-white/25 pl-4 mt-1 text-[0.65rem]">
+          Results truncated, try narrowing the pattern or path.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatGlobError(errorText: string): string {
+  if (errorText.includes("<tool_use_error>")) {
+    const match = errorText.match(/<tool_use_error>(.*?)<\/tool_use_error>/s);
+    return match?.[1] ?? errorText;
+  }
+  return errorText;
+}
+
+function GenericToolBlock({
+  toolCall,
+  statusOverride,
+  resultOverride,
+}: {
+  toolCall: ToolCallDisplay;
+  statusOverride?: ToolCallDisplay["status"];
+  resultOverride?: string;
+}) {
+  const { name } = toolCall;
+  const effectiveStatus = statusOverride ?? toolCall.status;
+  const effectiveResult = resultOverride ?? toolCall.result;
+  const running = effectiveStatus === "running";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="my-2 rounded-lg bg-[#0f0f0f] border border-white/[0.06] p-3"
+    >
+      <div className="flex items-center gap-2 text-[0.7rem] text-white/40 mb-1">
+        <Wrench size={12} />
+        <span>{name}</span>
+        {running && <Loader2 size={12} className="animate-spin ml-auto" />}
+      </div>
+      {effectiveResult && (
+        <pre className="text-[0.7rem] text-white/50 font-mono whitespace-pre-wrap break-all mt-1">
+          {effectiveResult}
+        </pre>
+      )}
+    </motion.div>
+  );
+}
+src\contexts\ProjectContext.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  type ReactNode,
+} from "react";
+import { pathToProjectKey } from "../lib/paths";
+
+interface ProjectContextValue {
+  folderPath: string | null;
+  folderName: string | null;
+  projectKey: string | null;
+  selectFolder: () => Promise<void>;
+  clearFolder: () => void;
+}
+
+const ProjectContext = createContext<ProjectContextValue | null>(null);
+
+export function ProjectProvider({ children }: { children: ReactNode }) {
+  const [folderPath, setFolderPath] = useState<string | null>(null);
+
+  const folderName = folderPath
+    ? folderPath.replace(/\\/g, "/").split("/").filter(Boolean).at(-1) ?? null
+    : null;
+
+  const projectKey = folderPath ? pathToProjectKey(folderPath) : null;
+
+  const selectFolder = useCallback(async () => {
+    try {
+      const result = await window.electronAPI!.selectFolder!();
+      if (result) setFolderPath(result);
+    } catch (err) {
+      console.error("[ProjectContext] selectFolder error:", err);
+    }
+  }, []);
+
+  const clearFolder = useCallback(() => {
+    setFolderPath(null);
+  }, []);
+
+  return (
+    <ProjectContext.Provider
+      value={{ folderPath, folderName, projectKey, selectFolder, clearFolder }}
+    >
+      {children}
+    </ProjectContext.Provider>
+  );
+}
+
+export function useProject() {
+  const ctx = useContext(ProjectContext);
+  if (!ctx) throw new Error("useProject must be used inside ProjectProvider");
+  return ctx;
+}
+
+src\contexts\ProvidersContext.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  type ReactNode,
+} from "react";
+import {
+  type ProvidersStore,
+  type Provider,
+  createProvider,
+  updateProvider,
+  deleteProvider,
+  setActiveProvider,
+  getActiveProvider,
+} from "../lib/providers";
+import { loadProviders, saveProviders } from "../lib/providersIO";
+
+interface ProvidersContextValue {
+  store: ProvidersStore;
+  activeProvider: Provider | null;
+  isLoading: boolean;
+  addProvider: (p: Omit<Provider, "id">) => void;
+  editProvider: (id: string, patch: Partial<Omit<Provider, "id">>) => void;
+  removeProvider: (id: string) => void;
+  switchProvider: (id: string) => void;
+}
+
+const ProvidersContext = createContext<ProvidersContextValue | null>(null);
+
+export function ProvidersProvider({ children }: { children: ReactNode }) {
+  const [store, setStore] = useState<ProvidersStore>({
+    providers: {},
+    activeProviderId: null,
+  });
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    loadProviders().then((s) => {
+      setStore(s);
+      setIsLoading(false);
+    });
+  }, []);
+
+  const update = useCallback(
+    (updater: (s: ProvidersStore) => ProvidersStore) => {
+      setStore((prev) => {
+        const next = updater(prev);
+        saveProviders(next);
+        return next;
+      });
+    },
+    []
+  );
+
+  const addProvider = useCallback(
+    (p: Omit<Provider, "id">) => {
+      update((s) => createProvider(s, p));
+    },
+    [update]
+  );
+
+  const editProvider = useCallback(
+    (id: string, patch: Partial<Omit<Provider, "id">>) => {
+      update((s) => updateProvider(s, id, patch));
+    },
+    [update]
+  );
+
+  const removeProvider = useCallback(
+    (id: string) => {
+      update((s) => deleteProvider(s, id));
+    },
+    [update]
+  );
+
+  const switchProvider = useCallback(
+    (id: string) => {
+      update((s) => setActiveProvider(s, id));
+    },
+    [update]
+  );
+
+  return (
+    <ProvidersContext.Provider
+      value={{
+        store,
+        activeProvider: getActiveProvider(store),
+        isLoading,
+        addProvider,
+        editProvider,
+        removeProvider,
+        switchProvider,
+      }}
+    >
+      {children}
+    </ProvidersContext.Provider>
+  );
+}
+
+export function useProviders() {
+  const ctx = useContext(ProvidersContext);
+  if (!ctx) throw new Error("useProviders must be used inside ProvidersProvider");
+  return ctx;
+}
+src\contexts\SessionContext.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  type ReactNode,
+} from "react";
+import type { SessionData, SessionMeta } from "../types/session";
+import {
+  createNewSession,
+  sessionRepository,
+} from "../lib/sessions/index";
+import { useProject } from "./ProjectContext";
+
+interface SessionContextValue {
+  activeSession: SessionData | null;
+  sessionList: SessionMeta[];
+  isLoadingList: boolean;
+  startNewSession: () => Promise<void>;
+  openSession: (id: string) => Promise<void>;
+  updateSession: (updated: SessionData) => void;
+  initSession: (projectPath: string) => SessionData;
+  reloadList: () => Promise<void>;
+  removeSession: (id: string) => Promise<void>;
+  getActiveSessionSnapshot: () => SessionData | null;
+  onSessionSaveError: (error: unknown) => void;
+}
+
+const SessionContext = createContext<SessionContextValue | null>(null);
+
+export function SessionProvider({ children }: { children: ReactNode }) {
+  const { projectKey } = useProject();
+
+  const [activeSession, setActiveSession] = useState<SessionData | null>(null);
+  const [sessionList, setSessionList] = useState<SessionMeta[]>([]);
+  const [isLoadingList, setIsLoadingList] = useState(false);
+
+  const activeSessionRef = useRef<SessionData | null>(null);
+  activeSessionRef.current = activeSession;
+
+  const projectKeyRef = useRef<string | null>(null);
+  projectKeyRef.current = projectKey;
+  const isMountedRef = useRef(true);
+
+  const onSessionSaveError = useCallback((error: unknown) => {
+    console.error("[sessions] save error:", error);
+    // TODO: surface this through non-blocking UI notification.
+  }, []);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setActiveSession(null);
+    setSessionList([]);
+    if (!projectKey) return;
+
+    setIsLoadingList(true);
+    sessionRepository
+      .list(projectKey)
+      .then((list) => {
+        if (!cancelled && isMountedRef.current) {
+          setSessionList(list);
+        }
+      })
+      .finally(() => {
+        if (!cancelled && isMountedRef.current) {
+          setIsLoadingList(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectKey]);
+
+  const reloadList = useCallback(async () => {
+    const key = projectKeyRef.current;
+    if (!key) return;
+    const list = await sessionRepository.list(key);
+    if (isMountedRef.current) {
+      setSessionList(list);
+    }
+  }, []);
+
+  const startNewSession = useCallback(async () => {
+    const current = activeSessionRef.current;
+    const key = projectKeyRef.current;
+
+    if (current && key && current.messages.length > 0) {
+      try {
+        await sessionRepository.save(key, current);
+      } catch (error) {
+        onSessionSaveError(error);
+      }
+    }
+
+    if (isMountedRef.current) {
+      setActiveSession(null);
+    }
+  }, [onSessionSaveError]);
+
+  const openSession = useCallback(async (id: string) => {
+    const key = projectKeyRef.current;
+    if (!key) return;
+    const session = await sessionRepository.load(key, id);
+    if (session && isMountedRef.current) {
+      setActiveSession(session);
+    }
+  }, []);
+
+  const initSession = useCallback((projectPath: string): SessionData => {
+    const session = createNewSession(projectPath);
+    setActiveSession(session);
+    return session;
+  }, []);
+
+  const updateSession = useCallback((updated: SessionData) => {
+    activeSessionRef.current = updated;
+    setActiveSession(updated);
+    setSessionList((prev) => {
+      const meta: SessionMeta = {
+        id: updated.id,
+        name: updated.name,
+        createdAt: updated.createdAt,
+        projectPath: updated.projectPath,
+      };
+      const idx = prev.findIndex((s) => s.id === updated.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = meta;
+        return next;
+      }
+      return [meta, ...prev];
+    });
+  }, []);
+
+  const removeSession = useCallback(
+    async (id: string) => {
+      const key = projectKeyRef.current;
+      if (!key) return;
+      await sessionRepository.delete(key, id);
+      if (!isMountedRef.current) return;
+      setSessionList((prev) => prev.filter((s) => s.id !== id));
+      if (activeSessionRef.current?.id === id) setActiveSession(null);
+    },
+    []
+  );
+
+  return (
+    <SessionContext.Provider
+      value={{
+        activeSession,
+        sessionList,
+        isLoadingList,
+        startNewSession,
+        openSession,
+        updateSession,
+        initSession,
+        reloadList,
+        removeSession,
+        getActiveSessionSnapshot: () => activeSessionRef.current,
+        onSessionSaveError,
+      }}
+    >
+      {children}
+    </SessionContext.Provider>
+  );
+}
+
+export function useSession() {
+  const ctx = useContext(SessionContext);
+  if (!ctx) throw new Error("useSession must be used inside SessionProvider");
+  return ctx;
+}
+
+src\hooks\useAbortController.ts
+import { useCallback, useRef } from "react";
+
+export function useAbortController() {
+  const abortRef = useRef<AbortController | null>(null);
+
+  const replaceActiveController = useCallback(() => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    return controller;
+  }, []);
+
+  const abortActiveRequest = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  const resetAbortController = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  }, []);
+
+  return {
+    replaceActiveController,
+    abortActiveRequest,
+    resetAbortController,
+  };
+}
+
+src\hooks\useAgent.ts
+import { useRef, useCallback, useState } from "react";
+import type { Mode } from "../types";
+import { useProviders } from "../contexts/ProvidersContext";
+import { useProject } from "../contexts/ProjectContext";
+import { useSession } from "../contexts/SessionContext";
+import { runAgentStream } from "../lib/agentLoop";
+import { useAbortController } from "./useAbortController";
+import { useMessageStream } from "./useMessageStream";
+import { buildChatHistory } from "../lib/chatHistory";
+import { useSessionPersist } from "./useSessionPersist";
+import type { StoredMessage } from "../types/session";
+
+export function useAgent() {
+  const { activeProvider } = useProviders();
+  const { folderPath, folderName, projectKey } = useProject();
+  const {
+    activeSession,
+    initSession,
+    getActiveSessionSnapshot,
+  } = useSession();
+
+  const [mode, setMode] = useState<Mode>("Ask");
+  const {
+    messages,
+    setMessages,
+    isTyping,
+    setIsTyping,
+    usedTokens,
+    setUsedTokens,
+    addPendingTurn,
+    updateMsg,
+    appendReasoningChunk,
+    appendContentChunk,
+    addToolCall,
+    updateToolCallStatus,
+    appendBlock,
+    resetMessageStream,
+  } = useMessageStream(activeSession);
+  const { replaceActiveController, abortActiveRequest, resetAbortController } =
+    useAbortController();
+  const { startSessionNameGeneration, persistCompletedTurn } =
+    useSessionPersist();
+
+  const projectKeyRef = useRef<string | null>(null);
+  projectKeyRef.current = projectKey;
+
+  const activeProviderRef = useRef(activeProvider);
+  activeProviderRef.current = activeProvider;
+
+  const folderPathRef = useRef(folderPath);
+  folderPathRef.current = folderPath;
+
+  const folderNameRef = useRef(folderName);
+  folderNameRef.current = folderName;
+
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+
+  const handleSend = useCallback(
+    async (value: string) => {
+      const fp = folderPathRef.current;
+      const pk = projectKeyRef.current;
+      const ap = activeProviderRef.current;
+
+      if (!value.trim() || !fp || !pk) return;
+
+      const controller = replaceActiveController();
+      const sendTs = Date.now();
+      const isFirstMessage = !getActiveSessionSnapshot();
+      const session = getActiveSessionSnapshot() ?? initSession(fp);
+      const assistantId = addPendingTurn(value, sendTs);
+      setIsTyping(true);
+
+      if (!ap) {
+        setTimeout(() => {
+          updateMsg(assistantId, {
+            content: "⚠ No provider configured. Please add one in Settings.",
+            isStreaming: false,
+          });
+          setIsTyping(false);
+        }, 300);
+        return;
+      }
+
+      startSessionNameGeneration({
+        isFirstMessage,
+        sessionId: session.id,
+        sessionName: session.name,
+        provider: ap,
+        firstUserMessage: value,
+      });
+
+      const history = buildChatHistory({
+        cwd: fp,
+        projectName: folderNameRef.current ?? fp,
+        mode: modeRef.current,
+        sessionMessages: session.messages,
+        userInput: value,
+      });
+
+      let assistantContent = "";
+      let assistantReasoning = "";
+      const turnMessages: StoredMessage[] = [];
+
+      runAgentStream(
+        ap,
+        history,
+        {
+          onReasoningChunk: (chunk) => {
+            assistantReasoning += chunk;
+            appendReasoningChunk(assistantId, chunk);
+            appendBlock(assistantId, { type: "reasoning", content: chunk, streaming: true });
+          },
+          onContentChunk: (chunk) => {
+            assistantContent += chunk;
+            appendContentChunk(assistantId, chunk);
+            appendBlock(assistantId, { type: "text", content: chunk, streaming: true });
+          },
+          onToolCallStart: (id, name) => {
+            const toolCall = {
+              id,
+              name,
+              arguments: {},
+              status: "pending" as const,
+            };
+            addToolCall(assistantId, toolCall);
+            appendBlock(assistantId, { type: "tool_call", call: toolCall });
+          },
+          onToolCallDone: (id, args) => {
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId) return m;
+
+                let parsedArgs: Record<string, unknown> = {};
+                try {
+                  parsedArgs = JSON.parse(args);
+                } catch {
+                  parsedArgs = { raw: args };
+                }
+
+                const updatedToolCalls = m.toolCalls?.map((tc) =>
+                  tc.id === id ? { ...tc, arguments: parsedArgs } : tc
+                );
+
+                const updatedBlocks = m.blocks?.map((b) => {
+                  if (b.type === "tool_call" && b.call.id === id) {
+                    return { ...b, call: { ...b.call, arguments: parsedArgs } };
+                  }
+                  return b;
+                });
+
+                return { ...m, toolCalls: updatedToolCalls, blocks: updatedBlocks };
+              })
+            );
+          },
+          onAssistantMessageWithTools: (content, toolCalls) => {
+            turnMessages.push({
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content,
+              tool_calls: toolCalls,
+              reasoning: assistantReasoning || undefined,
+              ts: Date.now(),
+            });
+          },
+          onToolExecutionStart: (id) => {
+            updateToolCallStatus(assistantId, id, "running");
+            appendBlock(assistantId, { type: "tool_result", callId: id, status: "running" });
+          },
+          onToolExecutionDone: (id, result) => {
+            updateToolCallStatus(assistantId, id, "success", result);
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId || !m.toolCalls) return m;
+                const blocks = m.blocks ?? [];
+                const lastBlockIdx = blocks.length - 1;
+                if (lastBlockIdx >= 0 && blocks[lastBlockIdx].type === "tool_result" && (blocks[lastBlockIdx] as { callId: string }).callId === id) {
+                  const updatedBlocks = [...blocks];
+                  updatedBlocks[lastBlockIdx] = { type: "tool_result", callId: id, status: "success", result };
+                  return { ...m, blocks: updatedBlocks };
+                }
+                return m;
+              })
+            );
+            const toolCall = turnMessages
+              .flatMap((m) => m.tool_calls ?? [])
+              .find((tc) => tc.id === id);
+
+            if (!toolCall) {
+              return;
+            }
+
+            turnMessages.push({
+              id: crypto.randomUUID(),
+              role: "tool",
+              content: result,
+              tool_call_id: id,
+              name: toolCall.function.name,
+              ts: Date.now(),
+            });
+          },
+          onToolExecutionError: (id, error) => {
+            updateToolCallStatus(assistantId, id, "error", error);
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId || !m.toolCalls) return m;
+                const blocks = m.blocks ?? [];
+                const lastBlockIdx = blocks.length - 1;
+                if (lastBlockIdx >= 0 && blocks[lastBlockIdx].type === "tool_result" && (blocks[lastBlockIdx] as { callId: string }).callId === id) {
+                  const updatedBlocks = [...blocks];
+                  updatedBlocks[lastBlockIdx] = { type: "tool_result", callId: id, status: "error", result: error };
+                  return { ...m, blocks: updatedBlocks };
+                }
+                return m;
+              })
+            );
+            const toolCall = turnMessages
+              .flatMap((m) => m.tool_calls ?? [])
+              .find((tc) => tc.id === id);
+
+            if (!toolCall) {
+              return;
+            }
+
+            turnMessages.push({
+              id: crypto.randomUUID(),
+              role: "tool",
+              content: error,
+              tool_call_id: id,
+              name: toolCall.function.name,
+              ts: Date.now(),
+            });
+          },
+          onUsage: (prompt, completion) => setUsedTokens(prompt + completion),
+          onError: (err) => {
+            updateMsg(assistantId, {
+              content: `⚠ Error: ${err.message}`,
+              isStreaming: false,
+              isReasoningStreaming: false,
+            });
+            setIsTyping(false);
+          },
+          onDone: async () => {
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId) return m;
+                const blocks = m.blocks ?? [];
+                const updatedBlocks = blocks.map((b) => {
+                  if (b.type === "reasoning") return { ...b, streaming: false };
+                  if (b.type === "text") return { ...b, streaming: false };
+                  return b;
+                });
+                return { ...m, blocks: updatedBlocks, isStreaming: false, isReasoningStreaming: false };
+              })
+            );
+            setIsTyping(false);
+
+            await persistCompletedTurn({
+              projectKey: projectKeyRef.current,
+              sessionId: session.id,
+              userInput: value,
+              sendTs,
+              assistantContent,
+              assistantReasoning,
+              turnMessages,
+            });
+          },
+        },
+        fp,
+        controller.signal
+      );
+    },
+    [
+      addPendingTurn,
+      appendContentChunk,
+      appendReasoningChunk,
+      addToolCall,
+      updateToolCallStatus,
+      appendBlock,
+      getActiveSessionSnapshot,
+      initSession,
+      persistCompletedTurn,
+      replaceActiveController,
+      setUsedTokens,
+      setIsTyping,
+      setMessages,
+      startSessionNameGeneration,
+      updateMsg,
+    ]
+  );
+
+  const resetAgentUi = useCallback(() => {
+    resetAbortController();
+    resetMessageStream();
+  }, [resetAbortController, resetMessageStream]);
+
+  return {
+    mode,
+    setMode,
+    messages,
+    isTyping,
+    usedTokens,
+    handleSend,
+    resetAgentUi,
+    abortActiveRequest,
+  };
+}
+src\hooks\useMessageStream.ts
+import { useCallback, useState } from "react";
+import type { Message, ToolCallDisplay, ContentBlock } from "../types/message";
+import type { SessionData } from "../types/session";
+import { useSessionRestore } from "./useSessionRestore";
+
+export function useMessageStream(activeSession: SessionData | null) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isTyping, setIsTyping] = useState(false);
+  const [usedTokens, setUsedTokens] = useState(0);
+
+  const addPendingTurn = useCallback((value: string, sendTs: number) => {
+    const userMsgId = `${sendTs}-user`;
+    const assistantId = `${sendTs + 1}-assistant`;
+
+    setMessages((prev) => [
+      ...prev,
+      { id: userMsgId, role: "user", content: value },
+      {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        reasoning: "",
+        isStreaming: true,
+        isReasoningStreaming: false,
+        blocks: [],
+      },
+    ]);
+
+    return assistantId;
+  }, []);
+
+  const updateMsg = useCallback(
+    (id: string, patch: Partial<Message>) =>
+      setMessages((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, ...patch } : m))
+      ),
+    []
+  );
+
+  const appendReasoningChunk = useCallback((id: string, chunk: string) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === id
+          ? {
+              ...m,
+              reasoning: (m.reasoning ?? "") + chunk,
+              isReasoningStreaming: true,
+            }
+          : m
+      )
+    );
+  }, []);
+
+  const appendContentChunk = useCallback((id: string, chunk: string) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === id
+          ? {
+              ...m,
+              content: (m.content ?? "") + chunk,
+              isReasoningStreaming: false,
+              isStreaming: true,
+            }
+          : m
+      )
+    );
+  }, []);
+
+  const addToolCall = useCallback(
+    (msgId: string, call: ToolCallDisplay) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId
+            ? {
+                ...m,
+                toolCalls: [...(m.toolCalls ?? []), call],
+              }
+            : m
+        )
+      );
+    },
+    []
+  );
+
+  const updateToolCallStatus = useCallback(
+    (
+      msgId: string,
+      callId: string,
+      status: ToolCallDisplay["status"],
+      result?: string
+    ) => {
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.id !== msgId || !m.toolCalls) return m;
+          return {
+            ...m,
+            toolCalls: m.toolCalls.map((tc) =>
+              tc.id === callId ? { ...tc, status, result } : tc
+            ),
+          };
+        })
+      );
+    },
+    []
+  );
+
+  const appendBlock = useCallback((msgId: string, block: ContentBlock) => {
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== msgId) return m;
+        const blocks = m.blocks ?? [];
+
+        if (block.type === "reasoning") {
+          const last = blocks[blocks.length - 1];
+          if (last && last.type === "reasoning" && last.streaming) {
+            return {
+              ...m,
+              blocks: [
+                ...blocks.slice(0, -1),
+                { ...last, content: last.content + block.content },
+              ],
+            };
+          }
+          return { ...m, blocks: [...blocks, block] };
+        }
+
+        if (block.type === "text") {
+          const last = blocks[blocks.length - 1];
+          if (last && last.type === "text" && last.streaming) {
+            return {
+              ...m,
+              blocks: [
+                ...blocks.slice(0, -1),
+                { ...last, content: last.content + block.content },
+              ],
+            };
+          }
+          return { ...m, blocks: [...blocks, block] };
+        }
+
+        return { ...m, blocks: [...blocks, block] };
+      })
+    );
+  }, []);
+
+  const replaceMessages = useCallback((nextMessages: Message[]) => {
+    setMessages(nextMessages);
+  }, []);
+  const { resetSessionRestore } = useSessionRestore(activeSession, replaceMessages);
+
+  const resetMessageStream = useCallback(() => {
+    resetSessionRestore();
+    setMessages([]);
+    setUsedTokens(0);
+  }, [resetSessionRestore]);
+
+  return {
+    messages,
+    setMessages,
+    isTyping,
+    setIsTyping,
+    usedTokens,
+    setUsedTokens,
+    addPendingTurn,
+    updateMsg,
+    appendReasoningChunk,
+    appendContentChunk,
+    addToolCall,
+    updateToolCallStatus,
+    appendBlock,
+    resetMessageStream,
+  };
+}
+src\hooks\useSessionPersist.ts
+import { useCallback, useRef } from "react";
+import {
+  generateSessionName,
+  sessionRepository,
+  type StoredMessage,
+} from "../lib/sessions/index";
+import type { Provider } from "../lib/providers";
+import { useSession } from "../contexts/SessionContext";
+
+interface StartSessionNameGenerationOptions {
+  isFirstMessage: boolean;
+  sessionId: string;
+  sessionName: string;
+  provider: Provider | null;
+  firstUserMessage: string;
+}
+
+interface PersistTurnOptions {
+  projectKey: string | null;
+  sessionId: string;
+  userInput: string;
+  sendTs: number;
+  assistantContent: string;
+  assistantReasoning: string;
+  turnMessages: StoredMessage[];
+}
+
+export function useSessionPersist() {
+  const {
+    getActiveSessionSnapshot,
+    updateSession,
+    onSessionSaveError,
+  } = useSession();
+  const sessionNameByIdRef = useRef<Record<string, string>>({});
+  const pendingNameGenerationByIdRef = useRef<Record<string, Promise<string>>>(
+    {}
+  );
+
+  const startSessionNameGeneration = useCallback(
+    ({
+      isFirstMessage,
+      sessionId,
+      sessionName,
+      provider,
+      firstUserMessage,
+    }: StartSessionNameGenerationOptions) => {
+      sessionNameByIdRef.current[sessionId] = sessionName;
+
+      if (!isFirstMessage || !provider) {
+        return;
+      }
+
+      const pendingGeneration = generateSessionName(provider, firstUserMessage)
+        .then((name) => {
+          sessionNameByIdRef.current[sessionId] = name;
+          const current = getActiveSessionSnapshot();
+          if (current && current.id === sessionId) {
+            updateSession({ ...current, name });
+          }
+          return name;
+        })
+        .catch((error) => {
+          console.error("[agent] generateSessionName error:", error);
+          return sessionNameByIdRef.current[sessionId] ?? sessionName;
+        })
+        .finally(() => {
+          delete pendingNameGenerationByIdRef.current[sessionId];
+        });
+
+      pendingNameGenerationByIdRef.current[sessionId] = pendingGeneration;
+    },
+    [getActiveSessionSnapshot, updateSession]
+  );
+
+  const persistCompletedTurn = useCallback(
+    async ({
+      projectKey,
+      sessionId,
+      userInput,
+      sendTs,
+      assistantContent,
+      assistantReasoning,
+      turnMessages,
+    }: PersistTurnOptions) => {
+      if (!projectKey) {
+        return;
+      }
+
+      const pendingSessionName =
+        pendingNameGenerationByIdRef.current[sessionId];
+      if (pendingSessionName) {
+        await pendingSessionName;
+      }
+
+      const userStored: StoredMessage = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: userInput,
+        ts: sendTs,
+      };
+
+      const latestSession = getActiveSessionSnapshot();
+      if (!latestSession || latestSession.id !== sessionId) return;
+
+      let messagesToAdd: StoredMessage[];
+      if (turnMessages.length > 0) {
+        messagesToAdd = [userStored, ...turnMessages];
+      } else {
+        const assistantStored: StoredMessage = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: assistantContent || null,
+          reasoning: assistantReasoning || undefined,
+          ts: Date.now(),
+        };
+        messagesToAdd = [userStored, assistantStored];
+      }
+
+      const finalSession = {
+        ...latestSession,
+        name: sessionNameByIdRef.current[sessionId] ?? latestSession.name,
+        messages: [...latestSession.messages, ...messagesToAdd],
+      };
+
+      try {
+        await sessionRepository.save(projectKey, finalSession);
+        updateSession(finalSession);
+      } catch (error) {
+        onSessionSaveError(error);
+      }
+    },
+    [getActiveSessionSnapshot, onSessionSaveError, updateSession]
+  );
+
+  return {
+    startSessionNameGeneration,
+    persistCompletedTurn,
+  };
+}
+
+src\hooks\useSessionRestore.ts
+import { useCallback, useEffect, useRef } from "react";
+import type { Message } from "../types/message";
+import { turnsToMessages } from "../lib/turnsToMessages";
+import type { SessionData } from "../types/session";
+
+export function useSessionRestore(
+  activeSession: SessionData | null,
+  replaceMessages: (nextMessages: Message[]) => void
+) {
+  const lastRestoredIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!activeSession) {
+      replaceMessages([]);
+      lastRestoredIdRef.current = null;
+      return;
+    }
+
+    if (
+      lastRestoredIdRef.current === activeSession.id ||
+      activeSession.messages.length === 0
+    ) {
+      return;
+    }
+
+    lastRestoredIdRef.current = activeSession.id;
+    replaceMessages(turnsToMessages(activeSession.messages));
+  }, [activeSession, replaceMessages]);
+
+  const resetSessionRestore = useCallback(() => {
+    lastRestoredIdRef.current = null;
+  }, []);
+
+  return { resetSessionRestore };
+}
+
+src\lib\agentLoop.ts
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { Provider } from "./providers";
+import { getTool, getToolDefinitions } from "./tools";
+import { formatToolError } from "./tools/utils/format";
+
+export interface ChatMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
+  name?: string;
+}
+
+export interface ToolCall {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+export interface StreamCallbacks {
+  onReasoningChunk: (chunk: string) => void;
+  onContentChunk: (chunk: string) => void;
+  onToolCallStart: (id: string, name: string) => void;
+  onToolCallDone: (id: string, args: string) => void;
+  onToolExecutionStart: (id: string, name: string, args: string) => void;
+  onToolExecutionDone: (id: string, result: string) => void;
+  onToolExecutionError: (id: string, error: string) => void;
+  onAssistantMessageWithTools: (content: string | null, toolCalls: ToolCall[]) => void;
+  onUsage: (promptTokens: number, completionTokens: number, reasoningTokens: number) => void;
+  onError: (err: Error) => void;
+  onDone: () => void;
+}
+
+interface ToolCallBuffer {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+export async function runAgentStream(
+  provider: Provider,
+  messages: ChatMessage[],
+  callbacks: StreamCallbacks,
+  cwd: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const history: ChatMessage[] = [...messages];
+
+  let iterationSafety = 0;
+  const MAX_ITERATIONS = 10;
+
+  while (iterationSafety < MAX_ITERATIONS) {
+    if (signal?.aborted) return;
+    iterationSafety++;
+
+    let fullContent = "";
+    let fullReasoning = "";
+    const toolCallsBuffer: Record<number, ToolCallBuffer> = {};
+
+    let finishReason: string | null = null;
+
+    try {
+      const response = await fetch(`${provider.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${provider.apiKey}`,
+        },
+        signal,
+        body: JSON.stringify({
+          model: provider.model,
+          messages: history,
+          stream: true,
+          stream_options: { include_usage: true },
+          tools: getToolDefinitions(),
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`API error ${response.status}: ${text}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data:")) continue;
+          const data = trimmed.slice(5).trim();
+          if (data === "[DONE]") continue;
+
+          let chunk: unknown;
+          try {
+            chunk = JSON.parse(data);
+          } catch {
+            continue;
+          }
+
+          const c = chunk as Record<string, unknown>;
+
+          if (c.usage) {
+            const u = c.usage as Record<string, unknown>;
+            const reasoningTokens =
+              (u.completion_tokens_details as Record<string, unknown>)?.reasoning_tokens ?? 0;
+            callbacks.onUsage(
+              (u.prompt_tokens as number) ?? 0,
+              (u.completion_tokens as number) ?? 0,
+              reasoningTokens as number
+            );
+          }
+
+          const choice = (c.choices as unknown[])?.[0] as Record<string, unknown> | undefined;
+          if (!choice) continue;
+
+          const delta = choice.delta as Record<string, unknown> ?? {};
+
+          if (delta.reasoning_content) {
+            fullReasoning += delta.reasoning_content as string;
+            callbacks.onReasoningChunk(delta.reasoning_content as string);
+          }
+
+          if (delta.content) {
+            fullContent += delta.content as string;
+            callbacks.onContentChunk(delta.content as string);
+          }
+
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls as unknown[] as { index?: number; id?: string; function?: { name?: string; arguments?: string } }[]) {
+              const idx: number = tc.index ?? 0;
+              if (!toolCallsBuffer[idx]) {
+                toolCallsBuffer[idx] = { id: "", name: "", arguments: "" };
+              }
+              if (tc.id) {
+                toolCallsBuffer[idx].id = tc.id;
+                callbacks.onToolCallStart(tc.id, tc.function?.name ?? "");
+              }
+              if (tc.function?.name) {
+                toolCallsBuffer[idx].name = tc.function.name;
+              }
+              if (tc.function?.arguments) {
+                toolCallsBuffer[idx].arguments += tc.function.arguments;
+              }
+            }
+          }
+
+          if (choice.finish_reason) {
+            finishReason = choice.finish_reason as string;
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as DOMException)?.name === "AbortError") return;
+      callbacks.onError(err as Error);
+      return;
+    }
+
+    const assistantMsg: ChatMessage = {
+      role: "assistant",
+      content: fullContent || null,
+    };
+    const toolCallsList = Object.values(toolCallsBuffer);
+    if (toolCallsList.length > 0) {
+      assistantMsg.tool_calls = toolCallsList.map((tc) => ({
+        id: tc.id,
+        type: "function",
+        function: { name: tc.name, arguments: tc.arguments },
+      }));
+    }
+    history.push(assistantMsg);
+
+    if (toolCallsList.length > 0) {
+      callbacks.onAssistantMessageWithTools(
+        fullContent || null,
+        toolCallsList.map((tc) => ({
+          id: tc.id,
+          type: "function",
+          function: { name: tc.name, arguments: tc.arguments },
+        }))
+      );
+    }
+
+    for (const tc of toolCallsList) {
+      callbacks.onToolCallDone(tc.id, tc.arguments);
+    }
+
+    if (finishReason === "tool_calls" && toolCallsList.length > 0) {
+      for (const tc of toolCallsList) {
+        try {
+          const tool = getTool(tc.name);
+          if (!tool) {
+            throw new Error(`Unknown tool: ${tc.name}`);
+          }
+
+          const args = JSON.parse(tc.arguments) as Record<string, unknown>;
+          callbacks.onToolExecutionStart(tc.id, tc.name, tc.arguments);
+          const result = await tool.execute(args, {
+            cwd,
+            signal,
+          });
+          callbacks.onToolExecutionDone(tc.id, result);
+
+          history.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            name: tc.name,
+            content: result,
+          });
+        } catch (error) {
+          const errorMsg =
+            error instanceof Error ? error.message : "Unknown error";
+          callbacks.onToolExecutionError(tc.id, errorMsg);
+          history.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            name: tc.name,
+            content: formatToolError(errorMsg),
+          });
+        }
+      }
+
+      continue;
+    }
+
+    break;
+  }
+
+  callbacks.onDone();
+}
+
+src\lib\chatHistory.ts
+import type { Mode } from "../types";
+import type { ChatMessage } from "./agentLoop";
+import { storedToChat } from "./converters";
+import { buildSystemMessages } from "./systemPrompt";
+import type { StoredMessage } from "../types/session";
+
+interface BuildChatHistoryOptions {
+  cwd: string;
+  projectName: string;
+  mode: Mode;
+  sessionMessages: StoredMessage[];
+  userInput: string;
+}
+
+export function buildChatHistory({
+  cwd,
+  projectName,
+  mode,
+  sessionMessages,
+  userInput,
+}: BuildChatHistoryOptions): ChatMessage[] {
+  return [
+    ...buildSystemMessages({
+      cwd,
+      projectName,
+      mode,
+    }),
+    ...sessionMessages.map(storedToChat),
+    { role: "user", content: userInput },
+  ];
+}
+
+src\lib\converters.ts
+import type { Message } from "../types/message";
+import type { ChatMessage } from "./agentLoop";
+import type { StoredMessage } from "../types/session";
+
+export function storedToChat(msg: StoredMessage): ChatMessage {
+  const m: ChatMessage = {
+    role: msg.role,
+    content: msg.content,
+  };
+  if (msg.tool_calls) m.tool_calls = msg.tool_calls as ChatMessage["tool_calls"];
+  if (msg.tool_call_id) m.tool_call_id = msg.tool_call_id;
+  if (msg.name) m.name = msg.name;
+  return m;
+}
+
+export function storedToUiMessage(msg: StoredMessage): Message {
+  const base: Message = {
+    id: msg.id,
+    role: msg.role,
+    content: msg.content ?? "",
+    reasoning: msg.reasoning,
+  };
+
+  if (msg.role === "assistant" && msg.tool_calls) {
+    base.toolCalls = msg.tool_calls.map((tc) => {
+      let parsedArgs: Record<string, unknown> = {};
+      try {
+        parsedArgs = JSON.parse(tc.function.arguments) as Record<string, unknown>;
+      } catch {
+        parsedArgs = { raw: tc.function.arguments };
+      }
+      return {
+        id: tc.id,
+        name: tc.function.name,
+        arguments: parsedArgs,
+        status: "success",
+      };
+    });
+  }
+
+  if (msg.role === "tool") {
+    base.toolCallId = msg.tool_call_id;
+    base.toolName = msg.name;
+  }
+
+  return base;
+}
+
+src\lib\paths.ts
+export function pathToProjectKey(absPath: string): string {
+  return absPath
+    .replace(/\\/g, "/")
+    .replace(/:/g, "-")
+    .replace(/^\//, "")
+    .replace(/\/$/, "")
+    .replace(/\//g, "-");
+}
+
+src\lib\providers.ts
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+export interface Provider {
+  id: string;
+  name: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  contextWindow: number;
+}
+
+export interface ProvidersStore {
+  providers: Record<string, Provider>;
+  activeProviderId: string | null;
+}
+
+export function getActiveProvider(store: ProvidersStore): Provider | null {
+  if (!store.activeProviderId) return null;
+  return store.providers[store.activeProviderId] ?? null;
+}
+
+export function createProvider(
+  store: ProvidersStore,
+  provider: Omit<Provider, "id">
+): ProvidersStore {
+  const id = `provider_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  return {
+    providers: { ...store.providers, [id]: { id, ...provider } },
+    activeProviderId: store.activeProviderId ?? id,
+  };
+}
+
+export function updateProvider(
+  store: ProvidersStore,
+  id: string,
+  patch: Partial<Omit<Provider, "id">>
+): ProvidersStore {
+  if (!store.providers[id]) return store;
+  return {
+    ...store,
+    providers: {
+      ...store.providers,
+      [id]: { ...store.providers[id], ...patch },
+    },
+  };
+}
+
+export function deleteProvider(store: ProvidersStore, id: string): ProvidersStore {
+  const { [id]: _removed, ...rest } = store.providers;
+  const ids = Object.keys(rest);
+  return {
+    providers: rest,
+    activeProviderId:
+      store.activeProviderId === id ? (ids[0] ?? null) : store.activeProviderId,
+  };
+}
+
+export function setActiveProvider(store: ProvidersStore, id: string): ProvidersStore {
+  return { ...store, activeProviderId: id };
+}
+
+src\lib\providersIO.ts
+import type { Provider, ProvidersStore } from "./providers";
+
+export async function loadProviders(): Promise<ProvidersStore> {
+  try {
+    if (window.electronAPI?.loadSettings) {
+      const raw = await window.electronAPI.loadSettings();
+      return {
+        providers: (raw.providers as Record<string, Provider>) ?? {},
+        activeProviderId: raw.activeProviderId ?? null,
+      };
+    }
+  } catch {
+    // fallback
+  }
+  return { providers: {}, activeProviderId: null };
+}
+
+export async function saveProviders(store: ProvidersStore): Promise<void> {
+  try {
+    await window.electronAPI?.saveSettings?.({
+      providers: store.providers,
+      activeProviderId: store.activeProviderId,
+    });
+  } catch (err) {
+    console.error("[providers] saveProviders error:", err);
+  }
+}
+
+src\lib\systemPrompt.ts
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import type { Mode } from "../types";
+import type { ChatMessage } from "./agentLoop";
+
+const STATIC_SYSTEM_PROMPT = [
+  "# Identity",
+  "You are **nanocode** — an autonomous coding agent.",
+  "",
+  "# Tool Protocol",
+  "- Solve tasks through available tool calls, not by guessing outcomes.",
+  "- Treat tool output as the single source of truth.",
+  "- Any read, write, search, or execution action must happen via tools.",
+  "",
+  "# Agentic Loop",
+  "- Continue until user request is fully resolved or a blocker is hit.",
+  "- Evaluate, choose best tool, execute.",
+  "- Keep CLI text concise. Return short completion report.",
+  "- Use absolute paths only in tool calls.",
+  "- In user-facing text (reports/commands/headings), use paths relative to CWD",
+  "  and never print absolute paths unless the user explicitly asks.",
+].join("\n");
+
+export interface DynamicPromptOptions {
+  cwd: string;
+  projectName: string;
+  os?: string;
+  shell?: string;
+  mode?: Mode;
+}
+
+export function buildDynamicSystemPrompt(opts: DynamicPromptOptions): string {
+  const {
+    cwd,
+    projectName,
+    os: osName =
+      typeof navigator !== "undefined" ? navigator.platform : "unknown",
+    shell = "bash",
+    mode = "Ask",
+  } = opts;
+
+  const modeDesc =
+    mode === "Code"
+      ? "Current mode: code (READ/WRITE).\nRead and write operations are permitted.\nProceed with file modifications as needed."
+      : "Current mode: ask (READ-ONLY).\nWrite operations are not permitted.\nSwitch to code mode for write access.";
+
+  const sections = [
+    "# Environment",
+    `- CWD (tool calls only): \`${cwd}\``,
+    `- Project name (user-facing): \`${projectName}\``,
+    `- OS: \`${osName}\``,
+    `- Shell: \`${shell}\``,
+    "",
+    "# Permissions",
+    modeDesc,
+  ];
+
+  return sections.join("\n");
+}
+
+export function buildSystemMessages(opts: DynamicPromptOptions): ChatMessage[] {
+  return [
+    { role: "system", content: STATIC_SYSTEM_PROMPT },
+    { role: "system", content: buildDynamicSystemPrompt(opts) },
+  ];
+}
+
+src\lib\turnsToMessages.ts
+import type { Message, ContentBlock, ToolCallDisplay } from "../types/message";
+import type { StoredMessage } from "../types/session";
+
+export function turnsToMessages(storedMessages: StoredMessage[]): Message[] {
+  const messages: Message[] = [];
+  let i = 0;
+
+  while (i < storedMessages.length) {
+    const current = storedMessages[i];
+
+    if (current.role === "user") {
+      messages.push({
+        id: current.id,
+        role: "user",
+        content: current.content ?? "",
+      });
+      i++;
+      continue;
+    }
+
+    const turnBlocks: ContentBlock[] = [];
+    const turnStartIndex = i;
+
+    while (i < storedMessages.length && storedMessages[i].role !== "user") {
+      const msg = storedMessages[i];
+
+      if (msg.role === "assistant") {
+        if (msg.reasoning) {
+          turnBlocks.push({
+            type: "reasoning",
+            content: msg.reasoning,
+          });
+        }
+
+        if (msg.tool_calls) {
+          for (const tc of msg.tool_calls) {
+            let parsedArgs: Record<string, unknown> = {};
+            try {
+              parsedArgs = JSON.parse(tc.function.arguments) as Record<string, unknown>;
+            } catch {
+              parsedArgs = { raw: tc.function.arguments };
+            }
+
+            const call: ToolCallDisplay = {
+              id: tc.id,
+              name: tc.function.name,
+              arguments: parsedArgs,
+              status: "success",
+            };
+            turnBlocks.push({ type: "tool_call", call });
+          }
+        }
+
+        if (msg.content) {
+          turnBlocks.push({
+            type: "text",
+            content: msg.content,
+          });
+        }
+      } else if (msg.role === "tool") {
+        const toolCallId = msg.tool_call_id;
+        if (toolCallId) {
+          turnBlocks.push({
+            type: "tool_result",
+            callId: toolCallId,
+            status: msg.content?.includes("<tool_use_error>") ? "error" : "success",
+            result: msg.content ?? undefined,
+          });
+        }
+      }
+
+      i++;
+    }
+
+    if (turnBlocks.length > 0) {
+      const firstMsg = storedMessages[turnStartIndex];
+      messages.push({
+        id: firstMsg.id,
+        role: "assistant",
+        content: "",
+        blocks: turnBlocks,
+      });
+    }
+  }
+
+  return messages;
+}
+src\lib\utils.ts
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+export function formatRelativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  const min = Math.floor(diff / 60_000);
+  const hr = Math.floor(diff / 3_600_000);
+  const day = Math.floor(diff / 86_400_000);
+
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  if (hr < 24) return `${hr}h ago`;
+  if (day < 7) return `${day}d ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+src\lib\version.ts
+export const APP_VERSION = "0.0.1";
+export const RELEASE_CHANNEL = "exp";
+
+export const CHANNEL_STYLES: Record<string, string> = {
+  exp: "bg-yellow-500/15 text-yellow-400 border-yellow-500/25",
+  beta: "bg-blue-500/15 text-blue-400 border-blue-500/25",
+  rc: "bg-purple-500/15 text-purple-400 border-purple-500/25",
+  stable: "bg-green-500/15 text-green-400 border-green-500/25",
+};
+src\types\index.ts
+export type Mode = "Ask" | "Code";
+
+src\types\message.ts
+export interface Message {
+  id: string;
+  role: "user" | "assistant" | "tool";
+  content: string;
+  reasoning?: string;
+  isStreaming?: boolean;
+  isReasoningStreaming?: boolean;
+  toolCalls?: ToolCallDisplay[];
+  toolCallId?: string;
+  toolName?: string;
+  blocks?: ContentBlock[];
+}
+
+export interface ToolCallDisplay {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  status: "pending" | "running" | "success" | "error";
+  result?: string;
+}
+
+export type ContentBlock =
+  | { type: "reasoning"; content: string; streaming?: boolean }
+  | { type: "text"; content: string; streaming?: boolean }
+  | { type: "tool_call"; call: ToolCallDisplay }
+  | { type: "tool_result"; callId: string; status: "running" | "success" | "error"; result?: string };
+src\types\session.ts
+export interface SessionMeta {
+  id: string;
+  name: string;
+  createdAt: number;
+  projectPath: string;
+}
+
+export interface SessionData extends SessionMeta {
+  messages: StoredMessage[];
+}
+
+export interface StoredMessage {
+  id: string;
+  role: "user" | "assistant" | "tool";
+  content: string | null;
+  tool_calls?: ToolCallData[];
+  tool_call_id?: string;
+  name?: string;
+  reasoning?: string;
+  ts: number;
+}
+
+export interface ToolCallData {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+src\components\settings\EditProviderFlow.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useState } from "react";
+import { ArrowLeft, ChevronRight } from "lucide-react";
+import type { Provider } from "../../lib/providers";
+import { useProviders } from "../../contexts/ProvidersContext";
+
+type EditField = keyof Omit<Provider, "id"> | null;
+
+interface EditProviderFlowProps {
+  provider: Provider;
+  onBack: () => void;
+}
+
+const FIELD_LABELS: Record<keyof Omit<Provider, "id">, string> = {
+  name: "Name",
+  baseUrl: "Base URL",
+  model: "Model",
+  apiKey: "API Key",
+  contextWindow: "Context Window",
+};
+
+export function EditProviderFlow({ provider, onBack }: EditProviderFlowProps) {
+  const { editProvider } = useProviders();
+  const [editingField, setEditingField] = useState<EditField>(null);
+  const [fieldValue, setFieldValue] = useState("");
+
+  if (editingField !== null) {
+    const label = FIELD_LABELS[editingField];
+    const isPassword = editingField === "apiKey";
+    const isNumber = editingField === "contextWindow";
+
+    const handleSave = () => {
+      if (!fieldValue.trim() && editingField !== "contextWindow") return;
+      const val = isNumber ? Number(fieldValue) : fieldValue.trim();
+      editProvider(provider.id, { [editingField]: val });
+      setEditingField(null);
+    };
+
+    return (
+      <div className="p-5 flex flex-col gap-4">
+        <button
+          onClick={() => setEditingField(null)}
+          className="flex items-center gap-1.5 text-[0.72rem] text-white/30 hover:text-white/60 transition-colors w-fit"
+        >
+          <ArrowLeft size={13} />
+          Back to fields
+        </button>
+
+        <div className="flex flex-col gap-2">
+          <label className="text-[0.67rem] font-mono text-white/30 uppercase tracking-wider">
+            {label}
+          </label>
+          <div className="text-[0.65rem] text-white/20 font-mono mb-1">
+            Current:{" "}
+            <span className="text-white/40">
+              {isPassword
+                ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+                : String(provider[editingField] ?? "")}
+            </span>
+          </div>
+          <input
+            type={isPassword ? "password" : isNumber ? "number" : "text"}
+            value={fieldValue}
+            onChange={(e) => setFieldValue(e.target.value)}
+            placeholder={`New ${label.toLowerCase()}...`}
+            autoFocus
+            className="
+              w-full bg-[#0f0f0f] border border-white/[0.08]
+              focus:border-white/[0.2] rounded-lg px-3 py-2
+              text-[0.82rem] font-mono text-white/75
+              placeholder-white/15 outline-none transition-all duration-150
+            "
+          />
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={handleSave}
+            disabled={!fieldValue.trim()}
+            className="
+              px-4 py-2 rounded-lg bg-white/[0.08] border border-white/[0.1]
+              text-[0.75rem] text-white/80 hover:bg-white/[0.12] hover:text-white
+              disabled:opacity-30 disabled:cursor-not-allowed
+              transition-all duration-150 font-mono
+            "
+          >
+            Apply
+          </button>
+          <button
+            onClick={() => setEditingField(null)}
+            className="
+              px-4 py-2 rounded-lg text-[0.75rem] text-white/30
+              hover:text-white/60 hover:bg-white/[0.05]
+              transition-all duration-150 font-mono
+            "
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-5 flex flex-col gap-4">
+      <button
+        onClick={onBack}
+        className="flex items-center gap-1.5 text-[0.72rem] text-white/30 hover:text-white/60 transition-colors w-fit"
+      >
+        <ArrowLeft size={13} />
+        Back
+      </button>
+
+      <div className="text-[0.78rem] text-white/50 font-medium">
+        {provider.name}
+      </div>
+
+      <div className="flex flex-col gap-1">
+        {(Object.keys(FIELD_LABELS) as (keyof Omit<Provider, "id">)[]).map(
+          (field) => (
+            <button
+              key={field}
+              onClick={() => {
+                setEditingField(field);
+                setFieldValue("");
+              }}
+              className="
+                flex items-center justify-between
+                px-3 py-2.5 rounded-xl
+                border border-white/[0.05] hover:border-white/[0.1]
+                hover:bg-white/[0.03] transition-all duration-150 text-left
+              "
+            >
+              <div>
+                <div className="text-[0.72rem] text-white/50">
+                  {FIELD_LABELS[field]}
+                </div>
+                <div className="text-[0.67rem] text-white/25 font-mono">
+                  {field === "apiKey"
+                    ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+                    : String(provider[field] ?? "")}
+                </div>
+              </div>
+              <ChevronRight size={13} className="text-white/20" />
+            </button>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+src\components\settings\ProviderForm.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useState } from "react";
+import { ArrowLeft } from "lucide-react";
+import type { Provider } from "../../lib/providers";
+
+interface ProviderFormProps {
+  initial?: Partial<Omit<Provider, "id">>;
+  onSave: (data: Omit<Provider, "id">) => void;
+  onCancel: () => void;
+  saveLabel?: string;
+}
+
+const FIELDS: {
+  key: keyof Omit<Provider, "id">;
+  label: string;
+  placeholder: string;
+  type?: string;
+}[] = [
+  { key: "name", label: "Name", placeholder: "My Provider" },
+  { key: "baseUrl", label: "Base URL", placeholder: "https://api.openai.com/v1" },
+  { key: "model", label: "Model", placeholder: "gpt-4o" },
+  { key: "apiKey", label: "API Key", placeholder: "sk-...", type: "password" },
+  { key: "contextWindow", label: "Context Window", placeholder: "128000", type: "number" },
+];
+
+export function ProviderForm({
+  initial = {},
+  onSave,
+  onCancel,
+  saveLabel = "Save",
+}: ProviderFormProps) {
+  const [values, setValues] = useState<Record<string, string>>({
+    name: initial.name ?? "",
+    baseUrl: initial.baseUrl ?? "",
+    model: initial.model ?? "",
+    apiKey: initial.apiKey ?? "",
+    contextWindow:
+      initial.contextWindow != null ? String(initial.contextWindow) : "",
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const set = (key: string, val: string) => {
+    setValues((v) => ({ ...v, [key]: val }));
+    setErrors((e) => ({ ...e, [key]: "" }));
+  };
+
+  const validate = () => {
+    const errs: Record<string, string> = {};
+    if (!values.name.trim()) errs.name = "Required";
+    if (!values.baseUrl.trim()) errs.baseUrl = "Required";
+    if (!values.model.trim()) errs.model = "Required";
+    if (!values.apiKey.trim()) errs.apiKey = "Required";
+    const cw = Number(values.contextWindow);
+    if (values.contextWindow && (isNaN(cw) || cw < 1))
+      errs.contextWindow = "Must be a positive number";
+    return errs;
+  };
+
+  const handleSave = () => {
+    const errs = validate();
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs);
+      return;
+    }
+    onSave({
+      name: values.name.trim(),
+      baseUrl: values.baseUrl.trim(),
+      model: values.model.trim(),
+      apiKey: values.apiKey.trim(),
+      contextWindow: values.contextWindow ? Number(values.contextWindow) : 128000,
+    });
+  };
+
+  return (
+    <div className="p-5 flex flex-col gap-4">
+      <button
+        onClick={onCancel}
+        className="flex items-center gap-1.5 text-[0.72rem] text-white/30 hover:text-white/60 transition-colors w-fit"
+      >
+        <ArrowLeft size={13} />
+        Back
+      </button>
+
+      <div className="flex flex-col gap-3">
+        {FIELDS.map(({ key, label, placeholder, type }) => (
+          <div key={key} className="flex flex-col gap-1">
+            <label className="text-[0.67rem] font-mono text-white/30 uppercase tracking-wider">
+              {label}
+            </label>
+            <input
+              type={type ?? "text"}
+              value={values[key]}
+              onChange={(e) => set(key, e.target.value)}
+              placeholder={placeholder}
+              className={`
+                w-full bg-[#0f0f0f] border rounded-lg px-3 py-2
+                text-[0.82rem] font-mono text-white/75
+                placeholder-white/15 outline-none
+                transition-all duration-150
+                ${errors[key]
+                  ? "border-red-500/50 focus:border-red-400/70"
+                  : "border-white/[0.08] focus:border-white/[0.2]"
+                }
+              `}
+            />
+            {errors[key] && (
+              <span className="text-[0.65rem] text-red-400/70">
+                {errors[key]}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex gap-2 pt-1">
+        <button
+          onClick={handleSave}
+          className="
+            px-4 py-2 rounded-lg bg-white/[0.08] border border-white/[0.1]
+            text-[0.75rem] text-white/80 hover:bg-white/[0.12] hover:text-white
+            transition-all duration-150 font-mono
+          "
+        >
+          {saveLabel}
+        </button>
+        <button
+          onClick={onCancel}
+          className="
+            px-4 py-2 rounded-lg text-[0.75rem] text-white/30
+            hover:text-white/60 hover:bg-white/[0.05]
+            transition-all duration-150 font-mono
+          "
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+src\components\settings\ProvidersPanel.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useState } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { Plus, Pencil, Trash2 } from "lucide-react";
+import { useProviders } from "../../contexts/ProvidersContext";
+import type { Provider } from "../../lib/providers";
+import { ProviderForm } from "./ProviderForm";
+import { EditProviderFlow } from "./EditProviderFlow";
+
+type PanelView =
+  | { type: "list" }
+  | { type: "create" }
+  | { type: "edit"; providerId: string };
+
+export function ProvidersPanel() {
+  const { store, activeProvider, addProvider, removeProvider, switchProvider } =
+    useProviders();
+  const [view, setView] = useState<PanelView>({ type: "list" });
+
+  if (view.type === "create") {
+    return (
+      <ProviderForm
+        onCancel={() => setView({ type: "list" })}
+        onSave={(data) => {
+          addProvider(data);
+          setView({ type: "list" });
+        }}
+      />
+    );
+  }
+
+  if (view.type === "edit") {
+    const p = store.providers[view.providerId];
+    if (!p) {
+      setView({ type: "list" });
+      return null;
+    }
+    return (
+      <EditProviderFlow
+        provider={p}
+        onBack={() => setView({ type: "list" })}
+      />
+    );
+  }
+
+  const providers = Object.values(store.providers);
+
+  return (
+    <div className="p-5 flex flex-col gap-4">
+      {activeProvider && (
+        <div className="
+          rounded-xl bg-white/[0.03] border border-white/[0.07]
+          px-4 py-3 flex items-center gap-3
+        ">
+          <div className="flex-1 min-w-0">
+            <div className="text-[0.65rem] text-white/25 font-mono uppercase tracking-wider mb-0.5">
+              Active
+            </div>
+            <div className="text-[0.82rem] text-white/80 font-medium truncate">
+              {activeProvider.name}
+            </div>
+            <div className="text-[0.7rem] text-white/30 font-mono truncate">
+              {activeProvider.model}
+            </div>
+          </div>
+          <div className="w-2 h-2 rounded-full bg-emerald-400/70" />
+        </div>
+      )}
+
+      <div className="flex flex-col gap-1.5">
+        {providers.length === 0 && (
+          <div className="text-center py-8 text-[0.75rem] text-white/20 font-mono">
+            No providers configured
+          </div>
+        )}
+        <AnimatePresence initial={false}>
+          {providers.map((p) => (
+            <ProviderRow
+              key={p.id}
+              provider={p}
+              isActive={p.id === store.activeProviderId}
+              onActivate={() => switchProvider(p.id)}
+              onEdit={() => setView({ type: "edit", providerId: p.id })}
+              onDelete={() => removeProvider(p.id)}
+            />
+          ))}
+        </AnimatePresence>
+      </div>
+
+      <button
+        onClick={() => setView({ type: "create" })}
+        className="
+          flex items-center gap-2 px-3 py-2.5 rounded-xl
+          border border-dashed border-white/[0.1]
+          text-[0.75rem] text-white/30 hover:text-white/60
+          hover:border-white/[0.2] hover:bg-white/[0.03]
+          transition-all duration-150 font-mono
+        "
+      >
+        <Plus size={13} />
+        Add provider
+      </button>
+    </div>
+  );
+}
+
+interface ProviderRowProps {
+  provider: Provider;
+  isActive: boolean;
+  onActivate: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}
+
+function ProviderRow({
+  provider,
+  isActive,
+  onActivate,
+  onEdit,
+  onDelete,
+}: ProviderRowProps) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -4 }}
+      className={`
+        flex items-center gap-3 px-3 py-2.5 rounded-xl
+        border transition-all duration-150
+        ${isActive
+          ? "bg-white/[0.05] border-white/[0.1]"
+          : "bg-transparent border-white/[0.05] hover:bg-white/[0.03]"
+        }
+      `}
+    >
+      <button
+        onClick={onActivate}
+        className="flex-shrink-0 flex items-center justify-center w-4 h-4"
+      >
+        {isActive ? (
+          <div className="w-2 h-2 rounded-full bg-emerald-400/80" />
+        ) : (
+          <div className="w-2 h-2 rounded-full border border-white/20 hover:border-white/50 transition-colors" />
+        )}
+      </button>
+
+      <div className="flex-1 min-w-0">
+        <div className="text-[0.78rem] text-white/75 font-medium truncate">
+          {provider.name}
+        </div>
+        <div className="text-[0.67rem] text-white/25 font-mono truncate">
+          {provider.model}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1 flex-shrink-0">
+        <button
+          onClick={onEdit}
+          className="
+            p-1.5 rounded-lg text-white/25 hover:text-white/60
+            hover:bg-white/[0.06] transition-all duration-150
+          "
+        >
+          <Pencil size={12} />
+        </button>
+        {confirmDelete ? (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => {
+                onDelete();
+                setConfirmDelete(false);
+              }}
+              className="px-2 py-1 rounded-lg text-[0.65rem] text-red-400/80 hover:bg-red-500/10 transition-all"
+            >
+              confirm
+            </button>
+            <button
+              onClick={() => setConfirmDelete(false)}
+              className="px-2 py-1 rounded-lg text-[0.65rem] text-white/30 hover:bg-white/[0.06] transition-all"
+            >
+              cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="
+              p-1.5 rounded-lg text-white/25 hover:text-red-400/70
+              hover:bg-red-500/[0.08] transition-all duration-150
+            "
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+src\components\settings\SettingsModal.tsx
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useState } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { X } from "lucide-react";
+import { ProvidersPanel } from "./ProvidersPanel";
+
+interface SettingsModalProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+type SettingsTab = "providers";
+
+export function SettingsModal({ open, onClose }: SettingsModalProps) {
+  const [tab, setTab] = useState<SettingsTab>("providers");
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <>
+          <motion.div
+            key="backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-[2px] z-40"
+            onClick={onClose}
+          />
+          <motion.div
+            key="modal"
+            initial={{ opacity: 0, scale: 0.96, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 8 }}
+            transition={{ duration: 0.18 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
+          >
+            <div
+              className="
+                pointer-events-auto
+                w-full max-w-2xl max-h-[80vh]
+                bg-[#111] border border-white/[0.09]
+                rounded-2xl shadow-[0_24px_64px_rgba(0,0,0,0.8)]
+                flex flex-col overflow-hidden
+              "
+            >
+              <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+                <div className="flex items-center gap-4">
+                  <span className="text-[0.8rem] font-semibold text-white/70 tracking-wide">
+                    Settings
+                  </span>
+                  <div className="flex gap-1">
+                    {(["providers"] as SettingsTab[]).map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => setTab(t)}
+                        className={`
+                          px-3 py-1 rounded-md text-[0.7rem] font-mono capitalize
+                          transition-all duration-150
+                          ${tab === t
+                            ? "bg-white/[0.1] text-white/90"
+                            : "text-white/30 hover:text-white/60 hover:bg-white/[0.05]"
+                          }
+                        `}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  onClick={onClose}
+                  className="
+                    w-7 h-7 flex items-center justify-center rounded-lg
+                    text-white/30 hover:text-white/70 hover:bg-white/[0.07]
+                    transition-all duration-150
+                  "
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto">
+                {tab === "providers" && <ProvidersPanel />}
+              </div>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
+src\lib\sessions\factory.ts
+import type { SessionData } from "../../types/session";
+
+export const DEFAULT_SESSION_NAME = "New session";
+
+function generateId(): string {
+  return crypto.randomUUID();
+}
+
+export function createNewSession(projectPath: string): SessionData {
+  return {
+    id: generateId(),
+    projectPath,
+    name: DEFAULT_SESSION_NAME,
+    createdAt: Date.now(),
+    messages: [],
+  };
+}
+
+src\lib\sessions\index.ts
+export type { SessionData, SessionMeta, StoredMessage } from "../../types/session";
+export { createNewSession, DEFAULT_SESSION_NAME } from "./factory";
+export { generateSessionName } from "./nameGenerator";
+export {
+  createSessionRepository,
+  sessionRepository,
+  type SessionRepository,
+} from "./repository";
+export { electronSessionTransport, type SessionTransport } from "./transport";
+
+src\lib\sessions\nameGenerator.ts
+import type { Provider } from "../providers";
+import { DEFAULT_SESSION_NAME } from "./factory";
+
+const SET_DIALOG_NAME_TOOL = {
+  type: "function" as const,
+  function: {
+    name: "setDialogName",
+    description:
+      "Set a short human-readable name for this conversation (max 6 words)",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Short conversation title" },
+      },
+      required: ["name"],
+    },
+  },
+};
+
+export async function generateSessionName(
+  provider: Provider,
+  firstUserMessage: string
+): Promise<string> {
+  try {
+    const response = await fetch(`${provider.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${provider.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: provider.model,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You name conversations. Call setDialogName with a short title (max 6 words, no quotes).",
+          },
+          { role: "user", content: firstUserMessage },
+        ],
+        tools: [SET_DIALOG_NAME_TOOL],
+        tool_choice: { type: "function", function: { name: "setDialogName" } },
+        stream: false,
+      }),
+    });
+
+    if (!response.ok) return DEFAULT_SESSION_NAME;
+
+    const data = await response.json();
+    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+    if (!toolCall) return DEFAULT_SESSION_NAME;
+
+    const args = JSON.parse(toolCall.function.arguments ?? "{}");
+    return (args.name as string)?.slice(0, 60) || DEFAULT_SESSION_NAME;
+  } catch {
+    return DEFAULT_SESSION_NAME;
+  }
+}
+
+src\lib\sessions\repository.ts
+import type { SessionData, SessionMeta } from "../../types/session";
+import {
+  electronSessionTransport,
+  type SessionTransport,
+} from "./transport";
+
+export interface SessionRepository {
+  list(projectKey: string): Promise<SessionMeta[]>;
+  load(projectKey: string, id: string): Promise<SessionData | null>;
+  save(projectKey: string, session: SessionData): Promise<void>;
+  delete(projectKey: string, id: string): Promise<void>;
+}
+
+export function createSessionRepository(
+  transport: SessionTransport
+): SessionRepository {
+  return {
+    async list(projectKey) {
+      if (!projectKey) {
+        throw new Error("projectKey is required");
+      }
+      const sessions = await transport.list(projectKey);
+      return [...sessions].sort((a, b) => b.createdAt - a.createdAt);
+    },
+    async load(projectKey, id) {
+      if (!projectKey) {
+        throw new Error("projectKey is required");
+      }
+      if (!id) {
+        throw new Error("session id is required");
+      }
+      return transport.load(projectKey, id);
+    },
+    async save(projectKey, session) {
+      if (!projectKey) {
+        throw new Error("projectKey is required");
+      }
+      if (!session.id) {
+        throw new Error("session id is required");
+      }
+      return transport.save(projectKey, session);
+    },
+    async delete(projectKey, id) {
+      if (!projectKey) {
+        throw new Error("projectKey is required");
+      }
+      if (!id) {
+        throw new Error("session id is required");
+      }
+      return transport.delete(projectKey, id);
+    },
+  };
+}
+
+export const sessionRepository = createSessionRepository(
+  electronSessionTransport
+);
+
+src\lib\sessions\transport.ts
+import type { SessionData, SessionMeta } from "../../types/session";
+
+export interface SessionTransport {
+  list(projectKey: string): Promise<SessionMeta[]>;
+  load(projectKey: string, id: string): Promise<SessionData | null>;
+  save(projectKey: string, session: SessionData): Promise<void>;
+  delete(projectKey: string, id: string): Promise<void>;
+}
+
+export const electronSessionTransport: SessionTransport = {
+  async list(projectKey) {
+    return (await window.electronAPI?.listSessions(projectKey)) ?? [];
+  },
+  async load(projectKey, id) {
+    return (await window.electronAPI?.loadSession(projectKey, id)) ?? null;
+  },
+  async save(projectKey, session) {
+    await window.electronAPI?.saveSession(projectKey, session);
+  },
+  async delete(projectKey, id) {
+    await window.electronAPI?.deleteSession(projectKey, id);
+  },
+};
+
+src\lib\tools\index.ts
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { GlobTool } from "./GlobTool/GlobTool";
+import type { Tool, ToolDefinition } from "./types";
+
+export const TOOLS: Tool[] = [GlobTool];
+
+export function getToolDefinitions(): ToolDefinition[] {
+  return TOOLS.map((tool) => tool.definition);
+}
+
+export function getTool(name: string): Tool | undefined {
+  return TOOLS.find((tool) => tool.metadata.name === name);
+}
+
+export function getReadOnlyTools(): Tool[] {
+  return TOOLS.filter((tool) => tool.metadata.isReadOnly);
+}
+
+export function isReadOnlyTool(name: string): boolean {
+  const tool = getTool(name);
+  return tool?.metadata.isReadOnly ?? false;
+}
+
+export * from "./types";
+export { GlobTool };
+
+src\lib\tools\types.ts
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+export interface ToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: {
+      type: "object";
+      properties: Record<string, unknown>;
+      required?: string[];
+    };
+  };
+}
+
+export interface ToolMetadata {
+  name: string;
+  isReadOnly: boolean;
+  isConcurrencySafe: boolean;
+  maxResultSizeChars: number;
+  searchHint?: string;
+}
+
+export interface ToolExecutor {
+  (input: Record<string, unknown>, context: ToolExecutionContext): Promise<string>;
+}
+
+export interface ToolExecutionContext {
+  cwd: string;
+  signal?: AbortSignal;
+}
+
+export interface ValidationResult {
+  result: boolean;
+  message?: string;
+  errorCode?: number;
+}
+
+export interface Tool {
+  definition: ToolDefinition;
+  metadata: ToolMetadata;
+  execute: ToolExecutor;
+  getUseSummary: (input: Record<string, unknown>) => string | null;
+  getUseMessage: (
+    input: Record<string, unknown>,
+    cwd: string,
+    verbose?: boolean
+  ) => string;
+  getActivityDescription: (input: Record<string, unknown>) => string;
+}
+
+src\lib\tools\GlobTool\GlobTool.ts
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Glob tool - Fast file pattern matching
+ * Full port from Claude Code with all validations and security checks
+ */
+
+import type { Tool, ToolExecutionContext } from "../types";
+import { formatToolError } from "../utils/format";
+import { hasNodeRuntime } from "../utils/node";
+import { expandPath, toRelativePath } from "../utils/path";
+import { validateDirectoryPath } from "../utils/validation";
+import {
+  DESCRIPTION,
+  GLOB_TOOL_NAME,
+  MAX_RESULTS,
+  MAX_RESULT_SIZE_CHARS,
+  SEARCH_HINT,
+} from "./prompt";
+import {
+  getActivityDescription,
+  getToolUseSummary,
+  renderToolUseMessage,
+} from "./UI";
+
+interface GlobInput {
+  pattern: string;
+  path?: string;
+}
+
+interface GlobOutput {
+  durationMs: number;
+  numFiles: number;
+  filenames: string[];
+  truncated: boolean;
+}
+
+async function execute(
+  input: Record<string, unknown>,
+  context: ToolExecutionContext
+): Promise<string> {
+  try {
+    const electronApi =
+      typeof window !== "undefined" ? window.electronAPI : undefined;
+
+    if (
+      !hasNodeRuntime() &&
+      (!electronApi?.glob || !electronApi?.stat)
+    ) {
+      return formatToolError("Glob tool is unavailable: electronAPI not initialized");
+    }
+
+    const pattern = typeof input.pattern === "string" ? input.pattern.trim() : "";
+    const requestedPath = typeof input.path === "string" ? input.path : undefined;
+
+    if (!pattern) {
+      return formatToolError("pattern is required and must be a non-empty string");
+    }
+
+    const pathValidation = await validateDirectoryPath(requestedPath, context.cwd);
+    if (!pathValidation.result) {
+      return formatToolError(pathValidation.message ?? "Invalid directory path");
+    }
+
+    const searchDir = requestedPath
+      ? expandPath(requestedPath, context.cwd)
+      : context.cwd;
+
+    const startedAt = Date.now();
+
+    if (!electronApi?.glob || !electronApi?.stat) {
+      return formatToolError("Filesystem API is not available in this environment.");
+    }
+
+    const files = await electronApi.glob(pattern, {
+      cwd: searchDir,
+      absolute: true,
+      nodir: true,
+      dot: true,
+      follow: false,
+    });
+
+    const filesWithMtime = await Promise.all(
+      files.map(async (file) => {
+        try {
+          const stats = await electronApi.stat(file);
+          return { file, mtime: stats.mtimeMs };
+        } catch {
+          return { file, mtime: 0 };
+        }
+      })
+    );
+
+    filesWithMtime.sort((a, b) => b.mtime - a.mtime);
+
+    const truncated = filesWithMtime.length > MAX_RESULTS;
+    const limitedFiles = filesWithMtime.slice(0, MAX_RESULTS).map(({ file }) =>
+      toRelativePath(file, context.cwd)
+    );
+
+    return formatResult({
+      durationMs: Date.now() - startedAt,
+      numFiles: filesWithMtime.length,
+      filenames: limitedFiles,
+      truncated,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return formatToolError(message);
+  }
+}
+
+function formatResult(output: GlobOutput): string {
+  if (output.filenames.length === 0) {
+    return "No files found";
+  }
+
+  const result = output.filenames.join("\n");
+
+  if (!output.truncated) {
+    return result;
+  }
+
+  return `${result}\n(Results are truncated. Consider using a more specific path or pattern.)`;
+}
+
+export const GlobTool: Tool = {
+  definition: {
+    type: "function",
+    function: {
+      name: GLOB_TOOL_NAME,
+      description: DESCRIPTION,
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: {
+            type: "string",
+            description: "The glob pattern to match files against",
+          },
+          path: {
+            type: "string",
+            description:
+              'The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter "undefined" or "null" - simply omit it for the default behavior. Must be a valid directory path if provided.',
+          },
+        },
+        required: ["pattern"],
+      },
+    },
+  },
+  metadata: {
+    name: GLOB_TOOL_NAME,
+    isReadOnly: true,
+    isConcurrencySafe: true,
+    maxResultSizeChars: MAX_RESULT_SIZE_CHARS,
+    searchHint: SEARCH_HINT,
+  },
+  execute,
+  getUseSummary: (input) => getToolUseSummary(input as Partial<GlobInput>),
+  getUseMessage: (input, cwd, verbose = false) =>
+    renderToolUseMessage(input as Partial<GlobInput>, cwd, verbose),
+  getActivityDescription: (input) =>
+    getActivityDescription(input as unknown as GlobInput),
+};
+
+src\lib\tools\GlobTool\UI.ts
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Glob tool UI formatting - ported from Claude Code
+ */
+
+import { TOOL_SUMMARY_MAX_LENGTH, truncate } from "../utils/format";
+import { expandPath, toRelativePath } from "../utils/path";
+
+interface GlobInput {
+  pattern: string;
+  path?: string;
+}
+
+export function userFacingName(): string {
+  return "Search";
+}
+
+export function getToolUseSummary(input: Partial<GlobInput>): string | null {
+  if (!input.pattern) {
+    return null;
+  }
+
+  return truncate(input.pattern, TOOL_SUMMARY_MAX_LENGTH);
+}
+
+export function renderToolUseMessage(
+  input: Partial<GlobInput>,
+  cwd: string,
+  verbose: boolean
+): string {
+  if (!input.pattern) {
+    return "";
+  }
+
+  if (!input.path) {
+    return `pattern: "${input.pattern}"`;
+  }
+
+  const absolutePath = expandPath(input.path, cwd);
+  const displayPath = verbose ? absolutePath : toRelativePath(absolutePath, cwd);
+
+  return `pattern: "${input.pattern}", path: "${displayPath}"`;
+}
+
+export function getActivityDescription(input: GlobInput): string {
+  const summary = getToolUseSummary(input);
+
+  if (!summary) {
+    return "Finding files";
+  }
+
+  return `Finding ${summary}`;
+}
+
+src\lib\tools\GlobTool\prompt.ts
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Glob tool prompts and constants - exact copy from Claude Code
+ */
+
+export const GLOB_TOOL_NAME = "Glob";
+
+export const DESCRIPTION = `- Fast file pattern matching tool that works with any codebase size
+- Supports glob patterns like "**/*.js" or "src/**/*.ts"
+- Returns matching file paths sorted by modification time
+- Use this tool when you need to find files by name patterns
+- When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the Agent tool instead`;
+
+export const SEARCH_HINT = "find files by name pattern or wildcard";
+
+export const MAX_RESULTS = 100;
+export const MAX_RESULT_SIZE_CHARS = 100_000;
+
+src\lib\tools\utils\format.ts
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+export const TOOL_SUMMARY_MAX_LENGTH = 50;
+
+export function truncate(str: string, maxLength: number): string {
+  if (str.length <= maxLength) {
+    return str;
+  }
+
+  return `${str.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+export function formatToolError(message: string): string {
+  return `<tool_use_error>${message}</tool_use_error>`;
+}
+
+export function isToolError(result: string): boolean {
+  return result.includes("<tool_use_error>") && result.includes("</tool_use_error>");
+}
+
+export function extractTag(content: string, tagName: string): string | null {
+  const regex = new RegExp(`<${tagName}>([\\s\\S]*?)</${tagName}>`);
+  const match = content.match(regex);
+  return match?.[1] ?? null;
+}
+
+src\lib\tools\utils\node.ts
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+export async function importNodeModule<T>(specifier: string): Promise<T> {
+  if (!hasNodeRuntime()) {
+    throw new Error(`Cannot import ${specifier}: Node.js runtime not available`);
+  }
+
+  return import(specifier) as Promise<T>;
+}
+
+export function hasNodeRuntime(): boolean {
+  if (
+    typeof window !== "undefined" &&
+    typeof (window as Window & { electronAPI?: unknown }).electronAPI !==
+      "undefined"
+  ) {
+    return true;
+  }
+
+  return typeof process !== "undefined" && !!process.versions?.node;
+}
+
+src\lib\tools\utils\path.ts
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+export function expandPath(inputPath: string, cwd: string): string {
+  const trimmed = inputPath.trim();
+  const homeDir = typeof process !== "undefined"
+    ? (process.env.HOME || process.env.USERPROFILE)
+    : undefined;
+
+  let expanded = trimmed;
+  if (trimmed === "~" && homeDir) {
+    expanded = homeDir;
+  } else if (trimmed.startsWith("~/") && homeDir) {
+    expanded = `${homeDir}/${trimmed.slice(2)}`;
+  }
+
+  if (expanded.startsWith("/") || /^[A-Za-z]:[\\/]/.test(expanded)) {
+    return expanded;
+  }
+
+  const normalizedCwd = cwd.replace(/[\\/]+$/, "");
+  return `${normalizedCwd}/${expanded}`;
+}
+
+export function toRelativePath(absolutePath: string, cwd: string): string {
+  const normalize = (value: string): string => value.replace(/\\/g, "/").replace(/\/+$/, "");
+
+  const base = normalize(cwd);
+  const target = normalize(absolutePath);
+
+  if (target === base) {
+    return target;
+  }
+
+  if (target.startsWith(`${base}/`)) {
+    return target.slice(base.length + 1);
+  }
+
+  return absolutePath;
+}
+
+export function getDisplayPath(inputPath: string, cwd: string): string {
+  const absolutePath = expandPath(inputPath, cwd);
+  return toRelativePath(absolutePath, cwd);
+}
+
+export async function suggestPathUnderCwd(
+  absolutePath: string,
+  cwd: string
+): Promise<string | null> {
+  const basename = absolutePath.split(/[\\/]/).pop();
+  if (!basename) {
+    return null;
+  }
+
+  const candidate = `${cwd}/${basename}`;
+
+  const electronApi =
+    typeof window !== "undefined" ? window.electronAPI : undefined;
+
+  if (!electronApi?.stat) {
+    return null;
+  }
+
+  try {
+    await electronApi.stat(candidate);
+    return `./${basename}`;
+  } catch {
+    return null;
+  }
+}
+
+src\lib\tools\utils\validation.ts
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import type { ValidationResult } from "../types";
+import { expandPath, suggestPathUnderCwd } from "./path";
+
+export const FILE_NOT_FOUND_CWD_NOTE =
+  "Note: paths are relative to the current working directory:";
+
+export function isENOENT(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const code = (error as { code?: unknown }).code;
+  return code === "ENOENT" || error.message.includes("ENOENT");
+}
+
+export async function validateDirectoryPath(
+  inputPath: string | undefined,
+  cwd: string
+): Promise<ValidationResult> {
+  if (!inputPath) {
+    return { result: true };
+  }
+
+  const trimmed = inputPath.trim();
+  if (trimmed.startsWith("\\\\") || trimmed.startsWith("//")) {
+    return { result: true };
+  }
+
+  const absolutePath = expandPath(trimmed, cwd);
+  const electronApi =
+    typeof window !== "undefined" ? window.electronAPI : undefined;
+
+  if (!electronApi?.stat) {
+    return { result: false, message: "Filesystem API not available" };
+  }
+
+  try {
+    const stats = await electronApi.stat(absolutePath);
+
+    if (!stats.isDirectory) {
+      return {
+        result: false,
+        errorCode: 2,
+        message: `Path is not a directory: ${inputPath}`,
+      };
+    }
+
+    return { result: true };
+  } catch (error) {
+    if (isENOENT(error)) {
+      const suggestion = await suggestPathUnderCwd(absolutePath, cwd);
+      const suggestionText = suggestion
+        ? `\nDid you mean: ${suggestion}`
+        : `\n${FILE_NOT_FOUND_CWD_NOTE} ${cwd}`;
+
+      return {
+        result: false,
+        errorCode: 1,
+        message: `Directory not found: ${inputPath}${suggestionText}`,
+      };
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      result: false,
+      message: `Failed to validate directory: ${message}`,
+    };
+  }
+}
+
