@@ -93,7 +93,7 @@ export default function App() {
 
       let finalAssistantContent = '';
 
-      streamChatCompletion(
+      await streamChatCompletion(
         activeProvider,
         nextLlmHistory,
         {
