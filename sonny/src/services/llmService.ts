@@ -44,6 +44,40 @@ interface CompletionChunk {
   usage?: CompletionUsage;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function parseCompletionChunk(raw: string): CompletionChunk | null {
+  const parsed: unknown = JSON.parse(raw);
+  if (!isRecord(parsed)) {
+    return null;
+  }
+
+  const chunk: CompletionChunk = {};
+
+  if (Array.isArray(parsed.choices)) {
+    chunk.choices = parsed.choices as CompletionChunkChoice[];
+  }
+
+  if (isRecord(parsed.usage)) {
+    const usage = parsed.usage as Record<string, unknown>;
+    if (
+      typeof usage.completion_tokens === 'number' &&
+      typeof usage.prompt_tokens === 'number' &&
+      typeof usage.total_tokens === 'number'
+    ) {
+      chunk.usage = {
+        completion_tokens: usage.completion_tokens,
+        prompt_tokens: usage.prompt_tokens,
+        total_tokens: usage.total_tokens,
+      };
+    }
+  }
+
+  return chunk;
+}
+
 const SET_DIALOG_NAME_TOOL = {
   type: 'function' as const,
   function: {
@@ -104,6 +138,81 @@ export async function streamChatCompletion(
     }
   };
 
+  const processDataLine = (
+    jsonStr: string,
+    accumulatedToolCalls: Record<number, ToolCallDelta>,
+    getLastUsage: () => CompletionUsage | undefined,
+    setLastUsage: (usage: CompletionUsage) => void,
+  ): 'done' | 'continue' => {
+    if (jsonStr === '[DONE]') {
+      safeDone(getLastUsage());
+      return 'done';
+    }
+
+    try {
+      const parsed = parseCompletionChunk(jsonStr);
+      if (!parsed) {
+        return 'continue';
+      }
+
+      if (parsed.usage) {
+        setLastUsage(parsed.usage);
+      }
+
+      const choice = parsed.choices?.[0];
+      if (!choice?.delta) {
+        return 'continue';
+      }
+
+      const { delta } = choice;
+
+      if (delta.reasoning_content) {
+        callbacks.onThinking(delta.reasoning_content);
+      }
+
+      if (delta.content) {
+        callbacks.onContent(delta.content);
+      }
+
+      if (delta.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const index = tc.index;
+          if (!accumulatedToolCalls[index]) {
+            accumulatedToolCalls[index] = {
+              index,
+              id: tc.id,
+              function: {
+                name: tc.function?.name,
+                arguments: '',
+              },
+            };
+          }
+
+          if (tc.function?.name) {
+            accumulatedToolCalls[index].function = {
+              ...accumulatedToolCalls[index].function,
+              name: tc.function.name,
+            };
+          }
+
+          if (tc.function?.arguments) {
+            const currentArgs = accumulatedToolCalls[index].function?.arguments ?? '';
+            accumulatedToolCalls[index].function = {
+              ...accumulatedToolCalls[index].function,
+              arguments: currentArgs + tc.function.arguments,
+            };
+          }
+
+          callbacks.onToolCall({ ...accumulatedToolCalls[index] });
+        }
+      }
+    } catch {
+      // Ignore malformed chunks.
+    }
+
+    return 'continue';
+  };
+
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -149,71 +258,31 @@ export async function streamChatCompletion(
         }
 
         const jsonStr = trimmed.slice(5).trim();
-        if (jsonStr === '[DONE]') {
-          safeDone(lastUsage);
+        const result = processDataLine(
+          jsonStr,
+          accumulatedToolCalls,
+          () => lastUsage,
+          (usage) => {
+            lastUsage = usage;
+          },
+        );
+        if (result === 'done') {
           return;
         }
-
-        try {
-          const parsed = JSON.parse(jsonStr) as CompletionChunk;
-          if (parsed.usage) {
-            lastUsage = parsed.usage;
-          }
-
-          const choice = parsed.choices?.[0];
-          if (!choice) {
-            continue;
-          }
-
-          const delta = choice.delta;
-          if (!delta) {
-            continue;
-          }
-
-          if (delta.reasoning_content) {
-            callbacks.onThinking(delta.reasoning_content);
-          }
-
-          if (delta.content) {
-            callbacks.onContent(delta.content);
-          }
-
-          if (delta.tool_calls) {
-            for (const tc of delta.tool_calls) {
-              const index = tc.index;
-              if (!accumulatedToolCalls[index]) {
-                accumulatedToolCalls[index] = {
-                  index,
-                  id: tc.id,
-                  function: {
-                    name: tc.function?.name,
-                    arguments: '',
-                  },
-                };
-              }
-
-              if (tc.function?.name) {
-                accumulatedToolCalls[index].function = {
-                  ...accumulatedToolCalls[index].function,
-                  name: tc.function.name,
-                };
-              }
-
-              if (tc.function?.arguments) {
-                const currentArgs = accumulatedToolCalls[index].function?.arguments ?? '';
-                accumulatedToolCalls[index].function = {
-                  ...accumulatedToolCalls[index].function,
-                  arguments: currentArgs + tc.function.arguments,
-                };
-              }
-
-              callbacks.onToolCall({ ...accumulatedToolCalls[index] });
-            }
-          }
-        } catch {
-          // Ignore malformed/partial chunks.
-        }
       }
+    }
+
+    const trailing = buffer.trim();
+    if (trailing.startsWith('data:')) {
+      const trailingData = trailing.slice(5).trim();
+      processDataLine(
+        trailingData,
+        accumulatedToolCalls,
+        () => lastUsage,
+        (usage) => {
+          lastUsage = usage;
+        },
+      );
     }
 
     safeDone(lastUsage);

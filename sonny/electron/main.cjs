@@ -6,6 +6,7 @@ const path = require('path');
 const isDev = process.env.NODE_ENV === 'development';
 const providersPath = path.join(os.homedir(), '.sonny', 'providers.json');
 const historyDir = path.join(os.homedir(), '.sonny', 'history');
+const historyIndexPath = path.join(historyDir, 'index.json');
 
 async function pathExists(targetPath) {
   try {
@@ -63,6 +64,37 @@ async function ensureHistoryDir() {
   await fsPromises.mkdir(historyDir, { recursive: true });
 }
 
+async function readHistoryIndex() {
+  await ensureHistoryDir();
+  if (!(await pathExists(historyIndexPath))) {
+    return null;
+  }
+
+  try {
+    const raw = await fsPromises.readFile(historyIndexPath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return null;
+    }
+
+    return parsed
+      .filter((item) => item && typeof item === 'object')
+      .map((item) => ({
+        id: typeof item.id === 'string' ? item.id : '',
+        title: typeof item.title === 'string' ? item.title : 'Untitled Chat',
+        updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : 0,
+      }))
+      .filter((item) => item.id.length > 0);
+  } catch {
+    return null;
+  }
+}
+
+async function writeHistoryIndex(chats) {
+  await ensureHistoryDir();
+  await fsPromises.writeFile(historyIndexPath, JSON.stringify(chats, null, 2), 'utf-8');
+}
+
 async function readChat(chatId) {
   await ensureHistoryDir();
   const filePath = path.join(historyDir, `${chatId}.json`);
@@ -91,9 +123,15 @@ async function writeChat(chatId, data) {
 
 async function listChats() {
   await ensureHistoryDir();
+  const index = await readHistoryIndex();
+  if (index) {
+    return index.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
   const files = await fsPromises.readdir(historyDir);
   const chats = await Promise.all(files
     .filter((fileName) => fileName.endsWith('.json'))
+    .filter((fileName) => fileName !== 'index.json')
     .map(async (fileName) => {
       const id = path.basename(fileName, '.json');
       const raw = await readChat(id);
@@ -108,7 +146,9 @@ async function listChats() {
       };
     }));
 
-  return chats.filter(Boolean).sort((a, b) => b.updatedAt - a.updatedAt);
+  const normalized = chats.filter(Boolean).sort((a, b) => b.updatedAt - a.updatedAt);
+  await writeHistoryIndex(normalized);
+  return normalized;
 }
 
 function registerHistoryIpc() {
@@ -116,7 +156,16 @@ function registerHistoryIpc() {
   ipcMain.handle('history:get', async (_, chatId) => readChat(chatId));
   ipcMain.handle('history:save', async (_, chatId, data) => {
     await writeChat(chatId, data);
-    return listChats();
+    const current = (await readHistoryIndex()) ?? [];
+    const nextItem = {
+      id: typeof data?.id === 'string' ? data.id : chatId,
+      title: typeof data?.title === 'string' ? data.title : 'Untitled Chat',
+      updatedAt: typeof data?.updatedAt === 'number' ? data.updatedAt : Date.now(),
+    };
+    const withoutCurrent = current.filter((chat) => chat.id !== chatId);
+    const nextList = [...withoutCurrent, nextItem].sort((a, b) => b.updatedAt - a.updatedAt);
+    await writeHistoryIndex(nextList);
+    return nextList;
   });
   ipcMain.handle('history:delete', async (_, chatId) => {
     await ensureHistoryDir();
@@ -124,7 +173,10 @@ function registerHistoryIpc() {
     if (await pathExists(filePath)) {
       await fsPromises.unlink(filePath);
     }
-    return listChats();
+    const current = (await readHistoryIndex()) ?? [];
+    const nextList = current.filter((chat) => chat.id !== chatId);
+    await writeHistoryIndex(nextList);
+    return nextList;
   });
 }
 

@@ -21,6 +21,9 @@ export default function App() {
     setLlmHistory,
     contextTokensUsed,
     setContextTokensUsed,
+    messagesRef,
+    llmHistoryRef,
+    contextTokensUsedRef,
     isTyping,
     setIsTyping,
     switchChat,
@@ -67,8 +70,8 @@ export default function App() {
       }
 
       const chatIdSnapshot = chatId;
-      const existingMessages = messages;
-      const isFirstMessage = messages.length === 0;
+      const existingMessages = [...messagesRef.current];
+      const isFirstMessage = existingMessages.length === 0;
 
       const userMsg: Message = {
         id: Date.now().toString(),
@@ -77,9 +80,10 @@ export default function App() {
         timestamp: new Date(),
       };
 
-      setMessages((prev) => [...prev, userMsg]);
+      const nextMessagesBase = [...existingMessages, userMsg];
+      setMessages(nextMessagesBase);
 
-      const nextLlmHistory = llmHistory.concat([{ role: 'user', content }]);
+      const nextLlmHistory = [...llmHistoryRef.current, { role: 'user', content }];
       setLlmHistory(nextLlmHistory);
 
       const assistantId = (Date.now() + 1).toString();
@@ -91,7 +95,8 @@ export default function App() {
         thinking: '',
         toolCalls: [],
       };
-      setMessages((prev) => [...prev, assistantMsg]);
+      let workingMessages: Message[] = [...nextMessagesBase, assistantMsg];
+      setMessages(workingMessages);
       setIsTyping(true);
 
       let finalAssistantContent = '';
@@ -108,7 +113,10 @@ export default function App() {
             }
 
             finalAssistantContent += text;
-            setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + text } : m)));
+            workingMessages = workingMessages.map((m) =>
+              m.id === assistantId ? { ...m, content: m.content + text } : m,
+            );
+            setMessages(workingMessages);
             scheduleAutoSave();
           },
           onThinking: (text) => {
@@ -117,9 +125,10 @@ export default function App() {
             }
 
             finalAssistantThinking += text;
-            setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, thinking: (m.thinking ?? '') + text } : m)),
+            workingMessages = workingMessages.map((m) =>
+              m.id === assistantId ? { ...m, thinking: (m.thinking ?? '') + text } : m,
             );
+            setMessages(workingMessages);
             scheduleAutoSave();
           },
           onToolCall: (toolCall) => {
@@ -129,24 +138,23 @@ export default function App() {
 
             finalToolCalls.set(toolCall.index, { ...(finalToolCalls.get(toolCall.index) ?? {}), ...toolCall });
 
-            setMessages((prev) =>
-              prev.map((m) => {
-                if (m.id !== assistantId) {
-                  return m;
-                }
+            workingMessages = workingMessages.map((m) => {
+              if (m.id !== assistantId) {
+                return m;
+              }
 
-                const existingToolCalls: ToolCall[] = m.toolCalls ? [...m.toolCalls] : [];
-                const idx = existingToolCalls.findIndex((tc) => tc.index === toolCall.index);
+              const existingToolCalls: ToolCall[] = m.toolCalls ? [...m.toolCalls] : [];
+              const idx = existingToolCalls.findIndex((tc) => tc.index === toolCall.index);
 
-                if (idx >= 0) {
-                  existingToolCalls[idx] = { ...existingToolCalls[idx], ...toolCall };
-                } else {
-                  existingToolCalls.push(toolCall);
-                }
+              if (idx >= 0) {
+                existingToolCalls[idx] = { ...existingToolCalls[idx], ...toolCall };
+              } else {
+                existingToolCalls.push(toolCall);
+              }
 
-                return { ...m, toolCalls: existingToolCalls };
-              }),
-            );
+              return { ...m, toolCalls: existingToolCalls };
+            });
+            setMessages(workingMessages);
             scheduleAutoSave();
           },
           onDone: async (usage) => {
@@ -159,7 +167,7 @@ export default function App() {
             }
 
             setIsTyping(false);
-            const finalTokens = usage?.total_tokens ?? contextTokensUsed;
+            const finalTokens = usage?.total_tokens ?? contextTokensUsedRef.current;
             if (usage?.total_tokens) {
               setContextTokensUsed(usage.total_tokens);
             }
@@ -198,7 +206,7 @@ export default function App() {
 
             setIsTyping(false);
             const errorMessage = error instanceof Error ? error.message : String(error);
-            const erroredMessages = messages.concat(
+            const erroredMessages = existingMessages.concat(
               userMsg,
               {
                 ...assistantMsg,
@@ -208,7 +216,7 @@ export default function App() {
               },
             );
             setMessages(erroredMessages);
-            await persistChatData(chatIdSnapshot, erroredMessages, nextLlmHistory, contextTokensUsed);
+            await persistChatData(chatIdSnapshot, erroredMessages, nextLlmHistory, contextTokensUsedRef.current);
           },
         },
         requestController.signal,
@@ -219,13 +227,13 @@ export default function App() {
       activeProvider,
       cancelPendingRequest,
       createChat,
-      llmHistory,
-      messages,
       loadChat,
-      contextTokensUsed,
       persistChatData,
       renameChat,
       scheduleAutoSave,
+      messagesRef,
+      llmHistoryRef,
+      contextTokensUsedRef,
       setContextTokensUsed,
       setIsTyping,
       setLlmHistory,
@@ -248,6 +256,21 @@ export default function App() {
     await deleteChat(chatId);
   }, [cancelPendingRequest, deleteChat]);
 
+
+  const handleRenameChat = useCallback(async () => {
+    if (!activeChatId) {
+      return;
+    }
+
+    const currentTitle = chats.find((chat) => chat.id === activeChatId)?.title ?? 'Untitled Chat';
+    const nextTitle = window.prompt('Rename chat', currentTitle);
+    if (nextTitle === null) {
+      return;
+    }
+
+    await renameChat(activeChatId, nextTitle);
+  }, [activeChatId, chats, renameChat]);
+
   const chatTitle = chats.find((chat) => chat.id === activeChatId)?.title ?? 'Untitled Chat';
 
   return (
@@ -263,7 +286,7 @@ export default function App() {
       />
 
       <main className="relative flex h-full flex-1 flex-col overflow-hidden">
-        <Titlebar chatTitle={chatTitle} onRename={() => {}} />
+        <Titlebar chatTitle={chatTitle} onRename={handleRenameChat} />
 
         <MessageList messages={messages} isTyping={isTyping} />
 
