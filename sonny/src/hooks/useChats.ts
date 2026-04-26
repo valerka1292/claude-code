@@ -137,8 +137,7 @@ export function useChats() {
   );
 
   const newChat = useCallback(async () => {
-    const bridge = window.electron?.history;
-    if (!bridge || switchingRef.current) {
+    if (switchingRef.current) {
       return;
     }
 
@@ -146,19 +145,47 @@ export function useChats() {
     try {
       setIsTyping(false);
       await saveCurrentChat();
-
-      const id = generateChatId();
-      await bridge.save(id, emptyChatData(id));
-      await loadChatList();
-
-      setActiveChatId(id);
+      setActiveChatId(null);
       setMessages([]);
       setLlmHistory([]);
       setContextTokensUsed(0);
     } finally {
       switchingRef.current = false;
     }
-  }, [loadChatList, saveCurrentChat]);
+  }, [saveCurrentChat]);
+
+  const createChat = useCallback(async (): Promise<string> => {
+    const bridge = window.electron?.history;
+    if (!bridge) {
+      throw new Error('History bridge is unavailable');
+    }
+
+    const id = generateChatId();
+    await bridge.save(id, emptyChatData(id));
+    await loadChatList();
+    return id;
+  }, [loadChatList]);
+
+  const renameChat = useCallback(async (chatId: string, title: string) => {
+    const bridge = window.electron?.history;
+    if (!bridge) {
+      return;
+    }
+
+    const data = await bridge.get(chatId);
+    if (!data) {
+      return;
+    }
+
+    const nextTitle = title.trim() || 'Untitled Chat';
+    const updatedData: ChatData = {
+      ...data,
+      title: nextTitle,
+      updatedAt: Date.now(),
+    };
+    const updatedList = await bridge.save(chatId, updatedData);
+    setChats(updatedList);
+  }, []);
 
   const deleteChat = useCallback(
     async (chatId: string) => {
@@ -197,11 +224,6 @@ export function useChats() {
     let mounted = true;
 
     async function bootstrap() {
-      const bridge = window.electron?.history;
-      if (!bridge) {
-        return;
-      }
-
       const list = await loadChatList();
       if (!mounted) {
         return;
@@ -209,20 +231,7 @@ export function useChats() {
 
       if (list.length > 0) {
         await loadChat(list[0].id);
-        return;
       }
-
-      const id = generateChatId();
-      await bridge.save(id, emptyChatData(id));
-      if (!mounted) {
-        return;
-      }
-
-      await loadChatList();
-      if (!mounted) {
-        return;
-      }
-      setActiveChatId(id);
     }
 
     void bootstrap();
@@ -244,8 +253,11 @@ export function useChats() {
     setContextTokensUsed,
     isTyping,
     setIsTyping,
+    loadChat,
     switchChat,
     newChat,
+    createChat,
+    renameChat,
     deleteChat,
     persistCurrentChat,
   };

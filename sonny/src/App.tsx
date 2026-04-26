@@ -5,7 +5,7 @@ import InputArea from './components/InputArea';
 import SettingsModal from './components/SettingsModal';
 import Titlebar from './components/Titlebar';
 import { AgentMode, Message, ToolCall } from './types';
-import { streamChatCompletion } from './services/llmService';
+import { generateChatName, streamChatCompletion } from './services/llmService';
 import { useProviders } from './hooks/useProviders';
 import { useChats } from './hooks/useChats';
 
@@ -23,7 +23,10 @@ export default function App() {
     isTyping,
     setIsTyping,
     switchChat,
+    loadChat,
     newChat,
+    createChat,
+    renameChat,
     deleteChat,
     persistCurrentChat,
   } = useChats();
@@ -34,12 +37,19 @@ export default function App() {
   const { activeProvider } = useProviders();
 
   const handleSend = useCallback(
-    (content: string) => {
-      if (!activeProvider || !activeChatIdRef.current) {
+    async (content: string) => {
+      if (!activeProvider) {
         return;
       }
 
-      const chatIdSnapshot = activeChatIdRef.current;
+      let chatId = activeChatIdRef.current;
+      if (!chatId) {
+        chatId = await createChat();
+        await loadChat(chatId);
+      }
+
+      const chatIdSnapshot = chatId;
+      const isFirstMessage = messages.length === 0;
 
       const userMsg: Message = {
         id: Date.now().toString(),
@@ -109,7 +119,7 @@ export default function App() {
             }),
           );
         },
-        onDone: (usage) => {
+        onDone: async (usage) => {
           if (activeChatIdRef.current !== chatIdSnapshot) {
             return;
           }
@@ -119,7 +129,14 @@ export default function App() {
             setContextTokensUsed(usage.total_tokens);
           }
           setLlmHistory((prev) => [...prev, { role: 'assistant', content: finalAssistantContent }]);
-          void persistCurrentChat();
+          await persistCurrentChat();
+
+          if (isFirstMessage) {
+            const title = await generateChatName(activeProvider, content);
+            if (activeChatIdRef.current === chatIdSnapshot) {
+              await renameChat(chatIdSnapshot, title);
+            }
+          }
         },
         onError: (error) => {
           if (activeChatIdRef.current !== chatIdSnapshot) {
@@ -134,7 +151,20 @@ export default function App() {
         },
       });
     },
-    [activeChatIdRef, activeProvider, llmHistory, persistCurrentChat, setContextTokensUsed, setIsTyping, setLlmHistory, setMessages],
+    [
+      activeChatIdRef,
+      activeProvider,
+      createChat,
+      llmHistory,
+      loadChat,
+      messages.length,
+      persistCurrentChat,
+      renameChat,
+      setContextTokensUsed,
+      setIsTyping,
+      setLlmHistory,
+      setMessages,
+    ],
   );
 
   const chatTitle = chats.find((chat) => chat.id === activeChatId)?.title ?? 'Untitled Chat';
