@@ -25,7 +25,7 @@ const DEFAULT_VALUES: ProviderFormValues = {
   model: '',
   contextWindowSize: 128000,
 };
-const BASE_URL_PATTERN = /^(https?:\/\/)[\w.-]+(?:\.[a-zA-Z]{2,})(\/.*)?$/;
+const BASE_URL_PATTERN = /^(https?:\/\/)[\w.-]+(:\d+)?(\/.*)?$/;
 const MODEL_PATTERN = /^[a-zA-Z0-9_/-]+$/;
 const MAX_CONTEXT_WINDOW = 2_000_000;
 
@@ -75,7 +75,7 @@ export default function ProviderForm({
     baseUrl: !baseUrl
       ? 'Base URL is required.'
       : !BASE_URL_PATTERN.test(baseUrl)
-        ? 'Base URL must start with http(s):// and include a valid domain.'
+        ? 'Base URL must start with http(s):// and include a valid host.'
         : '',
     apiKey: apiKey ? '' : 'API key is required.',
     model: !model
