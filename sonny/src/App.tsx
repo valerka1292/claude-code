@@ -20,26 +20,32 @@ import { AgentMode, Message } from './types';
 export default function App() {
   const [activeChatId, setActiveChatId] = React.useState('1');
   const [mode, setMode] = React.useState<AgentMode>('Chat');
-  const [messages, setMessages] = React.useState<Message[]>([]);
+  const [messagesByChatId, setMessagesByChatId] = React.useState<Record<string, Message[]>>({});
   const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
   const [isAgentRunning, setIsAgentRunning] = React.useState(false);
   const [isTyping, setIsTyping] = React.useState(false);
 
   // Simulated initial conversation
   React.useEffect(() => {
-    setMessages([
-      {
-        id: 'm1',
-        role: 'assistant',
-        content: 'Hello! I am your autonomous AI agent. I can help you write code, manage files, or even run investigative loops in autonomous mode.\n\nChoose a mode below to get started.',
-        timestamp: new Date()
-      }
-    ]);
+    setMessagesByChatId({
+      '1': [
+        {
+          id: 'm1',
+          role: 'assistant',
+          content: 'Hello! I am your autonomous AI agent. I can help you write code, manage files, or even run investigative loops in autonomous mode.\n\nChoose a mode below to get started.',
+          timestamp: new Date()
+        }
+      ]
+    });
   }, []);
 
   const handleSend = (content: string) => {
+    const chatId = activeChatId;
     const userMsg: Message = { id: Date.now().toString(), role: 'user', content, timestamp: new Date() };
-    setMessages(prev => [...prev, userMsg]);
+    setMessagesByChatId((prev) => ({
+      ...prev,
+      [chatId]: [...(prev[chatId] ?? []), userMsg]
+    }));
     setIsTyping(true);
     
     // Simulate assistant reply
@@ -50,14 +56,21 @@ export default function App() {
         content: `I received your message: "${content}". How else can I help?`, 
         timestamp: new Date() 
       };
-      setMessages(prev => [...prev, assistantMsg]);
+      setMessagesByChatId((prev) => ({
+        ...prev,
+        [chatId]: [...(prev[chatId] ?? []), assistantMsg]
+      }));
       setIsTyping(false);
     }, 1500);
   };
 
   const handleNewChat = () => {
-    setMessages([]);
-    setActiveChatId(Date.now().toString());
+    const newChatId = Date.now().toString();
+    setActiveChatId(newChatId);
+    setMessagesByChatId((prev) => ({
+      ...prev,
+      [newChatId]: []
+    }));
   };
 
   return (
@@ -65,6 +78,7 @@ export default function App() {
       <Sidebar 
         activeChatId={activeChatId} 
         onNewChat={handleNewChat} 
+        onSelectChat={setActiveChatId}
         onSettingsOpen={() => setIsSettingsOpen(true)}
       />
 
@@ -73,7 +87,7 @@ export default function App() {
         <Titlebar chatTitle="Untitled Chat" onRename={() => {}} />
 
         {/* Content area */}
-        <MessageList messages={messages} isTyping={isTyping} />
+        <MessageList messages={messagesByChatId[activeChatId] ?? []} isTyping={isTyping} />
 
         {/* Bottom Input */}
         <InputArea 
@@ -90,4 +104,3 @@ export default function App() {
     </div>
   );
 }
-

@@ -7,10 +7,16 @@ import { cn } from '../lib/utils';
 interface SidebarProps {
   activeChatId: string;
   onNewChat: () => void;
+  onSelectChat: (chatId: string) => void;
   onSettingsOpen: () => void;
 }
 
-export default function Sidebar({ activeChatId, onNewChat, onSettingsOpen }: SidebarProps) {
+export default function Sidebar({
+  activeChatId,
+  onNewChat,
+  onSelectChat,
+  onSettingsOpen
+}: SidebarProps) {
   const [chats] = React.useState<ChatSession[]>(MOCK_CHATS);
 
   const groupedChats = React.useMemo(() => {
@@ -37,7 +43,7 @@ export default function Sidebar({ activeChatId, onNewChat, onSettingsOpen }: Sid
         {groupChats.map((chat) => (
           <button
             key={chat.id}
-            onClick={() => {}}
+            onClick={() => onSelectChat(chat.id)}
             className={cn(
               "group relative flex items-center w-full text-left gap-3 px-3 py-2 rounded-lg text-[13px] transition-colors outline-none",
               "focus-visible:ring-2 focus-visible:ring-white/20",
