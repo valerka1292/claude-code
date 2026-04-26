@@ -34,10 +34,8 @@ export function useAgent() {
     appendReasoningChunk,
     appendContentChunk,
     appendBlock,
-    finalizeAndCommitLiveTurn,
+    commitLiveTurnAndPersist,
     resetMessageStream,
-    suspendSessionRestore,
-    resumeSessionRestore,
   } = useMessageStream(activeSession);
   const { replaceActiveController, abortActiveRequest, resetAbortController } =
     useAbortController();
@@ -279,11 +277,7 @@ export function useAgent() {
               });
             }
 
-            suspendSessionRestore();
-            try {
-              finalizeAndCommitLiveTurn();
-              setIsTyping(false);
-
+            await commitLiveTurnAndPersist(async () => {
               await persistCompletedTurn({
                 projectKey: projectKeyRef.current,
                 sessionId: session.id,
@@ -293,9 +287,8 @@ export function useAgent() {
                 assistantReasoning,
                 turnMessages,
               });
-            } finally {
-              resumeSessionRestore();
-            }
+            });
+            setIsTyping(false);
             isProcessingRef.current = false;
             setTurnActive(false);
           },
@@ -320,10 +313,8 @@ export function useAgent() {
       setUsedTokens,
       setIsTyping,
       updateLiveTurn,
-      finalizeAndCommitLiveTurn,
+      commitLiveTurnAndPersist,
       startSessionNameGeneration,
-      suspendSessionRestore,
-      resumeSessionRestore,
       setTurnActive,
       updateMsg,
     ]
