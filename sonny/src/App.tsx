@@ -56,7 +56,7 @@ export default function App() {
           finalAssistantContent += text;
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === assistantId ? { ...m, content: m.content + text, thinkingDone: true } : m,
+              m.id === assistantId ? { ...m, content: m.content + text } : m,
             ),
           );
         },
@@ -133,9 +133,7 @@ export default function App() {
           hasProvider={activeProvider !== null}
           isAgentRunning={isAgentRunning}
           onToggleAgent={() => setIsAgentRunning(!isAgentRunning)}
-          activeModel={activeProvider?.model}
           contextTokensUsed={contextTokensUsed}
-          contextWindow={activeProvider?.contextWindowSize}
         />
 
         <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />

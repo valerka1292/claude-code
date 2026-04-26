@@ -1,10 +1,11 @@
 import React, { useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
-import { Cpu, Check, Copy, ChevronDown, Wrench } from 'lucide-react';
+import { Cpu, Check, Copy, Wrench } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Message, ToolCall } from '../types';
+import { ReasoningBlock } from './ReasoningBlock';
 
 interface MessageListProps {
   messages: Message[];
@@ -124,15 +125,10 @@ export default function MessageList({ messages, isTyping }: MessageListProps) {
                 </div>
                 <div className="flex-1 min-w-0 markdown-body text-[15px] leading-relaxed text-text-primary">
                   {msg.thinking && (
-                    <details className="mb-4 group" open={!msg.thinkingDone}>
-                      <summary className="flex items-center gap-2 cursor-pointer text-xs font-medium text-text-secondary hover:text-text-primary transition-colors">
-                        <ChevronDown size={14} className="transition-transform group-open:rotate-180" />
-                        Thinking{msg.thinkingDone ? ' (completed)' : ''}
-                      </summary>
-                      <div className="mt-2 p-3 bg-bg-2 border border-border rounded-lg text-xs whitespace-pre-wrap text-text-secondary">
-                        {msg.thinking}
-                      </div>
-                    </details>
+                    <ReasoningBlock
+                      content={msg.thinking}
+                      isStreaming={isTyping && idx === messages.length - 1 && msg.role === 'assistant'}
+                    />
                   )}
 
                   {msg.toolCalls?.map(renderToolCall)}
