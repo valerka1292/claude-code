@@ -22,7 +22,7 @@ export function useAgent() {
   const [mode, setMode] = useState<Mode>("Ask");
   const {
     messages,
-    setMessages,
+    updateLiveTurn,
     isTyping,
     setIsTyping,
     usedTokens,
@@ -34,6 +34,7 @@ export function useAgent() {
     addToolCall,
     updateToolCallStatus,
     appendBlock,
+    finalizeAndCommitLiveTurn,
     resetMessageStream,
   } = useMessageStream(activeSession);
   const { replaceActiveController, abortActiveRequest, resetAbortController } =
@@ -128,7 +129,7 @@ export function useAgent() {
               arguments: {},
               status: "pending" as const,
             };
-            setMessages((prev) =>
+            updateLiveTurn((prev) =>
               prev.map((m) => {
                 if (m.id !== assistantId) return m;
                 return {
@@ -140,7 +141,7 @@ export function useAgent() {
             );
           },
           onToolCallDone: (id, args) => {
-            setMessages((prev) =>
+            updateLiveTurn((prev) =>
               prev.map((m) => {
                 if (m.id !== assistantId) return m;
 
@@ -177,7 +178,7 @@ export function useAgent() {
             });
           },
           onToolExecutionStart: (id) => {
-            setMessages((prev) =>
+            updateLiveTurn((prev) =>
               prev.map((m) => {
                 if (m.id !== assistantId) return m;
                 return {
@@ -192,7 +193,7 @@ export function useAgent() {
           },
           onToolExecutionDone: (id, result) => {
             updateToolCallStatus(assistantId, id, "success", result);
-            setMessages((prev) =>
+            updateLiveTurn((prev) =>
               prev.map((m) => {
                 if (m.id !== assistantId || !m.toolCalls) return m;
                 const blocks = m.blocks ?? [];
@@ -224,7 +225,7 @@ export function useAgent() {
           },
           onToolExecutionError: (id, error) => {
             updateToolCallStatus(assistantId, id, "error", error);
-            setMessages((prev) =>
+            updateLiveTurn((prev) =>
               prev.map((m) => {
                 if (m.id !== assistantId || !m.toolCalls) return m;
                 const blocks = m.blocks ?? [];
@@ -265,18 +266,7 @@ export function useAgent() {
             isProcessingRef.current = false;
           },
           onDone: async () => {
-            setMessages((prev) =>
-              prev.map((m) => {
-                if (m.id !== assistantId) return m;
-                const blocks = m.blocks ?? [];
-                const updatedBlocks = blocks.map((b) => {
-                  if (b.type === "reasoning") return { ...b, streaming: false };
-                  if (b.type === "text") return { ...b, streaming: false };
-                  return b;
-                });
-                return { ...m, blocks: updatedBlocks, isStreaming: false, isReasoningStreaming: false };
-              })
-            );
+            finalizeAndCommitLiveTurn();
             setIsTyping(false);
 
             await persistCompletedTurn({
@@ -309,7 +299,8 @@ export function useAgent() {
       replaceActiveController,
       setUsedTokens,
       setIsTyping,
-      setMessages,
+      updateLiveTurn,
+      finalizeAndCommitLiveTurn,
       startSessionNameGeneration,
       updateToolCallStatus,
       updateMsg,
