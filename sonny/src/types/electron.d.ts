@@ -1,3 +1,5 @@
+import type { ProvidersData } from '../types';
+
 export {};
 
 declare global {
@@ -7,6 +9,10 @@ declare global {
       maximize: () => void;
       close: () => void;
       platform: string;
+      providers?: {
+        getAll: () => Promise<ProvidersData>;
+        save: (data: ProvidersData) => Promise<ProvidersData>;
+      };
     };
   }
 }

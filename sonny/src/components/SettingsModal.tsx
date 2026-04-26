@@ -1,31 +1,84 @@
 import React from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X, Plus, Trash2, Edit2, Key, Globe, Cpu } from 'lucide-react';
-import { Provider } from '../types';
-import { MOCK_PROVIDERS } from '../constants';
+import { Plus, X } from 'lucide-react';
+import { useProviders } from '../hooks/useProviders';
+import { useProviderTest } from '../hooks/useProviderTest';
+import type { Provider } from '../types';
 import { cn } from '../lib/utils';
+import ProviderCard from './ProviderCard';
+import ProviderForm, { ProviderFormValues } from './ProviderForm';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+function valuesToProvider(values: ProviderFormValues, id: string): Provider {
+  return {
+    id,
+    visualName: values.visualName.trim(),
+    baseUrl: values.baseUrl.trim(),
+    apiKey: values.apiKey.trim(),
+    model: values.model.trim(),
+    contextWindowSize: Number(values.contextWindowSize) || 1,
+  };
+}
+
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  const [providers, setProviders] = React.useState<Provider[]>(MOCK_PROVIDERS);
+  const { data, addProvider, deleteProvider, setActiveProvider, updateProvider } = useProviders();
+  const { clear, result, test, testing } = useProviderTest();
+
   const [activeTab, setActiveTab] = React.useState<'providers' | 'general'>('providers');
+  const [isAddOpen, setIsAddOpen] = React.useState(false);
+  const [editingProvider, setEditingProvider] = React.useState<Provider | null>(null);
+
+  const providers = React.useMemo(() => Object.values(data.providers), [data.providers]);
+
+  const handleTest = async (values: ProviderFormValues) => {
+    await test(valuesToProvider(values, editingProvider?.id ?? 'test-provider'));
+  };
+
+  const handleAddProvider = async (values: ProviderFormValues) => {
+    const provider = valuesToProvider(values, `provider_${Date.now()}`);
+    await addProvider(provider);
+    setIsAddOpen(false);
+    clear();
+  };
+
+  const handleUpdateProvider = async (values: ProviderFormValues) => {
+    if (!editingProvider) {
+      return;
+    }
+
+    await updateProvider(editingProvider.id, valuesToProvider(values, editingProvider.id));
+    setEditingProvider(null);
+    clear();
+  };
 
   return (
-    <Dialog.Root open={isOpen} onOpenChange={(open) => !open && onClose()}>
+    <Dialog.Root
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) {
+          setEditingProvider(null);
+          setIsAddOpen(false);
+          clear();
+          onClose();
+        }
+      }}
+    >
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
-        <Dialog.Content 
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" />
+        <Dialog.Content
           aria-describedby="settings-description"
-          className="fixed left-1/2 top-1/2 z-50 w-full max-w-2xl max-h-[90vh] -translate-x-1/2 -translate-y-1/2 flex flex-col bg-bg-0 border border-border rounded-xl shadow-2xl overflow-hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]"
+          className="fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-bg-0 shadow-2xl"
         >
-          {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-bg-0 flex-shrink-0">
+          <div className="flex flex-shrink-0 items-center justify-between border-b border-border bg-bg-0 px-6 py-4">
             <Dialog.Title className="text-lg font-medium text-text-primary">Settings</Dialog.Title>
-            <Dialog.Close aria-label="Close" className="p-1.5 hover:bg-bg-2 text-text-secondary hover:text-text-primary rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus-ring">
+            <Dialog.Close
+              aria-label="Close"
+              className="rounded-md p-1.5 text-text-secondary outline-none transition-colors hover:bg-bg-2 hover:text-text-primary focus-visible:ring-2 focus-visible:ring-focus-ring"
+            >
               <X size={18} />
             </Dialog.Close>
           </div>
@@ -34,14 +87,15 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             Configuration preferences for your agent workspace.
           </Dialog.Description>
 
-          <div className="flex flex-1 overflow-hidden min-h-[400px]">
-            {/* Sidebar Tabs */}
-            <div className="w-[180px] border-r border-border bg-bg-1 p-4 flex flex-col gap-1 overflow-y-auto">
+          <div className="flex min-h-[400px] flex-1 overflow-hidden">
+            <div className="flex w-[180px] flex-col gap-1 overflow-y-auto border-r border-border bg-bg-1 p-4">
               <button
                 onClick={() => setActiveTab('general')}
                 className={cn(
-                  "flex items-center justify-start gap-2 px-3 py-2 rounded-md text-sm transition-colors w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring",
-                  activeTab === 'general' ? 'bg-bg-3 text-text-primary font-medium' : 'hover:bg-bg-2 text-text-secondary text-text-primary hover:text-text-primary'
+                  'w-full rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring',
+                  activeTab === 'general'
+                    ? 'bg-bg-3 font-medium text-text-primary'
+                    : 'text-text-secondary hover:bg-bg-2 hover:text-text-primary',
                 )}
               >
                 General
@@ -49,93 +103,79 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               <button
                 onClick={() => setActiveTab('providers')}
                 className={cn(
-                  "flex items-center justify-start gap-2 px-3 py-2 rounded-md text-sm transition-colors w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring",
-                  activeTab === 'providers' ? 'bg-bg-3 text-text-primary font-medium' : 'hover:bg-bg-2 text-text-secondary hover:text-text-primary'
+                  'w-full rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring',
+                  activeTab === 'providers'
+                    ? 'bg-bg-3 font-medium text-text-primary'
+                    : 'text-text-secondary hover:bg-bg-2 hover:text-text-primary',
                 )}
               >
                 Providers
               </button>
             </div>
 
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-6 bg-bg-0">
+            <div className="flex-1 overflow-y-auto bg-bg-0 p-6">
               {activeTab === 'providers' && (
-                <div className="flex flex-col gap-6">
+                <div className="flex flex-col gap-5">
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="font-medium text-text-primary">Model Providers</h3>
-                      <p className="text-sm text-text-secondary mt-1">Manage your AI backend connections.</p>
+                      <p className="mt-1 text-sm text-text-secondary">Manage your AI backend connections.</p>
                     </div>
-                    <button className="flex items-center gap-2 px-3 py-1.5 bg-accent text-accent-fg rounded-md text-sm font-medium hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring">
+                    <button
+                      className="flex items-center gap-2 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg transition-opacity hover:opacity-90"
+                      onClick={() => {
+                        setEditingProvider(null);
+                        setIsAddOpen((prev) => !prev);
+                      }}
+                    >
                       <Plus size={16} />
                       Add connection
                     </button>
                   </div>
 
-                  <div className="flex flex-col gap-3">
-                    {providers.map((p) => (
-                      <div key={p.id} className="p-4 border border-border rounded-lg bg-bg-1 hover:border-bg-3 transition-colors group">
-                        <div className="flex items-start justify-between gap-3 mb-4">
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <div className="w-10 h-10 bg-gradient-to-br from-bg-2 to-bg-3 border border-border rounded-lg flex items-center justify-center flex-shrink-0">
-                              <Cpu size={18} className="text-text-primary" />
-                            </div>
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium text-text-primary mb-0.5 truncate">{p.name}</div>
-                              <div className="text-xs text-text-secondary font-mono truncate">{p.model}</div>
-                            </div>
-                          </div>
-                          
-                          {/* Actions visible on mobile, highlighted on hover */}
-                          <div className="flex items-center gap-1 text-text-secondary md:opacity-60 group-hover:opacity-100 transition-opacity">
-                            <button 
-                              aria-label="Edit provider"
-                              className="p-1.5 hover:bg-bg-3 hover:text-text-primary rounded-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                            >
-                              <Edit2 size={14} />
-                            </button>
-                            <button 
-                              aria-label="Delete provider"
-                              className="p-1.5 hover:bg-red-500/10 hover:text-red-400 rounded-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </div>
+                  {result && (
+                    <div className={`rounded-md border px-3 py-2 text-sm ${result.ok ? 'border-green-500/40 text-green-400' : 'border-red-500/40 text-red-400'}`}>
+                      {result.message}
+                    </div>
+                  )}
 
-                        {/* Meta info */}
-                        <div className="flex flex-col gap-2 text-xs">
-                          <div className="flex items-center gap-2 text-text-secondary">
-                            <Globe size={12} className="flex-shrink-0" />
-                            <span className="truncate font-mono">{p.baseUrl}</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-text-secondary">
-                            <Key size={12} className="flex-shrink-0" />
-                            <span className="font-mono">{p.apiKey ? '••••••••' : 'No key'}</span>
-                          </div>
-                        </div>
-                      </div>
+                  {(isAddOpen || editingProvider) && (
+                    <ProviderForm
+                      initialValues={editingProvider ?? undefined}
+                      onSubmit={editingProvider ? handleUpdateProvider : handleAddProvider}
+                      onTest={handleTest}
+                      submitLabel={editingProvider ? 'Update' : 'Save'}
+                      testLabel={testing ? 'Testing...' : 'Test'}
+                      disabled={testing}
+                    />
+                  )}
+
+                  <div className="flex flex-col gap-3">
+                    {providers.map((provider) => (
+                      <ProviderCard
+                        key={provider.id}
+                        provider={provider}
+                        isActive={provider.id === data.activeProviderId}
+                        onSetActive={setActiveProvider}
+                        onEdit={(currentProvider) => {
+                          setIsAddOpen(false);
+                          clear();
+                          setEditingProvider(currentProvider);
+                        }}
+                        onDelete={deleteProvider}
+                      />
                     ))}
+                    {providers.length === 0 && (
+                      <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-text-secondary">
+                        No providers yet. Add your first connection.
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
 
-              {activeTab === 'general' && (
-                <div className="text-sm text-text-secondary">
-                  General settings would go here...
-                </div>
-              )}
+              {activeTab === 'general' && <div className="text-sm text-text-secondary">General settings would go here...</div>}
             </div>
-          </div>
-
-          {/* Footer */}
-          <div className="px-6 py-4 border-t border-border bg-bg-1 flex justify-end gap-3 rounded-b-xl flex-shrink-0">
-            <Dialog.Close className="px-4 py-2 text-sm font-medium text-text-primary hover:bg-bg-3 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus-ring">
-              Cancel
-            </Dialog.Close>
-            <button className="px-4 py-2 text-sm font-medium bg-accent text-accent-fg rounded-md hover:opacity-90 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus-ring">
-              Save changes
-            </button>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
