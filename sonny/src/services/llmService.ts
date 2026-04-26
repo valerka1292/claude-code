@@ -23,12 +23,6 @@ export interface CompletionUsage {
   total_tokens: number;
 }
 
-interface StreamRetryOptions {
-  retries?: number;
-  baseDelayMs?: number;
-  timeoutMs?: number;
-}
-
 interface CompletionChunkChoice {
   delta?: {
     content?: string;
@@ -68,17 +62,13 @@ const SET_DIALOG_NAME_TOOL = {
   },
 };
 
-export function streamChatCompletion(
+export async function streamChatCompletion(
   provider: Provider,
   messages: { role: string; content: string }[],
   callbacks: StreamCallbacks,
   signal?: AbortSignal,
   tools?: unknown[],
-  options?: StreamRetryOptions,
-) {
-  const retries = options?.retries ?? 2;
-  const baseDelayMs = options?.baseDelayMs ?? 500;
-  const timeoutMs = options?.timeoutMs ?? 45000;
+): Promise<void> {
   const url = `${provider.baseUrl}/chat/completions`;
 
   const body: Record<string, unknown> = {
@@ -92,198 +82,138 @@ export function streamChatCompletion(
     body.tools = tools;
   }
 
-  const run = async () => {
-    for (let attempt = 0; attempt <= retries; attempt += 1) {
-      const requestController = new AbortController();
-      const timeoutId = window.setTimeout(() => requestController.abort(), timeoutMs);
-      const abortFromCaller = () => requestController.abort();
-      signal?.addEventListener('abort', abortFromCaller, { once: true });
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let doneCalled = false;
 
-      try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${provider.apiKey}`,
-          },
-          body: JSON.stringify(body),
-          signal: requestController.signal,
-        });
-
-      if (!response.ok) {
-        const text = await response.text();
-          const retryable = response.status === 429 || response.status >= 500;
-          if (retryable && attempt < retries) {
-            await sleep(baseDelayMs * 2 ** attempt);
-            continue;
-          }
-          callbacks.onError(new Error(`HTTP ${response.status}: ${text}`));
-          return;
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        callbacks.onError(new Error('No response body'));
-        return;
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-      const accumulatedToolCalls: Record<number, ToolCallDelta> = {};
-      let lastUsage: CompletionUsage | undefined;
-      let doneCalled = false;
-      let errorCalled = false;
-
-      const emitError = (error: unknown) => {
-        if (errorCalled) {
-          return;
-        }
-        errorCalled = true;
-        callbacks.onError(error);
-      };
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            break;
-          }
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || !trimmed.startsWith('data:')) {
-              continue;
-            }
-
-            const jsonStr = trimmed.slice(5).trim();
-            if (jsonStr === '[DONE]') {
-              if (!doneCalled) {
-                callbacks.onDone(lastUsage);
-                doneCalled = true;
-              }
-              return;
-            }
-
-            try {
-              const parsed = JSON.parse(jsonStr) as CompletionChunk;
-              if (parsed.usage) {
-                lastUsage = parsed.usage;
-              }
-
-              const choice = parsed.choices?.[0];
-              if (!choice) {
-                continue;
-              }
-
-              const delta = choice.delta;
-              if (!delta) {
-                continue;
-              }
-
-              if (delta.reasoning_content) {
-                callbacks.onThinking(delta.reasoning_content);
-              }
-
-              if (delta.content) {
-                callbacks.onContent(delta.content);
-              }
-
-              if (delta.tool_calls) {
-                for (const tc of delta.tool_calls) {
-                  const index = tc.index;
-                  if (!accumulatedToolCalls[index]) {
-                    accumulatedToolCalls[index] = {
-                      index,
-                      id: tc.id,
-                      function: {
-                        name: tc.function?.name,
-                        arguments: '',
-                      },
-                    };
-                  }
-
-                  if (tc.function?.name) {
-                    accumulatedToolCalls[index].function = {
-                      ...accumulatedToolCalls[index].function,
-                      name: tc.function.name,
-                    };
-                  }
-
-                  if (tc.function?.arguments) {
-                    const currentArgs = accumulatedToolCalls[index].function?.arguments ?? '';
-                    accumulatedToolCalls[index].function = {
-                      ...accumulatedToolCalls[index].function,
-                      arguments: currentArgs + tc.function.arguments,
-                    };
-                  }
-
-                  callbacks.onToolCall({ ...accumulatedToolCalls[index] });
-                }
-              }
-
-              if (choice.finish_reason === 'stop') {
-                // Wait for usage or [DONE]
-              }
-            } catch {
-              // Ignore malformed/partial chunks.
-            }
-          }
-        }
-      } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
-          await reader.cancel().catch(() => undefined);
-          return;
-        }
-        await reader.cancel().catch(() => undefined);
-        emitError(error);
-      } finally {
-        await reader.cancel().catch(() => undefined);
-      }
-
-        if (!doneCalled) {
-          callbacks.onDone(lastUsage);
-        }
-        return;
-      } catch (error) {
-        const abortedByCaller = Boolean(signal?.aborted);
-        if (error instanceof Error && error.name === 'AbortError') {
-          if (abortedByCaller) {
-            return;
-          }
-
-          if (attempt < retries) {
-            await sleep(baseDelayMs * 2 ** attempt);
-            continue;
-          }
-          callbacks.onError(new Error('Request timed out while streaming response.'));
-          return;
-        }
-
-        if (attempt < retries) {
-          await sleep(baseDelayMs * 2 ** attempt);
-          continue;
-        }
-
-        callbacks.onError(error);
-        return;
-      } finally {
-        clearTimeout(timeoutId);
-        signal?.removeEventListener('abort', abortFromCaller);
-      }
+  const safeDone = (usage?: CompletionUsage) => {
+    if (!doneCalled) {
+      doneCalled = true;
+      callbacks.onDone(usage);
     }
   };
 
-  void run();
-}
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${provider.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
 
-function sleep(ms: number) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
+    if (!response.ok) {
+      const text = await response.text();
+      callbacks.onError(new Error(`HTTP ${response.status}: ${text}`));
+      return;
+    }
+
+    reader = response.body?.getReader();
+    if (!reader) {
+      callbacks.onError(new Error('No response body'));
+      return;
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const accumulatedToolCalls: Record<number, ToolCallDelta> = {};
+    let lastUsage: CompletionUsage | undefined;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data:')) {
+          continue;
+        }
+
+        const jsonStr = trimmed.slice(5).trim();
+        if (jsonStr === '[DONE]') {
+          safeDone(lastUsage);
+          return;
+        }
+
+        try {
+          const parsed = JSON.parse(jsonStr) as CompletionChunk;
+          if (parsed.usage) {
+            lastUsage = parsed.usage;
+          }
+
+          const choice = parsed.choices?.[0];
+          if (!choice) {
+            continue;
+          }
+
+          const delta = choice.delta;
+          if (!delta) {
+            continue;
+          }
+
+          if (delta.reasoning_content) {
+            callbacks.onThinking(delta.reasoning_content);
+          }
+
+          if (delta.content) {
+            callbacks.onContent(delta.content);
+          }
+
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const index = tc.index;
+              if (!accumulatedToolCalls[index]) {
+                accumulatedToolCalls[index] = {
+                  index,
+                  id: tc.id,
+                  function: {
+                    name: tc.function?.name,
+                    arguments: '',
+                  },
+                };
+              }
+
+              if (tc.function?.name) {
+                accumulatedToolCalls[index].function = {
+                  ...accumulatedToolCalls[index].function,
+                  name: tc.function.name,
+                };
+              }
+
+              if (tc.function?.arguments) {
+                const currentArgs = accumulatedToolCalls[index].function?.arguments ?? '';
+                accumulatedToolCalls[index].function = {
+                  ...accumulatedToolCalls[index].function,
+                  arguments: currentArgs + tc.function.arguments,
+                };
+              }
+
+              callbacks.onToolCall({ ...accumulatedToolCalls[index] });
+            }
+          }
+        } catch {
+          // Ignore malformed/partial chunks.
+        }
+      }
+    }
+
+    safeDone(lastUsage);
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      safeDone();
+      return;
+    }
+    callbacks.onError(error);
+  } finally {
+    await reader?.cancel().catch(() => undefined);
+  }
 }
 
 export async function generateChatName(provider: Provider, firstUserMessage: string): Promise<string> {
