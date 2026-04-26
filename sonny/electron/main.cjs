@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const fsPromises = require('fs/promises');
 const os = require('os');
 const path = require('path');
+const { z } = require('zod');
 const { registry } = require('./tools/registry.cjs');
 const { getSystemPrompt } = require('./prompts.cjs');
 
@@ -15,8 +16,83 @@ const historyDir = path.join(sonnyDir, 'history');
 const historyIndexPath = path.join(historyDir, 'index.json');
 const sandboxPath = path.join(sonnyDir, 'sandbox');
 const promptsDir = path.join(sonnyDir, 'prompts');
+const TOOL_EXEC_TIMEOUT_MS = 30000;
 
 const SAFE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+const roleSchema = z.enum(['user', 'assistant', 'system', 'tool']);
+const providerSchema = z.object({
+  id: z.string().min(1),
+  visualName: z.string().min(1),
+  baseUrl: z.string().min(1),
+  apiKey: z.string(),
+  model: z.string().min(1),
+  contextWindowSize: z.number().int().nonnegative(),
+});
+const providersDataSchema = z.object({
+  activeProviderId: z.string().nullable(),
+  providers: z.record(z.string(), providerSchema),
+});
+const toolCallSchema = z.object({
+  index: z.number().int(),
+  id: z.string().optional(),
+  function: z
+    .object({
+      name: z.string().optional(),
+      arguments: z.string().optional(),
+    })
+    .optional(),
+  result: z
+    .object({
+      status: z.enum(['running', 'success', 'error']),
+      error: z.string().optional(),
+      output: z.unknown().optional(),
+    })
+    .optional(),
+});
+const storedMessageSchema = z.object({
+  id: z.string().min(1),
+  role: z.enum(['user', 'assistant']),
+  content: z.string(),
+  timestamp: z.number().int(),
+  thinking: z.string().optional(),
+  toolCalls: z.array(toolCallSchema).optional(),
+});
+const llmHistorySchema = z.object({
+  role: roleSchema,
+  content: z.string(),
+  tool_call_id: z.string().optional(),
+  tool_calls: z.array(z.unknown()).optional(),
+});
+const chatDataSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  createdAt: z.number().int(),
+  updatedAt: z.number().int(),
+  messages: z.array(storedMessageSchema),
+  llmHistory: z.array(llmHistorySchema),
+  contextTokensUsed: z.number().nonnegative(),
+});
+const chatSessionSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  updatedAt: z.number().int(),
+});
+
+function withTimeout(promise, timeoutMs, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 function validateChatId(chatId) {
   if (typeof chatId !== 'string' || !SAFE_ID_PATTERN.test(chatId)) {
@@ -124,9 +200,15 @@ function registerIpc() {
     const tool = registry.get(name);
     if (!tool) throw new Error(`Tool ${name} not found`);
     await ensureDir(sandboxPath);
-    const context = { cwd: sandboxPath, signal: new AbortController().signal };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new Error(`Tool ${name} timed out`)), TOOL_EXEC_TIMEOUT_MS);
+    const context = { cwd: sandboxPath, signal: controller.signal, timeoutMs: TOOL_EXEC_TIMEOUT_MS };
     const parsed = tool.inputSchema.parse(input);
-    return tool.execute(parsed, context);
+    try {
+      return await withTimeout(tool.execute(parsed, context), TOOL_EXEC_TIMEOUT_MS, `Tool ${name}`);
+    } finally {
+      clearTimeout(timeout);
+    }
   });
 
   // Prompts
@@ -137,15 +219,20 @@ function registerIpc() {
   // Providers & History
   ipcMain.handle('providers:getAll', async () => readProviders());
   ipcMain.handle('providers:save', async (_, data) => {
-    await writeProviders(data);
+    const validated = providersDataSchema.parse(data);
+    await writeProviders(validated);
     return readProviders();
   });
   ipcMain.handle('history:list', async () => listChats());
   ipcMain.handle('history:get', async (_, chatId) => readChat(chatId));
   ipcMain.handle('history:save', async (_, chatId, data) => {
-    await writeChat(chatId, data);
+    const validatedChat = chatDataSchema.parse(data);
+    await writeChat(chatId, validatedChat);
     const list = await listChats();
-    const updated = [...list.filter(c => c.id !== chatId), { id: chatId, title: data.title, updatedAt: Date.now() }];
+    const updated = chatSessionSchema.array().parse([
+      ...list.filter((c) => c.id !== chatId),
+      { id: chatId, title: validatedChat.title, updatedAt: Date.now() },
+    ]);
     await atomicWriteFile(historyIndexPath, JSON.stringify(updated));
     return updated;
   });

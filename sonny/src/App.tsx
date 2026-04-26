@@ -12,6 +12,17 @@ import { executeTool, getSystemPrompt } from './services/toolBridge';
 
 const MAX_TOOL_ITERATIONS = 10;
 
+function applyToolCallDelta(messages: Message[], assistantId: string, toolCall: ToolCall): Message[] {
+  return messages.map((m) => {
+    if (m.id !== assistantId) return m;
+    const toolCalls = [...(m.toolCalls || [])];
+    const idx = toolCalls.findIndex((tc) => tc.index === toolCall.index);
+    if (idx >= 0) toolCalls[idx] = { ...toolCalls[idx], ...toolCall };
+    else toolCalls.push(toolCall);
+    return { ...m, toolCalls };
+  });
+}
+
 export default function App() {
   const {
     chats,
@@ -44,6 +55,7 @@ export default function App() {
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const { activeProvider } = useProviders();
   const pendingRequestControllerRef = useRef<AbortController | null>(null);
+  const isMountedRef = useRef(true);
 
   const cancelPendingRequest = useCallback(() => {
     console.log('[App] Cancelling pending request');
@@ -52,7 +64,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       cancelPendingRequest();
     };
   }, [cancelPendingRequest]);
@@ -96,9 +110,14 @@ export default function App() {
       let toolIteration = 0;
 
       const runIteration = async (history: any[]) => {
+        const shouldProcessUpdate = () =>
+          isMountedRef.current &&
+          !requestController.signal.aborted &&
+          activeChatIdRef.current === chatIdSnapshot;
+
         if (toolIteration++ >= MAX_TOOL_ITERATIONS) {
           console.error('[App] Max tool iterations reached');
-          setIsTyping(false);
+          if (shouldProcessUpdate()) setIsTyping(false);
           return;
         }
 
@@ -113,6 +132,7 @@ export default function App() {
         };
 
         let workingMessages = [...currentMessages, assistantMsg];
+        if (!shouldProcessUpdate()) return;
         setMessages(workingMessages);
         setIsTyping(true);
 
@@ -129,7 +149,7 @@ export default function App() {
           historyForLLM,
           {
             onContent: (text) => {
-              if (activeChatIdRef.current !== chatIdSnapshot) return;
+              if (!shouldProcessUpdate()) return;
               finalAssistantContent += text;
               workingMessages = workingMessages.map((m) =>
                 m.id === assistantId ? { ...m, content: m.content + text } : m,
@@ -138,7 +158,7 @@ export default function App() {
               scheduleAutoSave();
             },
             onThinking: (text) => {
-              if (activeChatIdRef.current !== chatIdSnapshot) return;
+              if (!shouldProcessUpdate()) return;
               finalAssistantThinking += text;
               workingMessages = workingMessages.map((m) =>
                 m.id === assistantId ? { ...m, thinking: (m.thinking ?? '') + text } : m,
@@ -147,23 +167,16 @@ export default function App() {
               scheduleAutoSave();
             },
             onToolCall: (toolCall) => {
-              if (activeChatIdRef.current !== chatIdSnapshot) return;
+              if (!shouldProcessUpdate()) return;
               const existing = finalToolCalls.get(toolCall.index) || {};
               finalToolCalls.set(toolCall.index, { ...existing, ...toolCall });
-              
-              workingMessages = workingMessages.map((m) => {
-                if (m.id !== assistantId) return m;
-                const toolCalls = [...(m.toolCalls || [])];
-                const idx = toolCalls.findIndex(tc => tc.index === toolCall.index);
-                if (idx >= 0) toolCalls[idx] = { ...toolCalls[idx], ...toolCall };
-                else toolCalls.push(toolCall);
-                return { ...m, toolCalls };
-              });
+
+              workingMessages = applyToolCallDelta(workingMessages, assistantId, toolCall);
               setMessages(workingMessages);
               scheduleAutoSave();
             },
             onDone: async (usage) => {
-              if (activeChatIdRef.current !== chatIdSnapshot) return;
+              if (!shouldProcessUpdate()) return;
               
               const finalToolCallsList = Array.from(finalToolCalls.values());
               const lastAssistant: Message = {
@@ -205,6 +218,7 @@ export default function App() {
                         t.index === tc.index ? { ...t, result: { status: 'running' } } : t
                       )
                     };
+                    if (!shouldProcessUpdate()) return;
                     setMessages([...currentMessages]);
 
                     const args = tc.function?.arguments ? JSON.parse(tc.function.arguments) : {};
@@ -236,11 +250,14 @@ export default function App() {
                       content: `Error: ${error.message}` 
                     });
                   }
+                  if (!shouldProcessUpdate()) return;
                   setMessages([...currentMessages]);
                 }
-                
+
+                if (!shouldProcessUpdate()) return;
                 await runIteration(toolResultsHistory);
               } else {
+                if (!shouldProcessUpdate()) return;
                 setIsTyping(false);
                 setLlmHistory(historyWithAssistant);
                 await persistChatData(chatIdSnapshot, currentMessages, historyWithAssistant, usage?.total_tokens ?? contextTokensUsedRef.current);
@@ -253,6 +270,7 @@ export default function App() {
             },
             onError: async (error: any) => {
               console.error('[App] Stream error:', error);
+              if (!shouldProcessUpdate()) return;
               setIsTyping(false);
               const errorAssistantMsg = {
                 ...assistantMsg,

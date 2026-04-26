@@ -15,6 +15,7 @@ View your app in AI Studio: https://ai.studio/apps/faadf36d-d857-4356-b38b-46593
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Create `.env.local` from `.env.example` and set `GEMINI_API_KEY`
+3. (Optional) set `VITE_ENABLE_HMR=true` in `.env.local` if you want HMR locally
+4. Run the app:
    `npm run dev`
