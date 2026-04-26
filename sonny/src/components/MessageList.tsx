@@ -124,10 +124,10 @@ export default function MessageList({ messages, isTyping }: MessageListProps) {
                 </div>
                 <div className="flex-1 min-w-0 markdown-body text-[15px] leading-relaxed text-text-primary">
                   {msg.thinking && (
-                    <details className="mb-4 group" open>
+                    <details className="mb-4 group" open={!msg.thinkingDone}>
                       <summary className="flex items-center gap-2 cursor-pointer text-xs font-medium text-text-secondary hover:text-text-primary transition-colors">
                         <ChevronDown size={14} className="transition-transform group-open:rotate-180" />
-                        Thinking
+                        Thinking{msg.thinkingDone ? ' (completed)' : ''}
                       </summary>
                       <div className="mt-2 p-3 bg-bg-2 border border-border rounded-lg text-xs whitespace-pre-wrap text-text-secondary">
                         {msg.thinking}

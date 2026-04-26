@@ -55,7 +55,9 @@ export default function App() {
         onContent: (text) => {
           finalAssistantContent += text;
           setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + text } : m)),
+            prev.map((m) =>
+              m.id === assistantId ? { ...m, content: m.content + text, thinkingDone: true } : m,
+            ),
           );
         },
         onThinking: (text) => {
