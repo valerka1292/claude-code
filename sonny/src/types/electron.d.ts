@@ -1,4 +1,4 @@
-import type { ProvidersData } from '../types';
+import type { ChatData, ChatSession, ProvidersData } from '../types';
 
 export {};
 
@@ -12,6 +12,12 @@ declare global {
       providers?: {
         getAll: () => Promise<ProvidersData>;
         save: (data: ProvidersData) => Promise<ProvidersData>;
+      };
+      history?: {
+        list: () => Promise<ChatSession[]>;
+        get: (chatId: string) => Promise<ChatData | null>;
+        save: (chatId: string, data: ChatData) => Promise<ChatSession[]>;
+        delete: (chatId: string) => Promise<ChatSession[]>;
       };
     };
   }

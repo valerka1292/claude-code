@@ -18,10 +18,29 @@ export interface Message {
   toolCalls?: ToolCall[];
 }
 
+export interface StoredMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+  thinking?: string;
+  toolCalls?: ToolCall[];
+}
+
 export interface ChatSession {
   id: string;
   title: string;
-  updatedAt: Date;
+  updatedAt: number;
+}
+
+export interface ChatData {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messages: StoredMessage[];
+  llmHistory: { role: string; content: string }[];
+  contextTokensUsed: number;
 }
 
 export interface Provider {

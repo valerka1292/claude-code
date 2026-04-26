@@ -5,6 +5,7 @@ const path = require('path');
 
 const isDev = process.env.NODE_ENV === 'development';
 const providersPath = path.join(os.homedir(), '.sonny', 'providers.json');
+const historyDir = path.join(os.homedir(), '.sonny', 'history');
 
 function ensureProvidersDir() {
   fs.mkdirSync(path.dirname(providersPath), { recursive: true });
@@ -44,6 +45,71 @@ function registerProvidersIpc() {
   });
 }
 
+function ensureHistoryDir() {
+  fs.mkdirSync(historyDir, { recursive: true });
+}
+
+function readChat(chatId) {
+  ensureHistoryDir();
+  const filePath = path.join(historyDir, `${chatId}.json`);
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeChat(chatId, data) {
+  ensureHistoryDir();
+  const filePath = path.join(historyDir, `${chatId}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+function listChats() {
+  ensureHistoryDir();
+  const files = fs.readdirSync(historyDir);
+
+  return files
+    .filter((fileName) => fileName.endsWith('.json'))
+    .map((fileName) => {
+      const id = path.basename(fileName, '.json');
+      const raw = readChat(id);
+      if (!raw || typeof raw !== 'object') {
+        return null;
+      }
+
+      return {
+        id: typeof raw.id === 'string' ? raw.id : id,
+        title: typeof raw.title === 'string' ? raw.title : 'Untitled Chat',
+        updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : 0,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+function registerHistoryIpc() {
+  ipcMain.handle('history:list', () => listChats());
+  ipcMain.handle('history:get', (_, chatId) => readChat(chatId));
+  ipcMain.handle('history:save', (_, chatId, data) => {
+    writeChat(chatId, data);
+    return listChats();
+  });
+  ipcMain.handle('history:delete', (_, chatId) => {
+    ensureHistoryDir();
+    const filePath = path.join(historyDir, `${chatId}.json`);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    return listChats();
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1400,
@@ -79,6 +145,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   registerProvidersIpc();
+  registerHistoryIpc();
   createWindow();
 });
 

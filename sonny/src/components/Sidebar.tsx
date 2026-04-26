@@ -1,45 +1,49 @@
 import React from 'react';
-import { Plus, MessageSquare, Trash2, Edit2, Settings } from 'lucide-react';
+import { MessageSquare, Plus, Settings, Trash2 } from 'lucide-react';
 import { ChatSession } from '../types';
-import { MOCK_CHATS } from '../constants';
 import { cn } from '../lib/utils';
 
 interface SidebarProps {
   activeChatId: string;
+  chats: ChatSession[];
   onNewChat: () => void;
   onSelectChat: (chatId: string) => void;
+  onDeleteChat: (chatId: string) => void;
   onSettingsOpen: () => void;
 }
 
 export default function Sidebar({
   activeChatId,
+  chats,
   onNewChat,
   onSelectChat,
-  onSettingsOpen
+  onDeleteChat,
+  onSettingsOpen,
 }: SidebarProps) {
-  const [chats] = React.useState<ChatSession[]>(MOCK_CHATS);
-
   const groupedChats = React.useMemo(() => {
     const now = new Date();
-    const today = new Date(now.setHours(0,0,0,0));
+    const today = new Date(now.setHours(0, 0, 0, 0));
     const yesterday = new Date(today.getTime() - 86400000);
     const week = new Date(today.getTime() - 7 * 86400000);
 
     return {
-      today: chats.filter((c) => new Date(c.updatedAt) >= today),
-      yesterday: chats.filter((c) => new Date(c.updatedAt) >= yesterday && new Date(c.updatedAt) < today),
-      week: chats.filter((c) => new Date(c.updatedAt) >= week && new Date(c.updatedAt) < yesterday),
-      older: chats.filter((c) => new Date(c.updatedAt) < week)
+      today: chats.filter((chat) => new Date(chat.updatedAt) >= today),
+      yesterday: chats.filter(
+        (chat) => new Date(chat.updatedAt) >= yesterday && new Date(chat.updatedAt) < today,
+      ),
+      week: chats.filter((chat) => new Date(chat.updatedAt) >= week && new Date(chat.updatedAt) < yesterday),
+      older: chats.filter((chat) => new Date(chat.updatedAt) < week),
     };
   }, [chats]);
 
   const renderChatGroup = (title: string, groupChats: ChatSession[]) => {
-    if (groupChats.length === 0) return null;
+    if (groupChats.length === 0) {
+      return null;
+    }
+
     return (
       <div className="mb-2">
-        <div className="px-3 pt-4 pb-2 first:pt-0 text-xs font-medium text-text-secondary">
-          {title}
-        </div>
+        <div className="first:pt-0 px-3 pb-2 pt-4 text-xs font-medium text-text-secondary">{title}</div>
         {groupChats.map((chat) => (
           <div
             key={chat.id}
@@ -53,27 +57,23 @@ export default function Sidebar({
               }
             }}
             className={cn(
-              'group relative flex items-center w-full text-left gap-3 px-3 py-2 rounded-lg text-[13px] transition-colors outline-none',
+              'group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] outline-none transition-colors',
               'focus-visible:ring-2 focus-visible:ring-white/20',
               activeChatId === chat.id
                 ? 'bg-bg-3 text-text-primary'
-                : 'hover:bg-bg-2 text-text-secondary hover:text-text-primary'
+                : 'text-text-secondary hover:bg-bg-2 hover:text-text-primary',
             )}
           >
             <MessageSquare size={14} className="flex-shrink-0 opacity-60" />
-            <span className="truncate flex-1 min-w-0">{chat.title}</span>
+            <span className="min-w-0 flex-1 truncate">{chat.title}</span>
 
-            <div className="hidden group-hover:flex items-center gap-0.5 ml-auto relative z-10">
+            <div className="relative z-10 ml-auto hidden items-center gap-0.5 group-hover:flex">
               <button
-                onClick={(e) => { e.stopPropagation(); }}
-                className="p-1.5 hover:bg-bg-3 rounded text-text-secondary hover:text-text-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
-                aria-label="Rename chat"
-              >
-                <Edit2 size={14} />
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); }}
-                className="p-1.5 hover:bg-red-500/10 rounded text-text-secondary hover:text-red-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteChat(chat.id);
+                }}
+                className="rounded p-1.5 text-text-secondary transition-colors hover:bg-red-500/10 hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
                 aria-label="Delete chat"
               >
                 <Trash2 size={14} />
@@ -86,39 +86,41 @@ export default function Sidebar({
   };
 
   return (
-    <aside className="w-[260px] bg-bg-1 flex flex-col h-full flex-shrink-0 border-r border-border">
-      <div className="h-11 flex-shrink-0 flex items-center px-4 border-b border-border titlebar-drag">
+    <aside className="flex h-full w-[260px] flex-shrink-0 flex-col border-r border-border bg-bg-1">
+      <div className="titlebar-drag flex h-11 flex-shrink-0 items-center border-b border-border px-4">
         <span className="text-[13px] font-medium text-text-secondary">Agent Workspace</span>
       </div>
 
-      <div className="p-3 border-b border-border flex-shrink-0">
+      <div className="flex-shrink-0 border-b border-border p-3">
         <button
           onClick={onNewChat}
-          className="w-full flex items-center gap-2.5 py-2.5 px-3 bg-bg-2 hover:bg-bg-3 border border-border rounded-lg text-[13px] font-medium transition-colors no-drag text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
+          className="no-drag w-full rounded-lg border border-border bg-bg-2 px-3 py-2.5 text-[13px] font-medium text-text-primary transition-colors hover:bg-bg-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
         >
-          <Plus size={16} strokeWidth={2} />
-          New chat
+          <span className="flex items-center gap-2.5">
+            <Plus size={16} strokeWidth={2} />
+            New chat
+          </span>
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-2 py-4 flex flex-col gap-0.5">
+      <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-4">
         {renderChatGroup('Today', groupedChats.today)}
         {renderChatGroup('Yesterday', groupedChats.yesterday)}
         {renderChatGroup('Previous 7 Days', groupedChats.week)}
         {renderChatGroup('Older', groupedChats.older)}
       </div>
 
-      <div className="p-3 border-t border-border flex flex-col gap-1 flex-shrink-0">
+      <div className="flex flex-shrink-0 flex-col gap-1 border-t border-border p-3">
         <button
           onClick={onSettingsOpen}
-          className="w-full flex items-center gap-3 py-2 px-3 hover:bg-bg-3 rounded-lg text-sm text-text-primary transition-colors no-drag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
+          className="no-drag w-full rounded-lg px-3 py-2 text-sm text-text-primary transition-colors hover:bg-bg-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
         >
-          <Settings size={16} className="text-text-secondary" />
-          Settings
+          <span className="flex items-center gap-3">
+            <Settings size={16} className="text-text-secondary" />
+            Settings
+          </span>
         </button>
-        <div className="px-3 pt-1 pb-1 text-[10px] text-text-secondary">
-          v0.0.1
-        </div>
+        <div className="px-3 pb-1 pt-1 text-[10px] text-text-secondary">v0.0.1</div>
       </div>
     </aside>
   );
