@@ -1,10 +1,10 @@
 import React, { useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
-import { Cpu, Check, Copy } from 'lucide-react';
+import { Cpu, Check, Copy, ChevronDown, Wrench } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Message } from '../types';
+import { Message, ToolCall } from '../types';
 
 interface MessageListProps {
   messages: Message[];
@@ -22,7 +22,6 @@ function CodeBlock({ language, children }: { language: string; children: string 
 
   return (
     <div className="group relative my-4 rounded-lg border border-border overflow-hidden bg-[#0d1117]">
-      {/* Code Header */}
       <div className="flex items-center justify-between px-4 py-2 bg-bg-1/50 border-b border-border">
         <span className="text-xs font-mono text-text-secondary">{language}</span>
         <button
@@ -34,10 +33,9 @@ function CodeBlock({ language, children }: { language: string; children: string 
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      {/* Code Body */}
       <SyntaxHighlighter
         language={language}
-        style={vscDarkPlus as any}
+        style={vscDarkPlus as never}
         customStyle={{
           margin: 0,
           padding: '1rem',
@@ -60,18 +58,16 @@ export default function MessageList({ messages, isTyping }: MessageListProps) {
 
   if (messages.length === 0) {
     return (
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.7, ease: "easeOut" }}
+        transition={{ duration: 0.7, ease: 'easeOut' }}
         className="flex-1 flex flex-col items-center justify-center p-8 text-center h-full"
       >
         <div className="w-12 h-12 rounded-full bg-bg-2 border border-border flex items-center justify-center mb-4">
           <Cpu size={24} className="text-text-secondary" />
         </div>
-        <h1 className="text-2xl font-semibold mb-2 text-text-primary">
-          How can I assist you today?
-        </h1>
+        <h1 className="text-2xl font-semibold mb-2 text-text-primary">How can I assist you today?</h1>
         <p className="text-text-secondary max-w-md text-sm leading-relaxed">
           Start a conversation or switch to an autonomous mode to let me work independently.
         </p>
@@ -79,20 +75,36 @@ export default function MessageList({ messages, isTyping }: MessageListProps) {
     );
   }
 
-  const MarkdownComponents: any = {
-    code({ node, inline, className, children, ...props }: any) {
-      const match = /language-(\w+)/.exec(className || '');
+  const MarkdownComponents = {
+    code({ inline, className, children, ...props }: { inline?: boolean; className?: string; children?: React.ReactNode }) {
+      const match = /language-(\w+)/.exec(className ?? '');
+      const text = String(children ?? '').replace(/\n$/, '');
       return !inline && match ? (
-        <CodeBlock language={match[1]}>
-          {String(children).replace(/\n$/, '')}
-        </CodeBlock>
+        <CodeBlock language={match[1]}>{text}</CodeBlock>
       ) : (
-        <code className={`${className} bg-bg-2 px-1.5 py-0.5 rounded-md border border-border/50 text-[13px] text-text-primary`} {...props}>
+        <code
+          className={`${className} bg-bg-2 px-1.5 py-0.5 rounded-md border border-border/50 text-[13px] text-text-primary`}
+          {...props}
+        >
           {children}
         </code>
       );
-    }
+    },
   };
+
+  const renderToolCall = (tc: ToolCall) => (
+    <div key={tc.index} className="my-2 p-3 rounded-md bg-bg-2 border border-border text-sm">
+      <div className="flex items-center gap-2 text-text-secondary mb-1">
+        <Wrench size={14} />
+        <span className="font-mono font-semibold">{tc.function?.name ?? `Tool call #${tc.index}`}</span>
+      </div>
+      {tc.function?.arguments && (
+        <pre className="text-xs text-text-secondary overflow-x-auto mt-1">
+          <code>{tc.function.arguments}</code>
+        </pre>
+      )}
+    </div>
+  );
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -103,7 +115,7 @@ export default function MessageList({ messages, isTyping }: MessageListProps) {
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: idx * 0.05 }}
-            className={`flex flex-col gap-2 items-start`}
+            className="flex flex-col gap-2 items-start"
           >
             {msg.role === 'assistant' ? (
               <div className="flex gap-3 w-full items-start">
@@ -111,9 +123,21 @@ export default function MessageList({ messages, isTyping }: MessageListProps) {
                   <Cpu size={14} className="text-text-primary" />
                 </div>
                 <div className="flex-1 min-w-0 markdown-body text-[15px] leading-relaxed text-text-primary">
-                  <ReactMarkdown components={MarkdownComponents}>
-                    {msg.content}
-                  </ReactMarkdown>
+                  {msg.thinking && (
+                    <details className="mb-4 group" open>
+                      <summary className="flex items-center gap-2 cursor-pointer text-xs font-medium text-text-secondary hover:text-text-primary transition-colors">
+                        <ChevronDown size={14} className="transition-transform group-open:rotate-180" />
+                        Thinking
+                      </summary>
+                      <div className="mt-2 p-3 bg-bg-2 border border-border rounded-lg text-xs whitespace-pre-wrap text-text-secondary">
+                        {msg.thinking}
+                      </div>
+                    </details>
+                  )}
+
+                  {msg.toolCalls?.map(renderToolCall)}
+
+                  <ReactMarkdown components={MarkdownComponents}>{msg.content}</ReactMarkdown>
                 </div>
               </div>
             ) : (
@@ -142,7 +166,7 @@ export default function MessageList({ messages, isTyping }: MessageListProps) {
             </div>
           </motion.div>
         )}
-        
+
         <div ref={bottomRef} className="h-px w-full" />
       </div>
     </div>

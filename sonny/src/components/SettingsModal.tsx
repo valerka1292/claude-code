@@ -70,7 +70,6 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" />
         <Dialog.Content
-          aria-describedby="settings-description"
           className="fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-bg-0 shadow-2xl"
         >
           <div className="flex flex-shrink-0 items-center justify-between border-b border-border bg-bg-0 px-6 py-4">

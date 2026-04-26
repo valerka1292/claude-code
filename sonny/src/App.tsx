@@ -1,104 +1,142 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import React from 'react';
-import { Minus, Square, X, Edit3 } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import MessageList from './components/MessageList';
 import InputArea from './components/InputArea';
 import SettingsModal from './components/SettingsModal';
 import Titlebar from './components/Titlebar';
-import { AgentMode, Message } from './types';
+import { AgentMode, Message, ToolCall } from './types';
+import { streamChatCompletion } from './services/llmService';
+import { MOCK_PROVIDERS } from './constants';
+import { useProviders } from './hooks/useProviders';
 
 export default function App() {
-  const [activeChatId, setActiveChatId] = React.useState('1');
-  const [mode, setMode] = React.useState<AgentMode>('Chat');
-  const [messagesByChatId, setMessagesByChatId] = React.useState<Record<string, Message[]>>({});
-  const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
-  const [isAgentRunning, setIsAgentRunning] = React.useState(false);
-  const [isTyping, setIsTyping] = React.useState(false);
+  const [activeChatId] = useState('1');
+  const [mode, setMode] = useState<AgentMode>('Chat');
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [llmHistory, setLlmHistory] = useState<{ role: string; content: string }[]>([]);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAgentRunning, setIsAgentRunning] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const { activeProvider } = useProviders();
 
-  // Simulated initial conversation
-  React.useEffect(() => {
-    setMessagesByChatId({
-      '1': [
-        {
-          id: 'm1',
-          role: 'assistant',
-          content: 'Hello! I am your autonomous AI agent. I can help you write code, manage files, or even run investigative loops in autonomous mode.\n\nChoose a mode below to get started.',
-          timestamp: new Date()
-        }
-      ]
-    });
+  useEffect(() => {
+    setMessages([
+      {
+        id: 'm1',
+        role: 'assistant',
+        content: 'Hello! I am your autonomous AI agent. How can I help?',
+        timestamp: new Date(),
+      },
+    ]);
   }, []);
 
-  const handleSend = (content: string) => {
-    const chatId = activeChatId;
-    const userMsg: Message = { id: Date.now().toString(), role: 'user', content, timestamp: new Date() };
-    setMessagesByChatId((prev) => ({
-      ...prev,
-      [chatId]: [...(prev[chatId] ?? []), userMsg]
-    }));
-    setIsTyping(true);
-    
-    // Simulate assistant reply
-    setTimeout(() => {
-      const assistantMsg: Message = { 
-        id: (Date.now() + 1).toString(), 
-        role: 'assistant', 
-        content: `I received your message: "${content}". How else can I help?`, 
-        timestamp: new Date() 
+  const handleSend = useCallback(
+    (content: string) => {
+      const userMsg: Message = {
+        id: Date.now().toString(),
+        role: 'user',
+        content,
+        timestamp: new Date(),
       };
-      setMessagesByChatId((prev) => ({
-        ...prev,
-        [chatId]: [...(prev[chatId] ?? []), assistantMsg]
-      }));
-      setIsTyping(false);
-    }, 1500);
-  };
+
+      setMessages((prev) => [...prev, userMsg]);
+
+      const nextLlmHistory = llmHistory.concat([{ role: 'user', content }]);
+      setLlmHistory(nextLlmHistory);
+
+      const assistantId = (Date.now() + 1).toString();
+      const assistantMsg: Message = {
+        id: assistantId,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date(),
+        thinking: '',
+        toolCalls: [],
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+      setIsTyping(true);
+
+      const provider = activeProvider ?? MOCK_PROVIDERS[0];
+      let finalAssistantContent = '';
+
+      streamChatCompletion(provider, nextLlmHistory, {
+        onContent: (text) => {
+          finalAssistantContent += text;
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + text } : m)),
+          );
+        },
+        onThinking: (text) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId ? { ...m, thinking: (m.thinking ?? '') + text } : m,
+            ),
+          );
+        },
+        onToolCall: (toolCall) => {
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== assistantId) {
+                return m;
+              }
+
+              const existingToolCalls: ToolCall[] = m.toolCalls ? [...m.toolCalls] : [];
+              const idx = existingToolCalls.findIndex((tc) => tc.index === toolCall.index);
+
+              if (idx >= 0) {
+                existingToolCalls[idx] = { ...existingToolCalls[idx], ...toolCall };
+              } else {
+                existingToolCalls.push(toolCall);
+              }
+
+              return { ...m, toolCalls: existingToolCalls };
+            }),
+          );
+        },
+        onDone: () => {
+          setIsTyping(false);
+          setLlmHistory((prev) => [...prev, { role: 'assistant', content: finalAssistantContent }]);
+        },
+        onError: (error) => {
+          setIsTyping(false);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, content: `Error: ${errorMessage}` } : m)),
+          );
+        },
+      });
+    },
+    [activeProvider, llmHistory],
+  );
 
   const handleNewChat = () => {
-    const newChatId = Date.now().toString();
-    setActiveChatId(newChatId);
-    setMessagesByChatId((prev) => ({
-      ...prev,
-      [newChatId]: []
-    }));
+    setMessages([]);
+    setLlmHistory([]);
   };
 
   return (
     <div className="flex h-screen w-full bg-bg-0 overflow-hidden text-text-primary select-none">
-      <Sidebar 
-        activeChatId={activeChatId} 
-        onNewChat={handleNewChat} 
-        onSelectChat={setActiveChatId}
+      <Sidebar
+        activeChatId={activeChatId}
+        onNewChat={handleNewChat}
+        onSelectChat={() => {}}
         onSettingsOpen={() => setIsSettingsOpen(true)}
       />
 
       <main className="flex-1 flex flex-col h-full overflow-hidden relative">
-        {/* Electron Style Titlebar */}
         <Titlebar chatTitle="Untitled Chat" onRename={() => {}} />
 
-        {/* Content area */}
-        <MessageList messages={messagesByChatId[activeChatId] ?? []} isTyping={isTyping} />
+        <MessageList messages={messages} isTyping={isTyping} />
 
-        {/* Bottom Input */}
-        <InputArea 
-          mode={mode} 
-          onModeChange={setMode} 
+        <InputArea
+          mode={mode}
+          onModeChange={setMode}
           onSend={handleSend}
           isAgentRunning={isAgentRunning}
           onToggleAgent={() => setIsAgentRunning(!isAgentRunning)}
+          activeModel={(activeProvider ?? MOCK_PROVIDERS[0]).model}
         />
 
-        {/* Modals */}
         <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       </main>
     </div>

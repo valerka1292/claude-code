@@ -4,7 +4,6 @@ import * as Select from '@radix-ui/react-select';
 import { AgentMode } from '../types';
 import { AGENT_MODES } from '../constants';
 import { cn } from '../lib/utils';
-import { useProviders } from '../hooks/useProviders';
 
 interface InputAreaProps {
   mode: AgentMode;
@@ -12,12 +11,19 @@ interface InputAreaProps {
   onSend: (text: string) => void;
   isAgentRunning: boolean;
   onToggleAgent: () => void;
+  activeModel?: string;
 }
 
-export default function InputArea({ mode, onModeChange, onSend, isAgentRunning, onToggleAgent }: InputAreaProps) {
+export default function InputArea({
+  mode,
+  onModeChange,
+  onSend,
+  isAgentRunning,
+  onToggleAgent,
+  activeModel,
+}: InputAreaProps) {
   const [text, setText] = React.useState('');
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
-  const { activeProvider } = useProviders();
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -38,7 +44,7 @@ export default function InputArea({ mode, onModeChange, onSend, isAgentRunning, 
   }, [text]);
 
   const contextUsed = 4821;
-  const contextMax = activeProvider?.contextWindowSize ?? 1;
+  const contextMax = 32768;
   const contextPercent = Math.min((contextUsed / contextMax) * 100, 100);
 
   return (
@@ -140,7 +146,7 @@ export default function InputArea({ mode, onModeChange, onSend, isAgentRunning, 
 
         <div className="mt-1 flex items-center justify-between px-1 text-xs text-text-secondary">
           <div className="flex items-center gap-3">
-            <span>{activeProvider?.model ?? 'No provider selected'}</span>
+            <span>{activeModel ?? 'No provider selected'}</span>
             <span className="text-border">•</span>
             <div className="flex items-center gap-2">
               <div className="h-1.5 w-20 overflow-hidden rounded-full border border-border bg-bg-2">
