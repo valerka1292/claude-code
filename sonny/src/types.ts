@@ -15,9 +15,14 @@ export interface ChatSession {
 
 export interface Provider {
   id: string;
-  name: string;
+  visualName: string;
   baseUrl: string;
   apiKey: string;
   model: string;
-  contextSize: number;
+  contextWindowSize: number;
+}
+
+export interface ProvidersData {
+  activeProviderId: string | null;
+  providers: Record<string, Provider>;
 }
