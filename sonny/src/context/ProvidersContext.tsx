@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import type { Provider, ProvidersData } from '../types';
+import { useProviderStorage } from './StorageContext';
 
 interface ProvidersContextValue {
   data: ProvidersData;
@@ -22,33 +23,32 @@ const ProvidersContext = createContext<ProvidersContextValue | null>(null);
 export function ProvidersProvider({ children }: { children: React.ReactNode }) {
   const [data, setData] = useState<ProvidersData>(defaultProvidersData);
   const [isLoaded, setIsLoaded] = useState(false);
+  const providerStorage = useProviderStorage();
 
   const refresh = useCallback(async () => {
-    const bridge = window.electron?.providers;
-    if (!bridge) {
+    if (!providerStorage) {
       setIsLoaded(true);
       return;
     }
 
-    const incoming = await bridge.getAll();
+    const incoming = await providerStorage.getAll();
     setData(incoming);
     setIsLoaded(true);
-  }, []);
+  }, [providerStorage]);
 
   React.useEffect(() => {
     refresh();
   }, [refresh]);
 
   const saveAndReplace = useCallback(async (nextData: ProvidersData) => {
-    const bridge = window.electron?.providers;
-    if (!bridge) {
+    if (!providerStorage) {
       setData(nextData);
       return;
     }
 
-    const saved = await bridge.save(nextData);
+    const saved = await providerStorage.save(nextData);
     setData(saved);
-  }, []);
+  }, [providerStorage]);
 
   const addProvider = useCallback(async (provider: Provider) => {
     const nextData: ProvidersData = {

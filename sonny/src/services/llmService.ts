@@ -23,6 +23,12 @@ export interface CompletionUsage {
   total_tokens: number;
 }
 
+interface StreamRetryOptions {
+  retries?: number;
+  baseDelayMs?: number;
+  timeoutMs?: number;
+}
+
 interface CompletionChunkChoice {
   delta?: {
     content?: string;
@@ -68,7 +74,11 @@ export function streamChatCompletion(
   callbacks: StreamCallbacks,
   signal?: AbortSignal,
   tools?: unknown[],
+  options?: StreamRetryOptions,
 ) {
+  const retries = options?.retries ?? 2;
+  const baseDelayMs = options?.baseDelayMs ?? 500;
+  const timeoutMs = options?.timeoutMs ?? 45000;
   const url = `${provider.baseUrl}/chat/completions`;
 
   const body: Record<string, unknown> = {
@@ -82,20 +92,33 @@ export function streamChatCompletion(
     body.tools = tools;
   }
 
-  fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${provider.apiKey}`,
-    },
-    body: JSON.stringify(body),
-    signal,
-  })
-    .then(async (response) => {
+  const run = async () => {
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      const requestController = new AbortController();
+      const timeoutId = window.setTimeout(() => requestController.abort(), timeoutMs);
+      const abortFromCaller = () => requestController.abort();
+      signal?.addEventListener('abort', abortFromCaller, { once: true });
+
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${provider.apiKey}`,
+          },
+          body: JSON.stringify(body),
+          signal: requestController.signal,
+        });
+
       if (!response.ok) {
         const text = await response.text();
-        callbacks.onError(new Error(`HTTP ${response.status}: ${text}`));
-        return;
+          const retryable = response.status === 429 || response.status >= 500;
+          if (retryable && attempt < retries) {
+            await sleep(baseDelayMs * 2 ** attempt);
+            continue;
+          }
+          callbacks.onError(new Error(`HTTP ${response.status}: ${text}`));
+          return;
       }
 
       const reader = response.body?.getReader();
@@ -221,11 +244,46 @@ export function streamChatCompletion(
         await reader.cancel().catch(() => undefined);
       }
 
-      if (!doneCalled) {
-        callbacks.onDone(lastUsage);
+        if (!doneCalled) {
+          callbacks.onDone(lastUsage);
+        }
+        return;
+      } catch (error) {
+        const abortedByCaller = Boolean(signal?.aborted);
+        if (error instanceof Error && error.name === 'AbortError') {
+          if (abortedByCaller) {
+            return;
+          }
+
+          if (attempt < retries) {
+            await sleep(baseDelayMs * 2 ** attempt);
+            continue;
+          }
+          callbacks.onError(new Error('Request timed out while streaming response.'));
+          return;
+        }
+
+        if (attempt < retries) {
+          await sleep(baseDelayMs * 2 ** attempt);
+          continue;
+        }
+
+        callbacks.onError(error);
+        return;
+      } finally {
+        clearTimeout(timeoutId);
+        signal?.removeEventListener('abort', abortFromCaller);
       }
-    })
-    .catch((error) => callbacks.onError(error));
+    }
+  };
+
+  void run();
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 export async function generateChatName(provider: Provider, firstUserMessage: string): Promise<string> {
