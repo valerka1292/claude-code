@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { SetStateAction } from 'react';
 import type { ChatData, ChatSession, Message, StoredMessage } from '../types';
 import { useChatStorage } from '../context/StorageContext';
 import { OperationQueue } from '../services/operationQueue';
@@ -46,9 +47,9 @@ export function useChats() {
   const chatStorage = useChatStorage();
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [llmHistory, setLlmHistory] = useState<{ role: string; content: string }[]>([]);
-  const [contextTokensUsed, setContextTokensUsed] = useState(0);
+  const [messagesState, setMessagesState] = useState<Message[]>([]);
+  const [llmHistoryState, setLlmHistoryState] = useState<{ role: string; content: string }[]>([]);
+  const [contextTokensUsedState, setContextTokensUsedState] = useState(0);
   const [isTyping, setIsTyping] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -61,6 +62,8 @@ export function useChats() {
   const isMountedRef = useRef(true);
   const loadVersionRef = useRef(0);
   const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSaveRequestedRef = useRef(false);
+  const lastAutoSaveAtRef = useRef(0);
 
   useEffect(() => {
     return () => {
@@ -69,6 +72,7 @@ export function useChats() {
       if (autoSaveTimeoutRef.current) {
         clearTimeout(autoSaveTimeoutRef.current);
       }
+      autoSaveRequestedRef.current = false;
     };
   }, []);
 
@@ -76,20 +80,37 @@ export function useChats() {
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
 
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
-
-  useEffect(() => {
-    llmHistoryRef.current = llmHistory;
-  }, [llmHistory]);
-
-  useEffect(() => {
-    contextTokensUsedRef.current = contextTokensUsed;
-  }, [contextTokensUsed]);
 
   const logStorageError = useCallback((action: string, error: unknown) => {
     console.error(`[useChats] ${action} failed`, error);
+  }, []);
+
+
+  const setMessages = useCallback((next: SetStateAction<Message[]>) => {
+    setMessagesState((prev) => {
+      const resolved = typeof next === 'function' ? (next as (prevState: Message[]) => Message[])(prev) : next;
+      messagesRef.current = resolved;
+      return resolved;
+    });
+  }, []);
+
+  const setLlmHistory = useCallback((next: SetStateAction<{ role: string; content: string }[]>) => {
+    setLlmHistoryState((prev) => {
+      const resolved =
+        typeof next === 'function'
+          ? (next as (prevState: { role: string; content: string }[]) => { role: string; content: string }[])(prev)
+          : next;
+      llmHistoryRef.current = resolved;
+      return resolved;
+    });
+  }, []);
+
+  const setContextTokensUsed = useCallback((next: SetStateAction<number>) => {
+    setContextTokensUsedState((prev) => {
+      const resolved = typeof next === 'function' ? (next as (prevState: number) => number)(prev) : next;
+      contextTokensUsedRef.current = resolved;
+      return resolved;
+    });
   }, []);
 
   const loadChatList = useCallback(async (): Promise<ChatSession[]> => {
@@ -325,12 +346,31 @@ export function useChats() {
   }, [loadChat, loadChatList]);
 
   const scheduleAutoSave = useCallback(() => {
-    if (autoSaveTimeoutRef.current) {
-      clearTimeout(autoSaveTimeoutRef.current);
-    }
-    autoSaveTimeoutRef.current = setTimeout(() => {
+    autoSaveRequestedRef.current = true;
+    const now = Date.now();
+    const elapsed = now - lastAutoSaveAtRef.current;
+
+    if (elapsed >= 2000 && autoSaveTimeoutRef.current === null) {
+      lastAutoSaveAtRef.current = now;
+      autoSaveRequestedRef.current = false;
       void saveCurrentChat();
-    }, 2000);
+      return;
+    }
+
+    if (autoSaveTimeoutRef.current !== null) {
+      return;
+    }
+
+    const delay = Math.max(0, 2000 - elapsed);
+    autoSaveTimeoutRef.current = setTimeout(() => {
+      autoSaveTimeoutRef.current = null;
+      if (!autoSaveRequestedRef.current) {
+        return;
+      }
+      autoSaveRequestedRef.current = false;
+      lastAutoSaveAtRef.current = Date.now();
+      void saveCurrentChat();
+    }, delay);
   }, [saveCurrentChat]);
 
   useEffect(() => {
@@ -338,19 +378,22 @@ export function useChats() {
       return;
     }
     scheduleAutoSave();
-  }, [activeChatId, llmHistory, messages, scheduleAutoSave]);
+  }, [activeChatId, llmHistoryState, messagesState, scheduleAutoSave]);
 
   return {
     chats,
     isLoading,
     activeChatId,
     activeChatIdRef,
-    messages,
+    messages: messagesState,
     setMessages,
-    llmHistory,
+    llmHistory: llmHistoryState,
     setLlmHistory,
-    contextTokensUsed,
+    contextTokensUsed: contextTokensUsedState,
     setContextTokensUsed,
+    messagesRef,
+    llmHistoryRef,
+    contextTokensUsedRef,
     isTyping,
     setIsTyping,
     loadChat,
