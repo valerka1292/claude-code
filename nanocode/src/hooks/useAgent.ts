@@ -109,6 +109,8 @@ export function useAgent() {
       let assistantReasoning = "";
       const turnMessages: StoredMessage[] = [];
 
+      let abortedByUser = false;
+
       try {
         await runAgentStream(
           ap,
@@ -252,10 +254,7 @@ export function useAgent() {
           onUsage: (prompt, completion) => setUsedTokens(prompt + completion),
           onError: (err) => {
             if (isAbortError(err)) {
-              updateLiveTurn((prev) => prev.filter((message) => message.id !== assistantId));
-              setIsTyping(false);
-              isProcessingRef.current = false;
-              setTurnActive(false);
+              abortedByUser = true;
               return;
             }
 
@@ -304,6 +303,25 @@ export function useAgent() {
           fp,
           controller.signal
         );
+
+        if (abortedByUser) {
+          await commitLiveTurnAndPersist(async () => {
+            await persistCompletedTurn({
+              projectKey: projectKeyRef.current,
+              sessionId: session.id,
+              userInput: value,
+              sendTs,
+              assistantContent,
+              assistantReasoning,
+              turnMessages,
+              isAborted: true,
+            });
+          });
+          setIsTyping(false);
+          isProcessingRef.current = false;
+          setTurnActive(false);
+          return;
+        }
       } finally {
         isProcessingRef.current = false;
         setTurnActive(false);

@@ -23,6 +23,7 @@ interface PersistTurnOptions {
   assistantContent: string;
   assistantReasoning: string;
   turnMessages: StoredMessage[];
+  isAborted?: boolean;
 }
 
 export function useSessionPersist() {
@@ -81,6 +82,7 @@ export function useSessionPersist() {
       assistantContent,
       assistantReasoning,
       turnMessages,
+      isAborted = false,
     }: PersistTurnOptions) => {
       if (!projectKey) {
         return;
@@ -113,7 +115,7 @@ export function useSessionPersist() {
             (msg.content ?? "") === assistantContent
         );
 
-        if (assistantContent && !hasFinalAssistantInTurn) {
+        if (!isAborted && assistantContent && !hasFinalAssistantInTurn) {
           messagesToAdd.push({
             id: crypto.randomUUID(),
             role: "assistant",
@@ -122,7 +124,7 @@ export function useSessionPersist() {
             ts: Date.now(),
           });
         }
-      } else {
+      } else if (!isAborted) {
         const assistantStored: StoredMessage = {
           id: crypto.randomUUID(),
           role: "assistant",
@@ -131,6 +133,8 @@ export function useSessionPersist() {
           ts: Date.now(),
         };
         messagesToAdd = [userStored, assistantStored];
+      } else {
+        messagesToAdd = [userStored];
       }
 
       const finalSession = {

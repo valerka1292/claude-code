@@ -191,7 +191,7 @@ export function useMessageStream(activeSession: SessionData | null) {
     () => archiveMessagesRef.current
   );
 
-  const finalizeAndCommitLiveTurn = useCallback(() => {
+  const finalizeLiveTurn = useCallback(() => {
     const finalizedTurn = finalizeLiveTurnMessages(liveTurnRef.current);
     if (finalizedTurn.length > 0) {
       setArchiveMessages((archive) => [...archive, ...finalizedTurn]);
@@ -199,6 +199,8 @@ export function useMessageStream(activeSession: SessionData | null) {
     }
     return finalizedTurn;
   }, []);
+
+  const finalizeAndCommitLiveTurn = finalizeLiveTurn;
 
   const resetMessageStream = useCallback(() => {
     resetSessionRestore();
@@ -212,14 +214,14 @@ export function useMessageStream(activeSession: SessionData | null) {
     async (persist: () => Promise<void>) => {
       sessionRestoreSuspendedRef.current = true;
       try {
-        const finalizedTurn = finalizeAndCommitLiveTurn();
+        const finalizedTurn = finalizeLiveTurn();
         await persist();
         return finalizedTurn;
       } finally {
         sessionRestoreSuspendedRef.current = false;
       }
     },
-    [finalizeAndCommitLiveTurn]
+    [finalizeLiveTurn]
   );
 
   return {
@@ -238,6 +240,7 @@ export function useMessageStream(activeSession: SessionData | null) {
     addToolCall,
     updateToolCallStatus,
     appendBlock,
+    finalizeLiveTurn,
     finalizeAndCommitLiveTurn,
     commitLiveTurnAndPersist,
     resetMessageStream,

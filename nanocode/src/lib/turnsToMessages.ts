@@ -20,6 +20,22 @@ export function turnsToMessages(storedMessages: StoredMessage[]): Message[] {
 
     const turnBlocks: ContentBlock[] = [];
     const turnStartIndex = i;
+    const toolResultByCallId = new Map<
+      string,
+      { status: "success" | "error"; result?: string }
+    >();
+
+    for (let j = i; j < storedMessages.length && storedMessages[j].role !== "user"; j++) {
+      const turnMsg = storedMessages[j];
+      if (turnMsg.role !== "tool" || !turnMsg.tool_call_id) {
+        continue;
+      }
+
+      toolResultByCallId.set(turnMsg.tool_call_id, {
+        status: turnMsg.content?.includes("<tool_use_error>") ? "error" : "success",
+        result: turnMsg.content ?? undefined,
+      });
+    }
 
     while (i < storedMessages.length && storedMessages[i].role !== "user") {
       const msg = storedMessages[i];
@@ -45,7 +61,8 @@ export function turnsToMessages(storedMessages: StoredMessage[]): Message[] {
               id: tc.id,
               name: tc.function.name,
               arguments: parsedArgs,
-              status: "success",
+              status: toolResultByCallId.get(tc.id)?.status ?? "pending",
+              result: toolResultByCallId.get(tc.id)?.result,
             };
             turnBlocks.push({ type: "tool_call", call });
           }
@@ -78,6 +95,8 @@ export function turnsToMessages(storedMessages: StoredMessage[]): Message[] {
         id: firstMsg.id,
         role: "assistant",
         content: "",
+        isStreaming: false,
+        isReasoningStreaming: false,
         blocks: turnBlocks,
       });
     }
