@@ -33,7 +33,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   const selectFolder = useCallback(async () => {
     try {
-      const result = await window.electronAPI!.selectFolder!();
+      const result = await window.electronAPI?.selectFolder?.();
       if (result) setFolderPath(result);
     } catch (err) {
       console.error("[ProjectContext] selectFolder error:", err);

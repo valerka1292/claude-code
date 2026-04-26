@@ -38,5 +38,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   glob: (pattern, options) =>
     ipcRenderer.invoke('glob', ensureString(pattern, 'pattern'), options),
 
-  stat: (filePath) => ipcRenderer.invoke('stat', ensureString(filePath, 'filePath')),
+  stat: (filePath, cwd) =>
+    ipcRenderer.invoke(
+      'stat',
+      ensureString(filePath, 'filePath'),
+      cwd === undefined ? undefined : ensureString(cwd, 'cwd')
+    ),
 });

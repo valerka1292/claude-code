@@ -27,6 +27,7 @@ export function useMessageStream(activeSession: SessionData | null) {
   const [usedTokens, setUsedTokens] = useState(0);
   const sessionRestoreSuspendedRef = useRef(false);
   const archiveMessagesRef = useRef<Message[]>([]);
+  const liveTurnRef = useRef<Message[]>([]);
   const messages = useMemo(
     () => [...archiveMessages, ...liveTurn],
     [archiveMessages, liveTurn]
@@ -34,6 +35,9 @@ export function useMessageStream(activeSession: SessionData | null) {
   useEffect(() => {
     archiveMessagesRef.current = archiveMessages;
   }, [archiveMessages]);
+  useEffect(() => {
+    liveTurnRef.current = liveTurn;
+  }, [liveTurn]);
 
   const updateLiveTurn = useCallback(
     (updater: (prev: Message[]) => Message[]) => {
@@ -188,12 +192,11 @@ export function useMessageStream(activeSession: SessionData | null) {
   );
 
   const finalizeAndCommitLiveTurn = useCallback(() => {
-    let finalizedTurn: Message[] = [];
-    setLiveTurn((prev) => {
-      finalizedTurn = finalizeLiveTurnMessages(prev);
+    const finalizedTurn = finalizeLiveTurnMessages(liveTurnRef.current);
+    if (finalizedTurn.length > 0) {
       setArchiveMessages((archive) => [...archive, ...finalizedTurn]);
-      return [];
-    });
+      setLiveTurn([]);
+    }
     return finalizedTurn;
   }, []);
 

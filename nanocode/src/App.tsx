@@ -37,6 +37,7 @@ export default function App() {
     usedTokens,
     handleSend,
     resetAgentUi,
+    abortActiveRequest,
   } = useAgent();
 
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -79,6 +80,8 @@ export default function App() {
       mode={mode}
       setMode={setMode}
       onSend={handleSend}
+      onStop={abortActiveRequest}
+      isGenerating={isTyping || isTurnActive}
       usedTokens={usedTokens}
     />
   );

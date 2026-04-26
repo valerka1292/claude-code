@@ -29,7 +29,7 @@ declare global {
         follow?: boolean;
       }) => Promise<string[]>;
 
-      stat?: (filePath: string) => Promise<{
+      stat?: (filePath: string, cwd?: string) => Promise<{
         mtimeMs: number;
         isDirectory: boolean;
       }>;
