@@ -28,7 +28,7 @@ export default function App() {
     createChat,
     renameChat,
     deleteChat,
-    persistCurrentChat,
+    persistChatData,
   } = useChats();
 
   const [mode, setMode] = useState<AgentMode>('Chat');
@@ -36,6 +36,11 @@ export default function App() {
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const { activeProvider } = useProviders();
   const pendingRequestControllerRef = useRef<AbortController | null>(null);
+  const messagesRef = useRef(messages);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const cancelPendingRequest = useCallback(() => {
     pendingRequestControllerRef.current?.abort();
@@ -65,7 +70,8 @@ export default function App() {
       }
 
       const chatIdSnapshot = chatId;
-      const isFirstMessage = messages.length === 0;
+      const existingMessages = messagesRef.current;
+      const isFirstMessage = existingMessages.length === 0;
 
       const userMsg: Message = {
         id: Date.now().toString(),
@@ -92,6 +98,8 @@ export default function App() {
       setIsTyping(true);
 
       let finalAssistantContent = '';
+      let finalAssistantThinking = '';
+      const finalToolCalls = new Map<number, ToolCall>();
 
       await streamChatCompletion(
         activeProvider,
@@ -110,6 +118,7 @@ export default function App() {
               return;
             }
 
+            finalAssistantThinking += text;
             setMessages((prev) =>
               prev.map((m) => (m.id === assistantId ? { ...m, thinking: (m.thinking ?? '') + text } : m)),
             );
@@ -118,6 +127,8 @@ export default function App() {
             if (activeChatIdRef.current !== chatIdSnapshot) {
               return;
             }
+
+            finalToolCalls.set(toolCall.index, { ...(finalToolCalls.get(toolCall.index) ?? {}), ...toolCall });
 
             setMessages((prev) =>
               prev.map((m) => {
@@ -148,11 +159,26 @@ export default function App() {
             }
 
             setIsTyping(false);
+            const finalTokens = usage?.total_tokens ?? contextTokensUsed;
             if (usage?.total_tokens) {
               setContextTokensUsed(usage.total_tokens);
             }
-            setLlmHistory((prev) => [...prev, { role: 'assistant', content: finalAssistantContent }]);
-            await persistCurrentChat();
+
+            const finalMessages = [
+              ...existingMessages,
+              userMsg,
+              {
+                ...assistantMsg,
+                content: finalAssistantContent,
+                thinking: finalAssistantThinking,
+                toolCalls: Array.from(finalToolCalls.values()),
+              },
+            ];
+            const finalLlmHistory = [...nextLlmHistory, { role: 'assistant', content: finalAssistantContent }];
+
+            setMessages(finalMessages);
+            setLlmHistory(finalLlmHistory);
+            await persistChatData(chatIdSnapshot, finalMessages, finalLlmHistory, finalTokens);
 
             if (isFirstMessage) {
               const title = await generateChatName(activeProvider, content);
@@ -187,8 +213,8 @@ export default function App() {
       createChat,
       llmHistory,
       loadChat,
-      messages.length,
-      persistCurrentChat,
+      contextTokensUsed,
+      persistChatData,
       renameChat,
       setContextTokensUsed,
       setIsTyping,

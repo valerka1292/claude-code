@@ -58,6 +58,7 @@ export function useChats() {
   const switchingRef = useRef(false);
   const isMountedRef = useRef(true);
   const loadVersionRef = useRef(0);
+  const saveVersionRef = useRef(0);
 
   useEffect(() => {
     return () => {
@@ -113,6 +114,7 @@ export function useChats() {
       }
 
       setActiveChatId(data.id);
+      activeChatIdRef.current = data.id;
       setMessages(data.messages.map(fromStoredMessage));
       setLlmHistory(data.llmHistory ?? []);
       setContextTokensUsed(data.contextTokensUsed ?? 0);
@@ -122,37 +124,57 @@ export function useChats() {
     }
   }, [chatStorage, logStorageError]);
 
+  const saveChatData = useCallback(
+    async (
+      chatId: string,
+      nextMessages: Message[],
+      nextLlmHistory: { role: string; content: string }[],
+      nextContextTokensUsed: number,
+      titleFallback?: string,
+    ) => {
+      if (!chatStorage) {
+        return;
+      }
+
+      const saveVersion = ++saveVersionRef.current;
+      try {
+        const existing = await chatStorage.get(chatId);
+        const now = Date.now();
+        const data: ChatData = {
+          id: chatId,
+          title: titleFallback ?? existing?.title ?? 'Untitled Chat',
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+          messages: nextMessages.map(toStoredMessage),
+          llmHistory: nextLlmHistory,
+          contextTokensUsed: nextContextTokensUsed,
+        };
+        const updatedList = await chatStorage.save(chatId, data);
+        if (isMountedRef.current && saveVersion === saveVersionRef.current) {
+          setChats(updatedList);
+        }
+      } catch (error) {
+        logStorageError(`save chat ${chatId}`, error);
+        throw error;
+      }
+    },
+    [chatStorage, logStorageError],
+  );
+
   const saveCurrentChat = useCallback(async () => {
     const chatId = activeChatIdRef.current;
 
-    if (!chatStorage || !chatId || savingRef.current) {
+    if (!chatId || savingRef.current) {
       return;
     }
 
     savingRef.current = true;
     try {
-      const existing = await chatStorage.get(chatId);
-      const now = Date.now();
-      const data: ChatData = {
-        id: chatId,
-        title: existing?.title ?? 'Untitled Chat',
-        createdAt: existing?.createdAt ?? now,
-        updatedAt: now,
-        messages: messagesRef.current.map(toStoredMessage),
-        llmHistory: llmHistoryRef.current,
-        contextTokensUsed: contextTokensUsedRef.current,
-      };
-      const updatedList = await chatStorage.save(chatId, data);
-      if (isMountedRef.current) {
-        setChats(updatedList);
-      }
-    } catch (error) {
-      logStorageError(`save chat ${chatId}`, error);
-      throw error;
+      await saveChatData(chatId, messagesRef.current, llmHistoryRef.current, contextTokensUsedRef.current);
     } finally {
       savingRef.current = false;
     }
-  }, [chatStorage, logStorageError]);
+  }, [saveChatData]);
 
   const switchChat = useCallback(
     async (chatId: string) => {
@@ -185,6 +207,7 @@ export function useChats() {
         return;
       }
       setActiveChatId(null);
+      activeChatIdRef.current = null;
       setMessages([]);
       setLlmHistory([]);
       setContextTokensUsed(0);
@@ -262,6 +285,7 @@ export function useChats() {
         }
 
         setActiveChatId(null);
+        activeChatIdRef.current = null;
         setMessages([]);
         setLlmHistory([]);
         setContextTokensUsed(0);
@@ -276,6 +300,19 @@ export function useChats() {
   const persistCurrentChat = useCallback(async () => {
     await saveCurrentChat();
   }, [saveCurrentChat]);
+
+  const persistChatData = useCallback(
+    async (
+      chatId: string,
+      nextMessages: Message[],
+      nextLlmHistory: { role: string; content: string }[],
+      nextContextTokensUsed: number,
+      titleFallback?: string,
+    ) => {
+      await saveChatData(chatId, nextMessages, nextLlmHistory, nextContextTokensUsed, titleFallback);
+    },
+    [saveChatData],
+  );
 
   useEffect(() => {
     async function bootstrap() {
@@ -307,5 +344,6 @@ export function useChats() {
     renameChat,
     deleteChat,
     persistCurrentChat,
+    persistChatData,
   };
 }
