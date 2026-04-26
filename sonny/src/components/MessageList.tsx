@@ -53,6 +53,23 @@ function CodeBlock({ language, children }: { language: string; children: string 
 export default function MessageList({ messages, isTyping }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  const MarkdownComponents = React.useMemo(() => ({
+    code({ inline, className, children, ...props }: { inline?: boolean; className?: string; children?: React.ReactNode }) {
+      const match = /language-(\w+)/.exec(className ?? '');
+      const text = String(children ?? '').replace(/\n$/, '');
+      return !inline && match ? (
+        <CodeBlock language={match[1]}>{text}</CodeBlock>
+      ) : (
+        <code
+          className={`${className} bg-bg-2 px-1.5 py-0.5 rounded-md border border-border/50 text-[13px] text-text-primary`}
+          {...props}
+        >
+          {children}
+        </code>
+      );
+    },
+  }), []);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
@@ -75,23 +92,6 @@ export default function MessageList({ messages, isTyping }: MessageListProps) {
       </motion.div>
     );
   }
-
-  const MarkdownComponents = {
-    code({ inline, className, children, ...props }: { inline?: boolean; className?: string; children?: React.ReactNode }) {
-      const match = /language-(\w+)/.exec(className ?? '');
-      const text = String(children ?? '').replace(/\n$/, '');
-      return !inline && match ? (
-        <CodeBlock language={match[1]}>{text}</CodeBlock>
-      ) : (
-        <code
-          className={`${className} bg-bg-2 px-1.5 py-0.5 rounded-md border border-border/50 text-[13px] text-text-primary`}
-          {...props}
-        >
-          {children}
-        </code>
-      );
-    },
-  };
 
   const renderToolCall = (tc: ToolCall) => (
     <div key={tc.index} className="my-2 p-3 rounded-md bg-bg-2 border border-border text-sm">

@@ -43,6 +43,7 @@ export default function App() {
   const pendingRequestControllerRef = useRef<AbortController | null>(null);
 
   const cancelPendingRequest = useCallback(() => {
+    console.log('[App] Cancelling pending request');
     pendingRequestControllerRef.current?.abort();
     pendingRequestControllerRef.current = null;
   }, []);
@@ -55,7 +56,9 @@ export default function App() {
 
   const handleSend = useCallback(
     async (content: string) => {
+      console.log(`[App] handleSend triggered: "${content.slice(0, 50)}..."`);
       if (!activeProvider) {
+        console.warn('[App] No active provider, aborting send');
         return;
       }
 
@@ -65,8 +68,8 @@ export default function App() {
 
       let chatId = activeChatIdRef.current;
       if (!chatId) {
+        console.log('[App] No active chat, creating new one');
         chatId = await createChat();
-        await loadChat(chatId);
       }
 
       const chatIdSnapshot = chatId;
@@ -80,6 +83,7 @@ export default function App() {
         timestamp: new Date(),
       };
 
+      console.log(`[App] Adding user message to chat ${chatIdSnapshot}`);
       const nextMessagesBase = [...existingMessages, userMsg];
       setMessages(nextMessagesBase);
 
@@ -95,6 +99,7 @@ export default function App() {
         thinking: '',
         toolCalls: [],
       };
+
       let workingMessages: Message[] = [...nextMessagesBase, assistantMsg];
       setMessages(workingMessages);
       setIsTyping(true);
@@ -103,12 +108,14 @@ export default function App() {
       let finalAssistantThinking = '';
       const finalToolCalls = new Map<number, ToolCall>();
 
+      console.log('[App] Starting LLM stream...');
       await streamChatCompletion(
         activeProvider,
         nextLlmHistory,
         {
           onContent: (text) => {
             if (activeChatIdRef.current !== chatIdSnapshot) {
+              console.warn('[App] onContent ignored: chat changed');
               return;
             }
 
@@ -120,9 +127,7 @@ export default function App() {
             scheduleAutoSave();
           },
           onThinking: (text) => {
-            if (activeChatIdRef.current !== chatIdSnapshot) {
-              return;
-            }
+            if (activeChatIdRef.current !== chatIdSnapshot) return;
 
             finalAssistantThinking += text;
             workingMessages = workingMessages.map((m) =>
@@ -132,16 +137,13 @@ export default function App() {
             scheduleAutoSave();
           },
           onToolCall: (toolCall) => {
-            if (activeChatIdRef.current !== chatIdSnapshot) {
-              return;
-            }
+            if (activeChatIdRef.current !== chatIdSnapshot) return;
 
+            console.log(`[App] Tool call update for index ${toolCall.index}`);
             finalToolCalls.set(toolCall.index, { ...(finalToolCalls.get(toolCall.index) ?? {}), ...toolCall });
 
             workingMessages = workingMessages.map((m) => {
-              if (m.id !== assistantId) {
-                return m;
-              }
+              if (m.id !== assistantId) return m;
 
               const existingToolCalls: ToolCall[] = m.toolCalls ? [...m.toolCalls] : [];
               const idx = existingToolCalls.findIndex((tc) => tc.index === toolCall.index);
@@ -158,11 +160,13 @@ export default function App() {
             scheduleAutoSave();
           },
           onDone: async (usage) => {
+            console.log('[App] Stream done');
             if (pendingRequestControllerRef.current === requestController) {
               pendingRequestControllerRef.current = null;
             }
 
             if (activeChatIdRef.current !== chatIdSnapshot) {
+              console.warn('[App] onDone ignored: chat changed');
               return;
             }
 
@@ -172,49 +176,47 @@ export default function App() {
               setContextTokensUsed(usage.total_tokens);
             }
 
-            const finalMessages = [
-              ...existingMessages,
-              userMsg,
-              {
-                ...assistantMsg,
-                content: finalAssistantContent,
-                thinking: finalAssistantThinking,
-                toolCalls: Array.from(finalToolCalls.values()),
-              },
-            ];
+            const finalAssistantMsg: Message = {
+              ...assistantMsg,
+              content: finalAssistantContent,
+              thinking: finalAssistantThinking,
+              toolCalls: Array.from(finalToolCalls.values()),
+            };
+
+            const finalMessages = [...nextMessagesBase, finalAssistantMsg];
             const finalLlmHistory = [...nextLlmHistory, { role: 'assistant', content: finalAssistantContent }];
 
             setMessages(finalMessages);
             setLlmHistory(finalLlmHistory);
+            
+            console.log(`[App] Persisting final chat data for ${chatIdSnapshot}`);
             await persistChatData(chatIdSnapshot, finalMessages, finalLlmHistory, finalTokens);
 
             if (isFirstMessage) {
-              const title = await generateChatName(activeProvider, content);
+              console.log('[App] Generating title for new chat');
+              const title = await generateChatName(activeProvider, content, requestController.signal);
               if (activeChatIdRef.current === chatIdSnapshot) {
                 await renameChat(chatIdSnapshot, title);
               }
             }
           },
           onError: async (error) => {
+            console.error('[App] Stream error:', error);
             if (pendingRequestControllerRef.current === requestController) {
               pendingRequestControllerRef.current = null;
             }
 
-            if (activeChatIdRef.current !== chatIdSnapshot) {
-              return;
-            }
+            if (activeChatIdRef.current !== chatIdSnapshot) return;
 
             setIsTyping(false);
             const errorMessage = error instanceof Error ? error.message : String(error);
-            const erroredMessages = existingMessages.concat(
-              userMsg,
-              {
-                ...assistantMsg,
-                content: finalAssistantContent || `Error: ${errorMessage}`,
-                thinking: finalAssistantThinking,
-                toolCalls: Array.from(finalToolCalls.values()),
-              },
-            );
+            const errorAssistantMsg: Message = {
+              ...assistantMsg,
+              content: finalAssistantContent || `Error: ${errorMessage}`,
+              thinking: finalAssistantThinking,
+              toolCalls: Array.from(finalToolCalls.values()),
+            };
+            const erroredMessages = [...nextMessagesBase, errorAssistantMsg];
             setMessages(erroredMessages);
             await persistChatData(chatIdSnapshot, erroredMessages, nextLlmHistory, contextTokensUsedRef.current);
           },
@@ -227,7 +229,6 @@ export default function App() {
       activeProvider,
       cancelPendingRequest,
       createChat,
-      loadChat,
       persistChatData,
       renameChat,
       scheduleAutoSave,
@@ -242,32 +243,32 @@ export default function App() {
   );
 
   const handleNewChat = useCallback(async () => {
+    console.log('[App] handleNewChat');
     cancelPendingRequest();
     await newChat();
   }, [cancelPendingRequest, newChat]);
 
   const handleSwitchChat = useCallback(async (chatId: string) => {
+    console.log(`[App] handleSwitchChat: ${chatId}`);
     cancelPendingRequest();
     await switchChat(chatId);
   }, [cancelPendingRequest, switchChat]);
 
   const handleDeleteChat = useCallback(async (chatId: string) => {
+    console.log(`[App] handleDeleteChat: ${chatId}`);
     cancelPendingRequest();
     await deleteChat(chatId);
   }, [cancelPendingRequest, deleteChat]);
 
 
   const handleRenameChat = useCallback(async () => {
-    if (!activeChatId) {
-      return;
-    }
+    if (!activeChatId) return;
 
     const currentTitle = chats.find((chat) => chat.id === activeChatId)?.title ?? 'Untitled Chat';
     const nextTitle = window.prompt('Rename chat', currentTitle);
-    if (nextTitle === null) {
-      return;
-    }
+    if (nextTitle === null) return;
 
+    console.log(`[App] handleRenameChat: ${nextTitle}`);
     await renameChat(activeChatId, nextTitle);
   }, [activeChatId, chats, renameChat]);
 

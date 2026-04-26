@@ -52,9 +52,25 @@ async function writeProviders(data) {
   }
 }
 
+const SAFE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
+function validateChatId(chatId) {
+  if (typeof chatId !== 'string' || !SAFE_ID_PATTERN.test(chatId)) {
+    throw new Error(`Invalid chatId: ${String(chatId)}`);
+  }
+  return chatId;
+}
+
 function registerProvidersIpc() {
-  ipcMain.handle('providers:getAll', async () => readProviders());
+  ipcMain.removeHandler('providers:getAll');
+  ipcMain.removeHandler('providers:save');
+
+  ipcMain.handle('providers:getAll', async () => {
+    console.log('[IPC] providers:getAll');
+    return readProviders();
+  });
   ipcMain.handle('providers:save', async (_, data) => {
+    console.log('[IPC] providers:save');
     await writeProviders(data);
     return readProviders();
   });
@@ -85,34 +101,41 @@ async function readHistoryIndex() {
         updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : 0,
       }))
       .filter((item) => item.id.length > 0);
-  } catch {
+  } catch (error) {
+    console.error('[Main] Failed to read history index:', error);
     return null;
   }
 }
 
 async function writeHistoryIndex(chats) {
   await ensureHistoryDir();
+  console.log(`[Main] Writing history index, count: ${chats.length}`);
   await fsPromises.writeFile(historyIndexPath, JSON.stringify(chats, null, 2), 'utf-8');
 }
 
 async function readChat(chatId) {
+  validateChatId(chatId);
   await ensureHistoryDir();
   const filePath = path.join(historyDir, `${chatId}.json`);
   if (!(await pathExists(filePath))) {
+    console.warn(`[Main] Chat file not found: ${filePath}`);
     return null;
   }
 
   try {
     const raw = await fsPromises.readFile(filePath, 'utf-8');
     return JSON.parse(raw);
-  } catch {
+  } catch (error) {
+    console.error(`[Main] Failed to read chat ${chatId}:`, error);
     return null;
   }
 }
 
 async function writeChat(chatId, data) {
+  validateChatId(chatId);
   await ensureHistoryDir();
   const filePath = path.join(historyDir, `${chatId}.json`);
+  console.log(`[Main] Writing chat file: ${filePath}, messages: ${data?.messages?.length ?? 0}`);
   try {
     await fsPromises.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
   } catch (error) {
@@ -125,9 +148,11 @@ async function listChats() {
   await ensureHistoryDir();
   const index = await readHistoryIndex();
   if (index) {
+    console.log(`[Main] Returning history from index, count: ${index.length}`);
     return index.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
+  console.log('[Main] Index not found, scanning directory...');
   const files = await fsPromises.readdir(historyDir);
   const chats = await Promise.all(files
     .filter((fileName) => fileName.endsWith('.json'))
@@ -152,9 +177,21 @@ async function listChats() {
 }
 
 function registerHistoryIpc() {
-  ipcMain.handle('history:list', async () => listChats());
-  ipcMain.handle('history:get', async (_, chatId) => readChat(chatId));
+  ipcMain.removeHandler('history:list');
+  ipcMain.removeHandler('history:get');
+  ipcMain.removeHandler('history:save');
+  ipcMain.removeHandler('history:delete');
+
+  ipcMain.handle('history:list', async () => {
+    console.log('[IPC] history:list');
+    return listChats();
+  });
+  ipcMain.handle('history:get', async (_, chatId) => {
+    console.log(`[IPC] history:get ${chatId}`);
+    return readChat(chatId);
+  });
   ipcMain.handle('history:save', async (_, chatId, data) => {
+    console.log(`[IPC] history:save ${chatId}`);
     await writeChat(chatId, data);
     const current = (await readHistoryIndex()) ?? [];
     const nextItem = {
@@ -168,6 +205,7 @@ function registerHistoryIpc() {
     return nextList;
   });
   ipcMain.handle('history:delete', async (_, chatId) => {
+    console.log(`[IPC] history:delete ${chatId}`);
     await ensureHistoryDir();
     const filePath = path.join(historyDir, `${chatId}.json`);
     if (await pathExists(filePath)) {
@@ -197,10 +235,14 @@ function createWindow() {
 
   if (isDev) {
     win.loadURL('http://localhost:3000');
-    win.webContents.openDevTools();
+    // win.webContents.openDevTools();
   } else {
     win.loadFile(path.join(__dirname, '../dist/index.html'));
   }
+
+  ipcMain.removeAllListeners('minimize-window');
+  ipcMain.removeAllListeners('maximize-window');
+  ipcMain.removeAllListeners('close-window');
 
   ipcMain.on('minimize-window', () => win.minimize());
   ipcMain.on('maximize-window', () => {

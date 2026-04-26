@@ -62,29 +62,6 @@ export function useChats() {
   const isMountedRef = useRef(true);
   const loadVersionRef = useRef(0);
   const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const autoSaveRequestedRef = useRef(false);
-  const lastAutoSaveAtRef = useRef(0);
-
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-      loadVersionRef.current += 1;
-      if (autoSaveTimeoutRef.current) {
-        clearTimeout(autoSaveTimeoutRef.current);
-      }
-      autoSaveRequestedRef.current = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    activeChatIdRef.current = activeChatId;
-  }, [activeChatId]);
-
-
-  const logStorageError = useCallback((action: string, error: unknown) => {
-    console.error(`[useChats] ${action} failed`, error);
-  }, []);
-
 
   const setMessages = useCallback((next: SetStateAction<Message[]>) => {
     setMessagesState((prev) => {
@@ -113,34 +90,63 @@ export function useChats() {
     });
   }, []);
 
-  const loadChatList = useCallback(async (): Promise<ChatSession[]> => {
-    setIsLoading(true);
-    try {
-      const list = chatStorage ? await chatStorage.list() : [];
-      if (isMountedRef.current) {
-        setChats(list);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      loadVersionRef.current += 1;
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
+
+  const logStorageError = useCallback((action: string, error: unknown) => {
+    console.error(`[useChats] ${action} failed`, error);
+  }, []);
+
+  const loadChatList = useCallback(async (silent = false): Promise<ChatSession[]> => {
+    if (!silent) setIsLoading(true);
+    console.log('[useChats] loadChatList: start');
+    try {
+      if (!chatStorage) {
+        console.warn('[useChats] loadChatList: chatStorage is null');
+        setChats([]);
+        return [];
+      }
+      const list = await chatStorage.list();
+      console.log(`[useChats] loadChatList: success, count = ${list.length}`);
+      setChats(list);
       return list;
     } catch (error) {
       logStorageError('load chat list', error);
+      setChats([]);
       return [];
     } finally {
-      if (isMountedRef.current) {
+      if (!silent) {
+        console.log('[useChats] loadChatList: setting isLoading to false');
         setIsLoading(false);
       }
     }
   }, [chatStorage, logStorageError]);
 
   const loadChat = useCallback(async (chatId: string) => {
-    if (!chatStorage) {
-      return;
-    }
-
+    if (!chatStorage) return;
     const loadVersion = ++loadVersionRef.current;
+    console.log(`[useChats] loadChat: ${chatId} (v${loadVersion})`);
 
     try {
       const data = await chatStorage.get(chatId);
-      if (!data || !isMountedRef.current || loadVersion !== loadVersionRef.current) {
+      if (!data) {
+        console.warn(`[useChats] loadChat: no data for ${chatId}`);
+        return;
+      }
+      if (loadVersion !== loadVersionRef.current) {
+        console.warn(`[useChats] loadChat: version mismatch for ${chatId}`);
         return;
       }
 
@@ -153,7 +159,7 @@ export function useChats() {
     } catch (error) {
       logStorageError(`load chat ${chatId}`, error);
     }
-  }, [chatStorage, logStorageError]);
+  }, [chatStorage, logStorageError, setMessages, setLlmHistory, setContextTokensUsed]);
 
   const saveChatData = useCallback(
     async (
@@ -163,9 +169,7 @@ export function useChats() {
       nextContextTokensUsed: number,
       titleFallback?: string,
     ) => {
-      if (!chatStorage) {
-        return;
-      }
+      if (!chatStorage) return;
 
       try {
         const existing = await chatStorage.get(chatId);
@@ -180,9 +184,7 @@ export function useChats() {
           contextTokensUsed: nextContextTokensUsed,
         };
         const updatedList = await chatStorage.save(chatId, data);
-        if (isMountedRef.current) {
-          setChats(updatedList);
-        }
+        setChats(updatedList);
       } catch (error) {
         logStorageError(`save chat ${chatId}`, error);
         throw error;
@@ -193,10 +195,7 @@ export function useChats() {
 
   const saveCurrentChat = useCallback(async () => {
     const chatId = activeChatIdRef.current;
-
-    if (!chatId) {
-      return;
-    }
+    if (!chatId) return;
 
     return saveQueueRef.current.enqueue(async () => {
       const snapshotMessages = [...messagesRef.current];
@@ -208,12 +207,14 @@ export function useChats() {
 
   const switchChat = useCallback(
     async (chatId: string) => {
-      if (activeChatIdRef.current === chatId) {
-        return;
-      }
+      if (activeChatIdRef.current === chatId) return;
 
       await switchQueueRef.current.enqueue(async () => {
         setIsTyping(false);
+        if (autoSaveTimeoutRef.current) {
+          clearTimeout(autoSaveTimeoutRef.current);
+          autoSaveTimeoutRef.current = null;
+        }
         await saveCurrentChat();
         await loadChat(chatId);
       });
@@ -224,45 +225,43 @@ export function useChats() {
   const newChat = useCallback(async () => {
     await switchQueueRef.current.enqueue(async () => {
       setIsTyping(false);
-      await saveCurrentChat();
-      if (!isMountedRef.current) {
-        return;
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+        autoSaveTimeoutRef.current = null;
       }
+      await saveCurrentChat();
       setActiveChatId(null);
       activeChatIdRef.current = null;
       setMessages([]);
       setLlmHistory([]);
       setContextTokensUsed(0);
     });
-  }, [saveCurrentChat]);
+  }, [saveCurrentChat, setMessages, setLlmHistory, setContextTokensUsed]);
 
   const createChat = useCallback(async (): Promise<string> => {
-    if (!chatStorage) {
-      throw new Error('History bridge is unavailable');
-    }
-
+    if (!chatStorage) throw new Error('History bridge is unavailable');
     const id = generateChatId();
     try {
-      await chatStorage.save(id, emptyChatData(id));
-      await loadChatList();
+      const empty = emptyChatData(id);
+      await chatStorage.save(id, empty);
+      await loadChatList(true);
+      setActiveChatId(id);
+      activeChatIdRef.current = id;
+      setMessages([]);
+      setLlmHistory([]);
+      setContextTokensUsed(0);
       return id;
     } catch (error) {
       logStorageError(`create chat ${id}`, error);
       throw error;
     }
-  }, [chatStorage, loadChatList, logStorageError]);
+  }, [chatStorage, loadChatList, logStorageError, setMessages, setLlmHistory, setContextTokensUsed]);
 
   const renameChat = useCallback(async (chatId: string, title: string) => {
-    if (!chatStorage) {
-      return;
-    }
-
+    if (!chatStorage) return;
     try {
       const data = await chatStorage.get(chatId);
-      if (!data) {
-        return;
-      }
-
+      if (!data) return;
       const nextTitle = title.trim() || 'Untitled Chat';
       const updatedData: ChatData = {
         ...data,
@@ -270,9 +269,7 @@ export function useChats() {
         updatedAt: Date.now(),
       };
       const updatedList = await chatStorage.save(chatId, updatedData);
-      if (isMountedRef.current) {
-        setChats(updatedList);
-      }
+      setChats(updatedList);
     } catch (error) {
       logStorageError(`rename chat ${chatId}`, error);
     }
@@ -280,46 +277,29 @@ export function useChats() {
 
   const deleteChat = useCallback(
     async (chatId: string) => {
-      if (!chatStorage) {
-        return;
-      }
-
+      if (!chatStorage) return;
       try {
         const list = await chatStorage.delete(chatId);
-        if (isMountedRef.current) {
-          setChats(list);
-        }
-
-        if (activeChatIdRef.current !== chatId) {
-          return;
-        }
+        setChats(list);
+        if (activeChatIdRef.current !== chatId) return;
 
         const nextId = list[0]?.id ?? null;
         if (nextId) {
           await loadChat(nextId);
-          return;
+        } else {
+          setActiveChatId(null);
+          activeChatIdRef.current = null;
+          setMessages([]);
+          setLlmHistory([]);
+          setContextTokensUsed(0);
+          setIsTyping(false);
         }
-
-        if (!isMountedRef.current) {
-          return;
-        }
-
-        setActiveChatId(null);
-        activeChatIdRef.current = null;
-        setMessages([]);
-        setLlmHistory([]);
-        setContextTokensUsed(0);
-        setIsTyping(false);
       } catch (error) {
         logStorageError(`delete chat ${chatId}`, error);
       }
     },
-    [chatStorage, loadChat, logStorageError],
+    [chatStorage, loadChat, logStorageError, setMessages, setLlmHistory, setContextTokensUsed],
   );
-
-  const persistCurrentChat = useCallback(async () => {
-    await saveCurrentChat();
-  }, [saveCurrentChat]);
 
   const persistChatData = useCallback(
     async (
@@ -336,49 +316,25 @@ export function useChats() {
 
   useEffect(() => {
     async function bootstrap() {
+      console.log('[useChats] bootstrap: start');
       const list = await loadChatList();
-      if (list.length > 0) {
+      if (list.length > 0 && isMountedRef.current) {
         await loadChat(list[0].id);
       }
+      console.log('[useChats] bootstrap: done');
     }
-
     void bootstrap();
   }, [loadChat, loadChatList]);
 
   const scheduleAutoSave = useCallback(() => {
-    autoSaveRequestedRef.current = true;
-    const now = Date.now();
-    const elapsed = now - lastAutoSaveAtRef.current;
-
-    if (elapsed >= 2000 && autoSaveTimeoutRef.current === null) {
-      lastAutoSaveAtRef.current = now;
-      autoSaveRequestedRef.current = false;
-      void saveCurrentChat();
-      return;
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current);
     }
-
-    if (autoSaveTimeoutRef.current !== null) {
-      return;
-    }
-
-    const delay = Math.max(0, 2000 - elapsed);
     autoSaveTimeoutRef.current = setTimeout(() => {
       autoSaveTimeoutRef.current = null;
-      if (!autoSaveRequestedRef.current) {
-        return;
-      }
-      autoSaveRequestedRef.current = false;
-      lastAutoSaveAtRef.current = Date.now();
       void saveCurrentChat();
-    }, delay);
+    }, 5000);
   }, [saveCurrentChat]);
-
-  useEffect(() => {
-    if (!activeChatId) {
-      return;
-    }
-    scheduleAutoSave();
-  }, [activeChatId, llmHistoryState, messagesState, scheduleAutoSave]);
 
   return {
     chats,
@@ -402,7 +358,6 @@ export function useChats() {
     createChat,
     renameChat,
     deleteChat,
-    persistCurrentChat,
     persistChatData,
     scheduleAutoSave,
   };

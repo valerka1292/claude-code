@@ -49,33 +49,37 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseCompletionChunk(raw: string): CompletionChunk | null {
-  const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) {
+      return null;
+    }
+
+    const chunk: CompletionChunk = {};
+
+    if (Array.isArray(parsed.choices)) {
+      chunk.choices = parsed.choices as CompletionChunkChoice[];
+    }
+
+    if (isRecord(parsed.usage)) {
+      const usage = parsed.usage as Record<string, unknown>;
+      if (
+        typeof usage.completion_tokens === 'number' &&
+        typeof usage.prompt_tokens === 'number' &&
+        typeof usage.total_tokens === 'number'
+      ) {
+        chunk.usage = {
+          completion_tokens: usage.completion_tokens,
+          prompt_tokens: usage.prompt_tokens,
+          total_tokens: usage.total_tokens,
+        };
+      }
+    }
+
+    return chunk;
+  } catch {
     return null;
   }
-
-  const chunk: CompletionChunk = {};
-
-  if (Array.isArray(parsed.choices)) {
-    chunk.choices = parsed.choices as CompletionChunkChoice[];
-  }
-
-  if (isRecord(parsed.usage)) {
-    const usage = parsed.usage as Record<string, unknown>;
-    if (
-      typeof usage.completion_tokens === 'number' &&
-      typeof usage.prompt_tokens === 'number' &&
-      typeof usage.total_tokens === 'number'
-    ) {
-      chunk.usage = {
-        completion_tokens: usage.completion_tokens,
-        prompt_tokens: usage.prompt_tokens,
-        total_tokens: usage.total_tokens,
-      };
-    }
-  }
-
-  return chunk;
 }
 
 const SET_DIALOG_NAME_TOOL = {
@@ -104,6 +108,7 @@ export async function streamChatCompletion(
   tools?: unknown[],
 ): Promise<void> {
   const url = `${provider.baseUrl}/chat/completions`;
+  console.log(`[LLM] Starting stream to ${url}, model: ${provider.model}`);
 
   const body: Record<string, unknown> = {
     model: provider.model,
@@ -119,13 +124,12 @@ export async function streamChatCompletion(
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let doneCalled = false;
   const cleanup = async () => {
-    if (!reader) {
-      return;
-    }
+    if (!reader) return;
     try {
+      console.log('[LLM] Cleaning up reader');
       await reader.cancel();
-    } catch {
-      // Ignore cleanup errors.
+    } catch (e) {
+      console.warn('[LLM] Cleanup error:', e);
     } finally {
       reader = undefined;
     }
@@ -133,81 +137,72 @@ export async function streamChatCompletion(
 
   const safeDone = (usage?: CompletionUsage) => {
     if (!doneCalled) {
+      console.log('[LLM] safeDone called', usage);
       doneCalled = true;
       callbacks.onDone(usage);
     }
   };
 
-  const processDataLine = (
-    jsonStr: string,
-    accumulatedToolCalls: Record<number, ToolCallDelta>,
-    getLastUsage: () => CompletionUsage | undefined,
-    setLastUsage: (usage: CompletionUsage) => void,
-  ): 'done' | 'continue' => {
+  const accumulatedToolCalls: Record<number, ToolCallDelta> = {};
+  let lastUsage: CompletionUsage | undefined;
+
+  const processDataLine = (jsonStr: string): 'done' | 'continue' => {
     if (jsonStr === '[DONE]') {
-      safeDone(getLastUsage());
+      safeDone(lastUsage);
       return 'done';
     }
 
-    try {
-      const parsed = parseCompletionChunk(jsonStr);
-      if (!parsed) {
-        return 'continue';
-      }
+    const parsed = parseCompletionChunk(jsonStr);
+    if (!parsed) return 'continue';
 
-      if (parsed.usage) {
-        setLastUsage(parsed.usage);
-      }
+    if (parsed.usage) {
+      lastUsage = parsed.usage;
+    }
 
-      const choice = parsed.choices?.[0];
-      if (!choice?.delta) {
-        return 'continue';
-      }
+    const choice = parsed.choices?.[0];
+    if (!choice?.delta) return 'continue';
 
-      const { delta } = choice;
+    const { delta } = choice;
 
-      if (delta.reasoning_content) {
-        callbacks.onThinking(delta.reasoning_content);
-      }
+    if (delta.reasoning_content) {
+      callbacks.onThinking(delta.reasoning_content);
+    }
 
-      if (delta.content) {
-        callbacks.onContent(delta.content);
-      }
+    if (delta.content) {
+      callbacks.onContent(delta.content);
+    }
 
-      if (delta.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const index = tc.index;
-          if (!accumulatedToolCalls[index]) {
-            accumulatedToolCalls[index] = {
-              index,
-              id: tc.id,
-              function: {
-                name: tc.function?.name,
-                arguments: '',
-              },
-            };
-          }
-
-          if (tc.function?.name) {
-            accumulatedToolCalls[index].function = {
-              ...accumulatedToolCalls[index].function,
-              name: tc.function.name,
-            };
-          }
-
-          if (tc.function?.arguments) {
-            const currentArgs = accumulatedToolCalls[index].function?.arguments ?? '';
-            accumulatedToolCalls[index].function = {
-              ...accumulatedToolCalls[index].function,
-              arguments: currentArgs + tc.function.arguments,
-            };
-          }
-
-          callbacks.onToolCall({ ...accumulatedToolCalls[index] });
+    if (delta.tool_calls) {
+      for (const tc of delta.tool_calls) {
+        const index = tc.index;
+        if (!accumulatedToolCalls[index]) {
+          accumulatedToolCalls[index] = {
+            index,
+            id: tc.id,
+            function: {
+              name: tc.function?.name,
+              arguments: '',
+            },
+          };
         }
+
+        if (tc.function?.name) {
+          accumulatedToolCalls[index].function = {
+            ...accumulatedToolCalls[index].function,
+            name: tc.function.name,
+          };
+        }
+
+        if (tc.function?.arguments) {
+          const currentArgs = accumulatedToolCalls[index].function?.arguments ?? '';
+          accumulatedToolCalls[index].function = {
+            ...accumulatedToolCalls[index].function,
+            arguments: currentArgs + tc.function.arguments,
+          };
+        }
+
+        callbacks.onToolCall({ ...accumulatedToolCalls[index] });
       }
-    } catch {
-      // Ignore malformed chunks.
     }
 
     return 'continue';
@@ -226,6 +221,7 @@ export async function streamChatCompletion(
 
     if (!response.ok) {
       const text = await response.text();
+      console.error(`[LLM] HTTP error ${response.status}: ${text}`);
       callbacks.onError(new Error(`HTTP ${response.status}: ${text}`));
       return;
     }
@@ -238,14 +234,10 @@ export async function streamChatCompletion(
 
     const decoder = new TextDecoder();
     let buffer = '';
-    const accumulatedToolCalls: Record<number, ToolCallDelta> = {};
-    let lastUsage: CompletionUsage | undefined;
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
+      if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
@@ -253,43 +245,27 @@ export async function streamChatCompletion(
 
       for (const line of lines) {
         const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data:')) {
-          continue;
-        }
+        if (!trimmed || !trimmed.startsWith('data:')) continue;
 
         const jsonStr = trimmed.slice(5).trim();
-        const result = processDataLine(
-          jsonStr,
-          accumulatedToolCalls,
-          () => lastUsage,
-          (usage) => {
-            lastUsage = usage;
-          },
-        );
-        if (result === 'done') {
-          return;
-        }
+        if (processDataLine(jsonStr) === 'done') return;
       }
     }
 
+    // Process trailing buffer
     const trailing = buffer.trim();
-    if (trailing.startsWith('data:')) {
-      const trailingData = trailing.slice(5).trim();
-      processDataLine(
-        trailingData,
-        accumulatedToolCalls,
-        () => lastUsage,
-        (usage) => {
-          lastUsage = usage;
-        },
-      );
+    if (trailing && trailing.startsWith('data:')) {
+      const jsonStr = trailing.slice(5).trim();
+      processDataLine(jsonStr);
     }
 
     safeDone(lastUsage);
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
+      console.log('[LLM] Stream aborted');
       safeDone();
     } else {
+      console.error('[LLM] Stream error:', error);
       callbacks.onError(error);
     }
   } finally {
@@ -297,7 +273,12 @@ export async function streamChatCompletion(
   }
 }
 
-export async function generateChatName(provider: Provider, firstUserMessage: string): Promise<string> {
+export async function generateChatName(
+  provider: Provider, 
+  firstUserMessage: string,
+  signal?: AbortSignal
+): Promise<string> {
+  console.log('[LLM] Generating chat name...');
   try {
     const response = await fetch(`${provider.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -305,6 +286,7 @@ export async function generateChatName(provider: Provider, firstUserMessage: str
         'Content-Type': 'application/json',
         Authorization: `Bearer ${provider.apiKey}`,
       },
+      signal,
       body: JSON.stringify({
         model: provider.model,
         messages: [
@@ -322,6 +304,7 @@ export async function generateChatName(provider: Provider, firstUserMessage: str
     });
 
     if (!response.ok) {
+      console.warn(`[LLM] Name generation failed: ${response.status}`);
       return 'Untitled Chat';
     }
 
@@ -337,18 +320,16 @@ export async function generateChatName(provider: Provider, firstUserMessage: str
       }>;
     };
     const argumentsText = payload.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
-    if (!argumentsText) {
-      return 'Untitled Chat';
-    }
+    if (!argumentsText) return 'Untitled Chat';
 
     const parsed = JSON.parse(argumentsText) as { name?: string };
     const generatedTitle = parsed.name?.trim();
-    if (!generatedTitle) {
-      return 'Untitled Chat';
-    }
+    if (!generatedTitle) return 'Untitled Chat';
 
+    console.log(`[LLM] Generated title: "${generatedTitle}"`);
     return generatedTitle.slice(0, 60);
-  } catch {
+  } catch (e) {
+    console.error('[LLM] generateChatName error:', e);
     return 'Untitled Chat';
   }
 }
