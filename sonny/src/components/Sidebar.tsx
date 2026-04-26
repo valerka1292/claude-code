@@ -2,10 +2,12 @@ import React from 'react';
 import { MessageSquare, Plus, Settings, Trash2 } from 'lucide-react';
 import { ChatSession } from '../types';
 import { cn } from '../lib/utils';
+import { groupChatsByDate } from '../utils/chatGrouping';
 
 interface SidebarProps {
   activeChatId: string;
   chats: ChatSession[];
+  isLoading: boolean;
   onNewChat: () => void;
   onSelectChat: (chatId: string) => void;
   onDeleteChat: (chatId: string) => void;
@@ -15,26 +17,13 @@ interface SidebarProps {
 export default function Sidebar({
   activeChatId,
   chats,
+  isLoading,
   onNewChat,
   onSelectChat,
   onDeleteChat,
   onSettingsOpen,
 }: SidebarProps) {
-  const groupedChats = React.useMemo(() => {
-    const now = new Date();
-    const today = new Date(now.setHours(0, 0, 0, 0));
-    const yesterday = new Date(today.getTime() - 86400000);
-    const week = new Date(today.getTime() - 7 * 86400000);
-
-    return {
-      today: chats.filter((chat) => new Date(chat.updatedAt) >= today),
-      yesterday: chats.filter(
-        (chat) => new Date(chat.updatedAt) >= yesterday && new Date(chat.updatedAt) < today,
-      ),
-      week: chats.filter((chat) => new Date(chat.updatedAt) >= week && new Date(chat.updatedAt) < yesterday),
-      older: chats.filter((chat) => new Date(chat.updatedAt) < week),
-    };
-  }, [chats]);
+  const groupedChats = React.useMemo(() => groupChatsByDate(chats), [chats]);
 
   const renderChatGroup = (title: string, groupChats: ChatSession[]) => {
     if (groupChats.length === 0) {
@@ -104,10 +93,22 @@ export default function Sidebar({
       </div>
 
       <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-4">
-        {renderChatGroup('Today', groupedChats.today)}
-        {renderChatGroup('Yesterday', groupedChats.yesterday)}
-        {renderChatGroup('Previous 7 Days', groupedChats.week)}
-        {renderChatGroup('Older', groupedChats.older)}
+        {isLoading ? (
+          <div className="px-3 py-8 text-center text-sm text-text-secondary">Loading chats...</div>
+        ) : chats.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-2 px-3 py-8 text-center text-text-secondary">
+            <MessageSquare size={20} className="opacity-50" />
+            <p className="text-sm">No chats yet</p>
+            <p className="text-xs opacity-70">Click “New chat” to get started.</p>
+          </div>
+        ) : (
+          <>
+            {renderChatGroup('Today', groupedChats.today)}
+            {renderChatGroup('Yesterday', groupedChats.yesterday)}
+            {renderChatGroup('Previous 7 Days', groupedChats.week)}
+            {renderChatGroup('Older', groupedChats.older)}
+          </>
+        )}
       </div>
 
       <div className="flex flex-shrink-0 flex-col gap-1 border-t border-border p-3">

@@ -84,7 +84,18 @@ export async function streamChatCompletion(
 
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let doneCalled = false;
-  let shouldCancelReader = false;
+  const cleanup = async () => {
+    if (!reader) {
+      return;
+    }
+    try {
+      await reader.cancel();
+    } catch {
+      // Ignore cleanup errors.
+    } finally {
+      reader = undefined;
+    }
+  };
 
   const safeDone = (usage?: CompletionUsage) => {
     if (!doneCalled) {
@@ -209,14 +220,11 @@ export async function streamChatCompletion(
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       safeDone();
-      return;
+    } else {
+      callbacks.onError(error);
     }
-    shouldCancelReader = true;
-    callbacks.onError(error);
   } finally {
-    if (shouldCancelReader && reader) {
-      await reader.cancel().catch(() => undefined);
-    }
+    await cleanup();
   }
 }
 
@@ -276,9 +284,18 @@ export async function generateChatName(provider: Provider, firstUserMessage: str
   }
 }
 
-export async function testProviderStream(provider: Provider): Promise<boolean> {
+function mergeAbortSignals(signalA: AbortSignal, signalB: AbortSignal): AbortSignal {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signalA.addEventListener('abort', abort, { once: true });
+  signalB.addEventListener('abort', abort, { once: true });
+  return controller.signal;
+}
+
+export async function testProviderStream(provider: Provider, signal?: AbortSignal): Promise<boolean> {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+  const combinedSignal = signal ? mergeAbortSignals(signal, controller.signal) : controller.signal;
 
   try {
     const response = await fetch(`${provider.baseUrl}/chat/completions`, {
@@ -293,7 +310,7 @@ export async function testProviderStream(provider: Provider): Promise<boolean> {
         stream: true,
         max_tokens: 8,
       }),
-      signal: controller.signal,
+      signal: combinedSignal,
     });
 
     if (!response.ok) {

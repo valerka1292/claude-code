@@ -4,13 +4,16 @@ import App from './App.tsx';
 import './index.css';
 import { ProvidersProvider } from './context/ProvidersContext';
 import { StorageProvider } from './context/StorageContext';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <StorageProvider>
-      <ProvidersProvider>
-        <App />
-      </ProvidersProvider>
-    </StorageProvider>
+    <ErrorBoundary>
+      <StorageProvider>
+        <ProvidersProvider>
+          <App />
+        </ProvidersProvider>
+      </StorageProvider>
+    </ErrorBoundary>
   </StrictMode>,
 );
