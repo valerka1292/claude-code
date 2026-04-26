@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatData, ChatSession, Message, StoredMessage } from '../types';
+import { useChatStorage } from '../context/StorageContext';
 
 function generateChatId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -41,6 +42,7 @@ function emptyChatData(id: string): ChatData {
 }
 
 export function useChats() {
+  const chatStorage = useChatStorage();
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -86,7 +88,7 @@ export function useChats() {
 
   const loadChatList = useCallback(async (): Promise<ChatSession[]> => {
     try {
-      const list = (await window.electron?.history?.list()) ?? [];
+      const list = chatStorage ? await chatStorage.list() : [];
       if (isMountedRef.current) {
         setChats(list);
       }
@@ -95,13 +97,17 @@ export function useChats() {
       logStorageError('load chat list', error);
       return [];
     }
-  }, [logStorageError]);
+  }, [chatStorage, logStorageError]);
 
   const loadChat = useCallback(async (chatId: string) => {
+    if (!chatStorage) {
+      return;
+    }
+
     const loadVersion = ++loadVersionRef.current;
 
     try {
-      const data = await window.electron?.history?.get(chatId);
+      const data = await chatStorage.get(chatId);
       if (!data || !isMountedRef.current || loadVersion !== loadVersionRef.current) {
         return;
       }
@@ -114,19 +120,18 @@ export function useChats() {
     } catch (error) {
       logStorageError(`load chat ${chatId}`, error);
     }
-  }, [logStorageError]);
+  }, [chatStorage, logStorageError]);
 
   const saveCurrentChat = useCallback(async () => {
     const chatId = activeChatIdRef.current;
-    const bridge = window.electron?.history;
 
-    if (!bridge || !chatId || savingRef.current) {
+    if (!chatStorage || !chatId || savingRef.current) {
       return;
     }
 
     savingRef.current = true;
     try {
-      const existing = await bridge.get(chatId);
+      const existing = await chatStorage.get(chatId);
       const now = Date.now();
       const data: ChatData = {
         id: chatId,
@@ -137,7 +142,7 @@ export function useChats() {
         llmHistory: llmHistoryRef.current,
         contextTokensUsed: contextTokensUsedRef.current,
       };
-      const updatedList = await bridge.save(chatId, data);
+      const updatedList = await chatStorage.save(chatId, data);
       if (isMountedRef.current) {
         setChats(updatedList);
       }
@@ -147,7 +152,7 @@ export function useChats() {
     } finally {
       savingRef.current = false;
     }
-  }, [logStorageError]);
+  }, [chatStorage, logStorageError]);
 
   const switchChat = useCallback(
     async (chatId: string) => {
@@ -189,30 +194,28 @@ export function useChats() {
   }, [saveCurrentChat]);
 
   const createChat = useCallback(async (): Promise<string> => {
-    const bridge = window.electron?.history;
-    if (!bridge) {
+    if (!chatStorage) {
       throw new Error('History bridge is unavailable');
     }
 
     const id = generateChatId();
     try {
-      await bridge.save(id, emptyChatData(id));
+      await chatStorage.save(id, emptyChatData(id));
       await loadChatList();
       return id;
     } catch (error) {
       logStorageError(`create chat ${id}`, error);
       throw error;
     }
-  }, [loadChatList, logStorageError]);
+  }, [chatStorage, loadChatList, logStorageError]);
 
   const renameChat = useCallback(async (chatId: string, title: string) => {
-    const bridge = window.electron?.history;
-    if (!bridge) {
+    if (!chatStorage) {
       return;
     }
 
     try {
-      const data = await bridge.get(chatId);
+      const data = await chatStorage.get(chatId);
       if (!data) {
         return;
       }
@@ -223,24 +226,23 @@ export function useChats() {
         title: nextTitle,
         updatedAt: Date.now(),
       };
-      const updatedList = await bridge.save(chatId, updatedData);
+      const updatedList = await chatStorage.save(chatId, updatedData);
       if (isMountedRef.current) {
         setChats(updatedList);
       }
     } catch (error) {
       logStorageError(`rename chat ${chatId}`, error);
     }
-  }, [logStorageError]);
+  }, [chatStorage, logStorageError]);
 
   const deleteChat = useCallback(
     async (chatId: string) => {
-      const bridge = window.electron?.history;
-      if (!bridge) {
+      if (!chatStorage) {
         return;
       }
 
       try {
-        const list = await bridge.delete(chatId);
+        const list = await chatStorage.delete(chatId);
         if (isMountedRef.current) {
           setChats(list);
         }
@@ -268,7 +270,7 @@ export function useChats() {
         logStorageError(`delete chat ${chatId}`, error);
       }
     },
-    [loadChat, logStorageError],
+    [chatStorage, loadChat, logStorageError],
   );
 
   const persistCurrentChat = useCallback(async () => {
