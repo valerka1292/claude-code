@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import MessageList from './components/MessageList';
 import InputArea from './components/InputArea';
@@ -35,12 +35,28 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const { activeProvider } = useProviders();
+  const pendingRequestControllerRef = useRef<AbortController | null>(null);
+
+  const cancelPendingRequest = useCallback(() => {
+    pendingRequestControllerRef.current?.abort();
+    pendingRequestControllerRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      cancelPendingRequest();
+    };
+  }, [cancelPendingRequest]);
 
   const handleSend = useCallback(
     async (content: string) => {
       if (!activeProvider) {
         return;
       }
+
+      cancelPendingRequest();
+      const requestController = new AbortController();
+      pendingRequestControllerRef.current = requestController;
 
       let chatId = activeChatIdRef.current;
       if (!chatId) {
@@ -77,83 +93,97 @@ export default function App() {
 
       let finalAssistantContent = '';
 
-      streamChatCompletion(activeProvider, nextLlmHistory, {
-        onContent: (text) => {
-          if (activeChatIdRef.current !== chatIdSnapshot) {
-            return;
-          }
-
-          finalAssistantContent += text;
-          setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + text } : m)));
-        },
-        onThinking: (text) => {
-          if (activeChatIdRef.current !== chatIdSnapshot) {
-            return;
-          }
-
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, thinking: (m.thinking ?? '') + text } : m)),
-          );
-        },
-        onToolCall: (toolCall) => {
-          if (activeChatIdRef.current !== chatIdSnapshot) {
-            return;
-          }
-
-          setMessages((prev) =>
-            prev.map((m) => {
-              if (m.id !== assistantId) {
-                return m;
-              }
-
-              const existingToolCalls: ToolCall[] = m.toolCalls ? [...m.toolCalls] : [];
-              const idx = existingToolCalls.findIndex((tc) => tc.index === toolCall.index);
-
-              if (idx >= 0) {
-                existingToolCalls[idx] = { ...existingToolCalls[idx], ...toolCall };
-              } else {
-                existingToolCalls.push(toolCall);
-              }
-
-              return { ...m, toolCalls: existingToolCalls };
-            }),
-          );
-        },
-        onDone: async (usage) => {
-          if (activeChatIdRef.current !== chatIdSnapshot) {
-            return;
-          }
-
-          setIsTyping(false);
-          if (usage?.total_tokens) {
-            setContextTokensUsed(usage.total_tokens);
-          }
-          setLlmHistory((prev) => [...prev, { role: 'assistant', content: finalAssistantContent }]);
-          await persistCurrentChat();
-
-          if (isFirstMessage) {
-            const title = await generateChatName(activeProvider, content);
-            if (activeChatIdRef.current === chatIdSnapshot) {
-              await renameChat(chatIdSnapshot, title);
+      streamChatCompletion(
+        activeProvider,
+        nextLlmHistory,
+        {
+          onContent: (text) => {
+            if (activeChatIdRef.current !== chatIdSnapshot) {
+              return;
             }
-          }
-        },
-        onError: (error) => {
-          if (activeChatIdRef.current !== chatIdSnapshot) {
-            return;
-          }
 
-          setIsTyping(false);
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, content: `Error: ${errorMessage}` } : m)),
-          );
+            finalAssistantContent += text;
+            setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + text } : m)));
+          },
+          onThinking: (text) => {
+            if (activeChatIdRef.current !== chatIdSnapshot) {
+              return;
+            }
+
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, thinking: (m.thinking ?? '') + text } : m)),
+            );
+          },
+          onToolCall: (toolCall) => {
+            if (activeChatIdRef.current !== chatIdSnapshot) {
+              return;
+            }
+
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId) {
+                  return m;
+                }
+
+                const existingToolCalls: ToolCall[] = m.toolCalls ? [...m.toolCalls] : [];
+                const idx = existingToolCalls.findIndex((tc) => tc.index === toolCall.index);
+
+                if (idx >= 0) {
+                  existingToolCalls[idx] = { ...existingToolCalls[idx], ...toolCall };
+                } else {
+                  existingToolCalls.push(toolCall);
+                }
+
+                return { ...m, toolCalls: existingToolCalls };
+              }),
+            );
+          },
+          onDone: async (usage) => {
+            if (pendingRequestControllerRef.current === requestController) {
+              pendingRequestControllerRef.current = null;
+            }
+
+            if (activeChatIdRef.current !== chatIdSnapshot) {
+              return;
+            }
+
+            setIsTyping(false);
+            if (usage?.total_tokens) {
+              setContextTokensUsed(usage.total_tokens);
+            }
+            setLlmHistory((prev) => [...prev, { role: 'assistant', content: finalAssistantContent }]);
+            await persistCurrentChat();
+
+            if (isFirstMessage) {
+              const title = await generateChatName(activeProvider, content);
+              if (activeChatIdRef.current === chatIdSnapshot) {
+                await renameChat(chatIdSnapshot, title);
+              }
+            }
+          },
+          onError: (error) => {
+            if (pendingRequestControllerRef.current === requestController) {
+              pendingRequestControllerRef.current = null;
+            }
+
+            if (activeChatIdRef.current !== chatIdSnapshot) {
+              return;
+            }
+
+            setIsTyping(false);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, content: `Error: ${errorMessage}` } : m)),
+            );
+          },
         },
-      });
+        requestController.signal,
+      );
     },
     [
       activeChatIdRef,
       activeProvider,
+      cancelPendingRequest,
       createChat,
       llmHistory,
       loadChat,
@@ -167,6 +197,21 @@ export default function App() {
     ],
   );
 
+  const handleNewChat = useCallback(async () => {
+    cancelPendingRequest();
+    await newChat();
+  }, [cancelPendingRequest, newChat]);
+
+  const handleSwitchChat = useCallback(async (chatId: string) => {
+    cancelPendingRequest();
+    await switchChat(chatId);
+  }, [cancelPendingRequest, switchChat]);
+
+  const handleDeleteChat = useCallback(async (chatId: string) => {
+    cancelPendingRequest();
+    await deleteChat(chatId);
+  }, [cancelPendingRequest, deleteChat]);
+
   const chatTitle = chats.find((chat) => chat.id === activeChatId)?.title ?? 'Untitled Chat';
 
   return (
@@ -174,9 +219,9 @@ export default function App() {
       <Sidebar
         activeChatId={activeChatId ?? ''}
         chats={chats}
-        onNewChat={newChat}
-        onSelectChat={switchChat}
-        onDeleteChat={deleteChat}
+        onNewChat={handleNewChat}
+        onSelectChat={handleSwitchChat}
+        onDeleteChat={handleDeleteChat}
         onSettingsOpen={() => setIsSettingsOpen(true)}
       />
 

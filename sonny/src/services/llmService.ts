@@ -109,6 +109,15 @@ export function streamChatCompletion(
       const accumulatedToolCalls: Record<number, ToolCallDelta> = {};
       let lastUsage: CompletionUsage | undefined;
       let doneCalled = false;
+      let errorCalled = false;
+
+      const emitError = (error: unknown) => {
+        if (errorCalled) {
+          return;
+        }
+        errorCalled = true;
+        callbacks.onError(error);
+      };
 
       try {
         while (true) {
@@ -203,9 +212,13 @@ export function streamChatCompletion(
         }
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') {
+          await reader.cancel().catch(() => undefined);
           return;
         }
-        callbacks.onError(error);
+        await reader.cancel().catch(() => undefined);
+        emitError(error);
+      } finally {
+        await reader.cancel().catch(() => undefined);
       }
 
       if (!doneCalled) {
