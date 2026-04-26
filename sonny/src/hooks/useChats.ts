@@ -43,51 +43,49 @@ function emptyChatData(id: string): ChatData {
   };
 }
 
+function useSyncedState<T>(initialValue: T) {
+  const [value, setValue] = useState(initialValue);
+  const valueRef = useRef(value);
+
+  const setSyncedValue = useCallback((next: SetStateAction<T>) => {
+    setValue((prev) => {
+      const resolved = typeof next === 'function' ? (next as (prevState: T) => T)(prev) : next;
+      valueRef.current = resolved;
+      return resolved;
+    });
+  }, []);
+
+  return [value, setSyncedValue, valueRef] as const;
+}
+
 export function useChats() {
   const chatStorage = useChatStorage();
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
-  const [messagesState, setMessagesState] = useState<Message[]>([]);
-  const [llmHistoryState, setLlmHistoryState] = useState<{ role: string; content: string }[]>([]);
-  const [contextTokensUsedState, setContextTokensUsedState] = useState(0);
+  const [messagesState, setMessagesState, messagesRef] = useSyncedState<Message[]>([]);
+  const [llmHistoryState, setLlmHistoryState, llmHistoryRef] = useSyncedState<{ role: string; content: string }[]>([]);
+  const [contextTokensUsedState, setContextTokensUsedState, contextTokensUsedRef] = useSyncedState(0);
   const [isTyping, setIsTyping] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   const activeChatIdRef = useRef<string | null>(null);
-  const messagesRef = useRef<Message[]>([]);
-  const llmHistoryRef = useRef<{ role: string; content: string }[]>([]);
-  const contextTokensUsedRef = useRef(0);
   const saveQueueRef = useRef(new OperationQueue());
   const switchQueueRef = useRef(new OperationQueue());
   const isMountedRef = useRef(true);
   const loadVersionRef = useRef(0);
   const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveRequestVersionRef = useRef(0);
 
   const setMessages = useCallback((next: SetStateAction<Message[]>) => {
-    setMessagesState((prev) => {
-      const resolved = typeof next === 'function' ? (next as (prevState: Message[]) => Message[])(prev) : next;
-      messagesRef.current = resolved;
-      return resolved;
-    });
+    setMessagesState(next);
   }, []);
 
   const setLlmHistory = useCallback((next: SetStateAction<{ role: string; content: string }[]>) => {
-    setLlmHistoryState((prev) => {
-      const resolved =
-        typeof next === 'function'
-          ? (next as (prevState: { role: string; content: string }[]) => { role: string; content: string }[])(prev)
-          : next;
-      llmHistoryRef.current = resolved;
-      return resolved;
-    });
+    setLlmHistoryState(next);
   }, []);
 
   const setContextTokensUsed = useCallback((next: SetStateAction<number>) => {
-    setContextTokensUsedState((prev) => {
-      const resolved = typeof next === 'function' ? (next as (prevState: number) => number)(prev) : next;
-      contextTokensUsedRef.current = resolved;
-      return resolved;
-    });
+    setContextTokensUsedState(next);
   }, []);
 
   useEffect(() => {
@@ -196,8 +194,10 @@ export function useChats() {
   const saveCurrentChat = useCallback(async () => {
     const chatId = activeChatIdRef.current;
     if (!chatId) return;
+    const requestVersion = ++saveRequestVersionRef.current;
 
     return saveQueueRef.current.enqueue(async () => {
+      if (requestVersion !== saveRequestVersionRef.current) return;
       const snapshotMessages = [...messagesRef.current];
       const snapshotHistory = [...llmHistoryRef.current];
       const snapshotTokens = contextTokensUsedRef.current;
@@ -309,7 +309,11 @@ export function useChats() {
       nextContextTokensUsed: number,
       titleFallback?: string,
     ) => {
-      await saveChatData(chatId, nextMessages, nextLlmHistory, nextContextTokensUsed, titleFallback);
+      const requestVersion = ++saveRequestVersionRef.current;
+      await saveQueueRef.current.enqueue(async () => {
+        if (requestVersion !== saveRequestVersionRef.current) return;
+        await saveChatData(chatId, nextMessages, nextLlmHistory, nextContextTokensUsed, titleFallback);
+      });
     },
     [saveChatData],
   );

@@ -44,6 +44,32 @@ interface CompletionChunk {
   usage?: CompletionUsage;
 }
 
+function combineSignals(signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
+  const availableSignals = signals.filter((signal): signal is AbortSignal => Boolean(signal));
+  if (availableSignals.length === 0) return undefined;
+
+  if (typeof AbortSignal.any === 'function') {
+    return AbortSignal.any(availableSignals);
+  }
+
+  const controller = new AbortController();
+  const abortFrom = (source: AbortSignal) => {
+    if (!controller.signal.aborted) {
+      controller.abort(source.reason ?? new DOMException('Operation aborted', 'AbortError'));
+    }
+  };
+
+  for (const signal of availableSignals) {
+    if (signal.aborted) {
+      abortFrom(signal);
+      break;
+    }
+    signal.addEventListener('abort', () => abortFrom(signal), { once: true });
+  }
+
+  return controller.signal;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -121,9 +147,7 @@ export async function streamChatCompletion(
   };
 
   // Modern AbortSignal.any (Chrome 116+) or fallback
-  const combinedSignal = (AbortSignal as any).any 
-    ? (AbortSignal as any).any([signal, stallController.signal].filter(Boolean))
-    : signal;
+  const combinedSignal = combineSignals([signal, stallController.signal]);
 
   const body = {
     model: provider.model,
@@ -258,9 +282,7 @@ export async function generateChatName(provider: Provider, firstUserMessage: str
 
 export async function testProviderStream(provider: Provider, signal?: AbortSignal): Promise<boolean> {
   const timeoutSignal = AbortSignal.timeout(15000); // Node 17.3+ / Chrome 103+
-  const combinedSignal = (AbortSignal as any).any 
-    ? (AbortSignal as any).any([signal, timeoutSignal].filter(Boolean)) 
-    : signal;
+  const combinedSignal = combineSignals([signal, timeoutSignal]);
 
   try {
     const response = await fetch(`${provider.baseUrl}/chat/completions`, {
