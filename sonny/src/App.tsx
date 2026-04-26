@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import MessageList from './components/MessageList';
 import InputArea from './components/InputArea';
@@ -6,7 +6,6 @@ import SettingsModal from './components/SettingsModal';
 import Titlebar from './components/Titlebar';
 import { AgentMode, Message, ToolCall } from './types';
 import { streamChatCompletion } from './services/llmService';
-import { MOCK_PROVIDERS } from './constants';
 import { useProviders } from './hooks/useProviders';
 
 export default function App() {
@@ -20,19 +19,12 @@ export default function App() {
   const [contextTokensUsed, setContextTokensUsed] = useState(0);
   const { activeProvider } = useProviders();
 
-  useEffect(() => {
-    setMessages([
-      {
-        id: 'm1',
-        role: 'assistant',
-        content: 'Hello! I am your autonomous AI agent. How can I help?',
-        timestamp: new Date(),
-      },
-    ]);
-  }, []);
-
   const handleSend = useCallback(
     (content: string) => {
+      if (!activeProvider) {
+        return;
+      }
+
       const userMsg: Message = {
         id: Date.now().toString(),
         role: 'user',
@@ -57,10 +49,9 @@ export default function App() {
       setMessages((prev) => [...prev, assistantMsg]);
       setIsTyping(true);
 
-      const provider = activeProvider ?? MOCK_PROVIDERS[0];
       let finalAssistantContent = '';
 
-      streamChatCompletion(provider, nextLlmHistory, {
+      streamChatCompletion(activeProvider, nextLlmHistory, {
         onContent: (text) => {
           finalAssistantContent += text;
           setMessages((prev) =>
@@ -137,11 +128,12 @@ export default function App() {
           mode={mode}
           onModeChange={setMode}
           onSend={handleSend}
+          hasProvider={activeProvider !== null}
           isAgentRunning={isAgentRunning}
           onToggleAgent={() => setIsAgentRunning(!isAgentRunning)}
-          activeModel={(activeProvider ?? MOCK_PROVIDERS[0]).model}
+          activeModel={activeProvider?.model}
           contextTokensUsed={contextTokensUsed}
-          contextWindow={(activeProvider ?? MOCK_PROVIDERS[0]).contextWindowSize}
+          contextWindow={activeProvider?.contextWindowSize}
         />
 
         <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />

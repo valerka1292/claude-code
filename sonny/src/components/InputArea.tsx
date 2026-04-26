@@ -9,6 +9,7 @@ interface InputAreaProps {
   mode: AgentMode;
   onModeChange: (mode: AgentMode) => void;
   onSend: (text: string) => void;
+  hasProvider: boolean;
   isAgentRunning: boolean;
   onToggleAgent: () => void;
   activeModel?: string;
@@ -20,6 +21,7 @@ export default function InputArea({
   mode,
   onModeChange,
   onSend,
+  hasProvider,
   isAgentRunning,
   onToggleAgent,
   activeModel,
@@ -28,10 +30,11 @@ export default function InputArea({
 }: InputAreaProps) {
   const [text, setText] = React.useState('');
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const canSend = Boolean(text.trim()) && hasProvider;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
-      if (mode === 'Chat' && text.trim()) {
+      if (mode === 'Chat' && canSend) {
         e.preventDefault();
         onSend(text);
         setText('');
@@ -101,20 +104,21 @@ export default function InputArea({
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Message agent..."
+                placeholder={hasProvider ? 'Message agent...' : 'Add a provider in Settings to start'}
                 aria-label="Message input"
+                disabled={!hasProvider}
                 className="min-h-[52px] max-h-[200px] flex-1 resize-none bg-transparent pt-3 text-[15px] leading-relaxed text-text-primary outline-none placeholder:text-text-secondary scrollbar-thin"
                 rows={1}
               />
               <button
                 aria-label="Send message"
                 onClick={() => {
-                  if (text.trim()) {
+                  if (canSend) {
                     onSend(text);
                     setText('');
                   }
                 }}
-                disabled={!text.trim()}
+                disabled={!canSend}
                 className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-white text-black transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:bg-bg-3 disabled:text-text-secondary disabled:hover:opacity-100 focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <Send size={16} />
@@ -162,7 +166,7 @@ export default function InputArea({
                   style={{ width: `${contextPercent}%` }}
                 />
               </div>
-              <span className="tabular-nums">{Math.round(contextPercent)}%</span>
+              <span className="tabular-nums">{contextPercent.toFixed(2)}%</span>
               <span className="tabular-nums text-[10px] text-text-secondary/80">
                 {contextUsed.toLocaleString()} / {contextMax.toLocaleString()}
               </span>
