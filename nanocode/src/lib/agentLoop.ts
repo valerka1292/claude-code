@@ -184,7 +184,10 @@ export async function runAgentStream(
         }
       }
     } catch (err) {
-      if ((err as DOMException)?.name === "AbortError") return;
+      if ((err as DOMException)?.name === "AbortError") {
+        callbacks.onError(new Error("Generation cancelled"));
+        return;
+      }
       callbacks.onError(err instanceof Error ? err : new Error(getErrorMessage(err)));
       return;
     }

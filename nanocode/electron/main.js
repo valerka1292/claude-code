@@ -13,6 +13,7 @@ const userDataPath = path.join(os.homedir(), '.nanocode');
 const settingsFile = path.join(userDataPath, 'settings.json');
 const sessionsDir = path.join(userDataPath, 'sessions');
 const sessionsDirResolved = path.resolve(sessionsDir);
+let selectedProjectDirResolved = null;
 
 function ensureString(value, fieldName) {
   if (typeof value !== 'string') {
@@ -45,6 +46,23 @@ async function ensureDir(dir) {
   } catch (err) {
     if (err.code !== 'EEXIST') throw err;
   }
+}
+
+function isWithinDir(targetPath, basePath) {
+  if (!basePath) {
+    return false;
+  }
+  const normalizedTarget = path.resolve(targetPath);
+  const normalizedBase = path.resolve(basePath);
+  return (
+    normalizedTarget === normalizedBase ||
+    normalizedTarget.startsWith(`${normalizedBase}${path.sep}`)
+  );
+}
+
+function isPathAllowed(targetPath) {
+  const roots = [sessionsDirResolved, selectedProjectDirResolved].filter(Boolean);
+  return roots.some((root) => isWithinDir(targetPath, root));
 }
 
 async function loadSettings() {
@@ -153,7 +171,9 @@ function setupIPC() {
   ipcMain.handle('select-folder', async () => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
     if (result.canceled || result.filePaths.length === 0) return null;
-    return result.filePaths[0];
+    const selectedPath = path.resolve(result.filePaths[0]);
+    selectedProjectDirResolved = selectedPath;
+    return selectedPath;
   });
 
   ipcMain.handle('resolve-path', async (_event, p) => {
@@ -178,22 +198,44 @@ function setupIPC() {
       return [];
     }
     try {
+      const rawCwd = typeof options?.cwd === 'string' ? options.cwd : selectedProjectDirResolved;
+      if (!rawCwd) {
+        return [];
+      }
+      const cwd = path.resolve(rawCwd);
+      if (!isPathAllowed(cwd)) {
+        return [];
+      }
+
       const files = await glob(pattern, {
         ...options,
+        cwd,
         windowsPathsNoEscape: true,
       });
-      return files;
+      return files
+        .map((file) => path.resolve(cwd, file))
+        .filter((file) => isPathAllowed(file));
     } catch (err) {
       console.error('Glob error:', err);
       return [];
     }
   });
 
-  ipcMain.handle('stat', async (_event, filePath) => {
+  ipcMain.handle('stat', async (_event, filePath, cwd) => {
     if (typeof filePath !== 'string') {
       throw new Error('filePath must be a string');
     }
-    const stats = statSync(filePath);
+    const baseDir =
+      typeof cwd === 'string' && cwd.trim().length > 0
+        ? path.resolve(cwd)
+        : selectedProjectDirResolved;
+    const resolvedPath = baseDir
+      ? path.resolve(baseDir, filePath)
+      : path.resolve(filePath);
+    if (!isPathAllowed(resolvedPath)) {
+      throw new Error('Access denied: path is outside allowed directories');
+    }
+    const stats = statSync(resolvedPath);
     return {
       mtimeMs: stats.mtimeMs,
       isDirectory: stats.isDirectory(),

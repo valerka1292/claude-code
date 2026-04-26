@@ -57,6 +57,8 @@ export function useAgent() {
   const modeRef = useRef(mode);
   modeRef.current = mode;
   const isProcessingRef = useRef(false);
+  const isAbortError = (err: Error): boolean =>
+    err.name === "AbortError" || err.message === "Generation cancelled";
 
   const handleSend = useCallback(
     async (value: string) => {
@@ -77,16 +79,14 @@ export function useAgent() {
       setIsTyping(true);
 
       if (!ap) {
-          setTimeout(() => {
-          updateMsg(assistantId, {
-            content: "⚠ No provider configured. Please add one in Settings.",
-            isStreaming: false,
-          });
-            setIsTyping(false);
-            isProcessingRef.current = false;
-            setTurnActive(false);
-          }, 300);
-          return;
+        updateMsg(assistantId, {
+          content: "⚠ No provider configured. Please add one in Settings.",
+          isStreaming: false,
+        });
+        setIsTyping(false);
+        isProcessingRef.current = false;
+        setTurnActive(false);
+        return;
       }
 
       startSessionNameGeneration({
@@ -251,6 +251,14 @@ export function useAgent() {
           },
           onUsage: (prompt, completion) => setUsedTokens(prompt + completion),
           onError: (err) => {
+            if (isAbortError(err)) {
+              updateLiveTurn((prev) => prev.filter((message) => message.id !== assistantId));
+              setIsTyping(false);
+              isProcessingRef.current = false;
+              setTurnActive(false);
+              return;
+            }
+
             updateMsg(assistantId, {
               content: `⚠ Error: ${err.message}`,
               isStreaming: false,
@@ -306,13 +314,13 @@ export function useAgent() {
       appendContentChunk,
       appendBlock,
       appendReasoningChunk,
+      updateLiveTurn,
       getActiveSessionSnapshot,
       initSession,
       persistCompletedTurn,
       replaceActiveController,
       setUsedTokens,
       setIsTyping,
-      updateLiveTurn,
       commitLiveTurnAndPersist,
       startSessionNameGeneration,
       setTurnActive,

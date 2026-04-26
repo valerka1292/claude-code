@@ -15,13 +15,15 @@ import { FolderIcon } from "./Icons";
 import { ModeDropdown } from "./ModeDropdown";
 import type { Mode } from "../types";
 import { ContextIndicator } from "./ContextIndicator";
-import { CornerDownLeft } from "lucide-react";
+import { CornerDownLeft, Square } from "lucide-react";
 import { useProject } from "../contexts/ProjectContext";
 
 interface InputContainerProps {
   mode: Mode;
   setMode: (m: Mode) => void;
   onSend: (value: string) => void;
+  onStop?: () => void;
+  isGenerating?: boolean;
   usedTokens?: number;
 }
 
@@ -32,12 +34,15 @@ export interface InputContainerHandle {
 export const InputContainer = forwardRef<
   InputContainerHandle,
   InputContainerProps
->(function InputContainer({ mode, setMode, onSend, usedTokens = 0 }, ref) {
+>(function InputContainer(
+  { mode, setMode, onSend, onStop, isGenerating = false, usedTokens = 0 },
+  ref
+) {
   const [inputValue, setInputValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { folderPath, folderName: _folderName, selectFolder } = useProject();
 
-  const canSend = !!folderPath && !!inputValue.trim();
+  const canSend = !!folderPath && !!inputValue.trim() && !isGenerating;
 
   useImperativeHandle(ref, () => ({
     setValue: (text: string) => {
@@ -122,22 +127,38 @@ export const InputContainer = forwardRef<
             "
           />
           <div className="relative group/send self-start mt-0.5">
-            <button
-              onClick={handleSend}
-              disabled={!canSend}
-              className="
-                flex-shrink-0 flex items-center gap-1
-                px-2 py-1 rounded-md
-                text-[0.65rem] font-mono text-white/25
-                hover:text-white/60 hover:bg-white/[0.06]
-                disabled:opacity-20 disabled:cursor-not-allowed
-                border border-transparent hover:border-white/[0.08]
-                disabled:hover:bg-transparent disabled:hover:border-transparent
-                transition-all duration-150
-              "
-            >
-              <CornerDownLeft size={11} />
-            </button>
+            {isGenerating ? (
+              <button
+                onClick={onStop}
+                className="
+                  flex-shrink-0 flex items-center gap-1
+                  px-2 py-1 rounded-md
+                  text-[0.65rem] font-mono text-white/40
+                  hover:text-white/80 hover:bg-white/[0.08]
+                  border border-white/[0.08]
+                  transition-all duration-150
+                "
+              >
+                <Square size={11} />
+              </button>
+            ) : (
+              <button
+                onClick={handleSend}
+                disabled={!canSend}
+                className="
+                  flex-shrink-0 flex items-center gap-1
+                  px-2 py-1 rounded-md
+                  text-[0.65rem] font-mono text-white/25
+                  hover:text-white/60 hover:bg-white/[0.06]
+                  disabled:opacity-20 disabled:cursor-not-allowed
+                  border border-transparent hover:border-white/[0.08]
+                  disabled:hover:bg-transparent disabled:hover:border-transparent
+                  transition-all duration-150
+                "
+              >
+                <CornerDownLeft size={11} />
+              </button>
+            )}
             {!folderPath && (
               <div
                 className="

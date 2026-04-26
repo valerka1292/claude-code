@@ -65,7 +65,7 @@ export async function suggestPathUnderCwd(
   }
 
   try {
-    await electronApi.stat(candidate);
+    await electronApi.stat(candidate, cwd);
     return `./${basename}`;
   } catch {
     return null;
