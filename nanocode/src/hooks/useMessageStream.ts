@@ -1,18 +1,47 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { Message, ToolCallDisplay, ContentBlock } from "../types/message";
 import type { SessionData } from "../types/session";
 import { useSessionRestore } from "./useSessionRestore";
 
+export function finalizeLiveTurnMessages(liveTurn: Message[]): Message[] {
+  return liveTurn.map((m) => {
+    const blocks = m.blocks ?? [];
+    const updatedBlocks = blocks.map((b) => {
+      if (b.type === "reasoning") return { ...b, streaming: false };
+      if (b.type === "text") return { ...b, streaming: false };
+      return b;
+    });
+    return {
+      ...m,
+      blocks: updatedBlocks,
+      isStreaming: false,
+      isReasoningStreaming: false,
+    };
+  });
+}
+
 export function useMessageStream(activeSession: SessionData | null) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [archiveMessages, setArchiveMessages] = useState<Message[]>([]);
+  const [liveTurn, setLiveTurn] = useState<Message[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [usedTokens, setUsedTokens] = useState(0);
+  const messages = useMemo(
+    () => [...archiveMessages, ...liveTurn],
+    [archiveMessages, liveTurn]
+  );
+
+  const updateLiveTurn = useCallback(
+    (updater: (prev: Message[]) => Message[]) => {
+      setLiveTurn((prev) => updater(prev));
+    },
+    []
+  );
 
   const addPendingTurn = useCallback((value: string, sendTs: number) => {
     const userMsgId = `${sendTs}-user`;
     const assistantId = `${sendTs + 1}-assistant`;
 
-    setMessages((prev) => [
+    setLiveTurn((prev) => [
       ...prev,
       { id: userMsgId, role: "user", content: value },
       {
@@ -31,14 +60,14 @@ export function useMessageStream(activeSession: SessionData | null) {
 
   const updateMsg = useCallback(
     (id: string, patch: Partial<Message>) =>
-      setMessages((prev) =>
+      updateLiveTurn((prev) =>
         prev.map((m) => (m.id === id ? { ...m, ...patch } : m))
       ),
-    []
+    [updateLiveTurn]
   );
 
   const appendReasoningChunk = useCallback((id: string, chunk: string) => {
-    setMessages((prev) =>
+    updateLiveTurn((prev) =>
       prev.map((m) =>
         m.id === id
           ? {
@@ -49,10 +78,10 @@ export function useMessageStream(activeSession: SessionData | null) {
           : m
       )
     );
-  }, []);
+  }, [updateLiveTurn]);
 
   const appendContentChunk = useCallback((id: string, chunk: string) => {
-    setMessages((prev) =>
+    updateLiveTurn((prev) =>
       prev.map((m) =>
         m.id === id
           ? {
@@ -64,11 +93,11 @@ export function useMessageStream(activeSession: SessionData | null) {
           : m
       )
     );
-  }, []);
+  }, [updateLiveTurn]);
 
   const addToolCall = useCallback(
     (msgId: string, call: ToolCallDisplay) => {
-      setMessages((prev) =>
+      updateLiveTurn((prev) =>
         prev.map((m) =>
           m.id === msgId
             ? {
@@ -79,7 +108,7 @@ export function useMessageStream(activeSession: SessionData | null) {
         )
       );
     },
-    []
+    [updateLiveTurn]
   );
 
   const updateToolCallStatus = useCallback(
@@ -89,7 +118,7 @@ export function useMessageStream(activeSession: SessionData | null) {
       status: ToolCallDisplay["status"],
       result?: string
     ) => {
-      setMessages((prev) =>
+      updateLiveTurn((prev) =>
         prev.map((m) => {
           if (m.id !== msgId || !m.toolCalls) return m;
           return {
@@ -101,11 +130,11 @@ export function useMessageStream(activeSession: SessionData | null) {
         })
       );
     },
-    []
+    [updateLiveTurn]
   );
 
   const appendBlock = useCallback((msgId: string, block: ContentBlock) => {
-    setMessages((prev) =>
+    updateLiveTurn((prev) =>
       prev.map((m) => {
         if (m.id !== msgId) return m;
         const blocks = m.blocks ?? [];
@@ -141,22 +170,38 @@ export function useMessageStream(activeSession: SessionData | null) {
         return { ...m, blocks: [...blocks, block] };
       })
     );
-  }, []);
+  }, [updateLiveTurn]);
 
-  const replaceMessages = useCallback((nextMessages: Message[]) => {
-    setMessages(nextMessages);
+  const replaceArchiveMessages = useCallback((nextMessages: Message[]) => {
+    setArchiveMessages(nextMessages);
   }, []);
-  const { resetSessionRestore } = useSessionRestore(activeSession, replaceMessages);
+  const { resetSessionRestore } = useSessionRestore(
+    activeSession,
+    replaceArchiveMessages
+  );
+
+  const finalizeAndCommitLiveTurn = useCallback(() => {
+    let finalizedTurn: Message[] = [];
+    setLiveTurn((prev) => {
+      finalizedTurn = finalizeLiveTurnMessages(prev);
+      setArchiveMessages((archive) => [...archive, ...finalizedTurn]);
+      return [];
+    });
+    return finalizedTurn;
+  }, []);
 
   const resetMessageStream = useCallback(() => {
     resetSessionRestore();
-    setMessages([]);
+    setArchiveMessages([]);
+    setLiveTurn([]);
     setUsedTokens(0);
   }, [resetSessionRestore]);
 
   return {
     messages,
-    setMessages,
+    archiveMessages,
+    liveTurn,
+    updateLiveTurn,
     isTyping,
     setIsTyping,
     usedTokens,
@@ -168,6 +213,7 @@ export function useMessageStream(activeSession: SessionData | null) {
     addToolCall,
     updateToolCallStatus,
     appendBlock,
+    finalizeAndCommitLiveTurn,
     resetMessageStream,
   };
 }
