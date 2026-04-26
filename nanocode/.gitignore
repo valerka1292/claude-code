@@ -3,7 +3,8 @@ build/
 dist/
 dist-electron/
 coverage/
-collect_ts.py
+save_to_txt.py
+output.txt
 .DS_Store
 *.log
 .env*
