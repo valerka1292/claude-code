@@ -7,23 +7,39 @@ import Titlebar from './components/Titlebar';
 import { AgentMode, Message, ToolCall } from './types';
 import { streamChatCompletion } from './services/llmService';
 import { useProviders } from './hooks/useProviders';
+import { useChats } from './hooks/useChats';
 
 export default function App() {
-  const [activeChatId] = useState('1');
+  const {
+    chats,
+    activeChatId,
+    activeChatIdRef,
+    messages,
+    setMessages,
+    llmHistory,
+    setLlmHistory,
+    contextTokensUsed,
+    setContextTokensUsed,
+    isTyping,
+    setIsTyping,
+    switchChat,
+    newChat,
+    deleteChat,
+    persistCurrentChat,
+  } = useChats();
+
   const [mode, setMode] = useState<AgentMode>('Chat');
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [llmHistory, setLlmHistory] = useState<{ role: string; content: string }[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
-  const [contextTokensUsed, setContextTokensUsed] = useState(0);
   const { activeProvider } = useProviders();
 
   const handleSend = useCallback(
     (content: string) => {
-      if (!activeProvider) {
+      if (!activeProvider || !activeChatIdRef.current) {
         return;
       }
+
+      const chatIdSnapshot = activeChatIdRef.current;
 
       const userMsg: Message = {
         id: Date.now().toString(),
@@ -53,21 +69,27 @@ export default function App() {
 
       streamChatCompletion(activeProvider, nextLlmHistory, {
         onContent: (text) => {
+          if (activeChatIdRef.current !== chatIdSnapshot) {
+            return;
+          }
+
           finalAssistantContent += text;
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId ? { ...m, content: m.content + text } : m,
-            ),
-          );
+          setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + text } : m)));
         },
         onThinking: (text) => {
+          if (activeChatIdRef.current !== chatIdSnapshot) {
+            return;
+          }
+
           setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId ? { ...m, thinking: (m.thinking ?? '') + text } : m,
-            ),
+            prev.map((m) => (m.id === assistantId ? { ...m, thinking: (m.thinking ?? '') + text } : m)),
           );
         },
         onToolCall: (toolCall) => {
+          if (activeChatIdRef.current !== chatIdSnapshot) {
+            return;
+          }
+
           setMessages((prev) =>
             prev.map((m) => {
               if (m.id !== assistantId) {
@@ -88,13 +110,22 @@ export default function App() {
           );
         },
         onDone: (usage) => {
+          if (activeChatIdRef.current !== chatIdSnapshot) {
+            return;
+          }
+
           setIsTyping(false);
           if (usage?.total_tokens) {
             setContextTokensUsed(usage.total_tokens);
           }
           setLlmHistory((prev) => [...prev, { role: 'assistant', content: finalAssistantContent }]);
+          void persistCurrentChat();
         },
         onError: (error) => {
+          if (activeChatIdRef.current !== chatIdSnapshot) {
+            return;
+          }
+
           setIsTyping(false);
           const errorMessage = error instanceof Error ? error.message : String(error);
           setMessages((prev) =>
@@ -103,26 +134,24 @@ export default function App() {
         },
       });
     },
-    [activeProvider, llmHistory],
+    [activeChatIdRef, activeProvider, llmHistory, persistCurrentChat, setContextTokensUsed, setIsTyping, setLlmHistory, setMessages],
   );
 
-  const handleNewChat = () => {
-    setMessages([]);
-    setLlmHistory([]);
-    setContextTokensUsed(0);
-  };
+  const chatTitle = chats.find((chat) => chat.id === activeChatId)?.title ?? 'Untitled Chat';
 
   return (
-    <div className="flex h-screen w-full bg-bg-0 overflow-hidden text-text-primary select-none">
+    <div className="flex h-screen w-full select-none overflow-hidden bg-bg-0 text-text-primary">
       <Sidebar
-        activeChatId={activeChatId}
-        onNewChat={handleNewChat}
-        onSelectChat={() => {}}
+        activeChatId={activeChatId ?? ''}
+        chats={chats}
+        onNewChat={newChat}
+        onSelectChat={switchChat}
+        onDeleteChat={deleteChat}
         onSettingsOpen={() => setIsSettingsOpen(true)}
       />
 
-      <main className="flex-1 flex flex-col h-full overflow-hidden relative">
-        <Titlebar chatTitle="Untitled Chat" onRename={() => {}} />
+      <main className="relative flex h-full flex-1 flex-col overflow-hidden">
+        <Titlebar chatTitle={chatTitle} onRename={() => {}} />
 
         <MessageList messages={messages} isTyping={isTyping} />
 

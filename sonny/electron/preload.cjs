@@ -9,4 +9,10 @@ contextBridge.exposeInMainWorld('electron', {
     getAll: () => ipcRenderer.invoke('providers:getAll'),
     save: (data) => ipcRenderer.invoke('providers:save', data),
   },
+  history: {
+    list: () => ipcRenderer.invoke('history:list'),
+    get: (chatId) => ipcRenderer.invoke('history:get', chatId),
+    save: (chatId, data) => ipcRenderer.invoke('history:save', chatId, data),
+    delete: (chatId) => ipcRenderer.invoke('history:delete', chatId),
+  },
 });
