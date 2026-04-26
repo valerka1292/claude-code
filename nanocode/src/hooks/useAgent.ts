@@ -34,6 +34,7 @@ export function useAgent() {
     appendReasoningChunk,
     appendContentChunk,
     appendBlock,
+    finalizeLiveTurn,
     commitLiveTurnAndPersist,
     resetMessageStream,
   } = useMessageStream(activeSession);
@@ -340,6 +341,7 @@ export function useAgent() {
       setUsedTokens,
       setIsTyping,
       commitLiveTurnAndPersist,
+      finalizeLiveTurn,
       startSessionNameGeneration,
       setTurnActive,
       updateMsg,
