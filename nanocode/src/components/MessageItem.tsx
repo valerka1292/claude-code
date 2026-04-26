@@ -5,10 +5,10 @@
 
 import { motion } from "motion/react";
 import { User } from "lucide-react";
-import { useMemo } from "react";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { ToolCallBlock } from "./ToolCallBlock";
-import type { Message, ContentBlock, ToolCallDisplay } from "../types/message";
+import type { Message, ContentBlock } from "../types/message";
+import { useBlockDisplay } from "../hooks/useBlockDisplay";
 
 interface MessageItemProps {
   message: Message;
@@ -107,16 +107,16 @@ export function MessageItem({ message }: MessageItemProps) {
 }
 
 function BlocksRenderer({ blocks }: { blocks: ContentBlock[] }) {
-  const toolResultMap = useMemo(() => buildToolResultMap(blocks), [blocks]);
+  const displayBlocks = useBlockDisplay(blocks);
 
   return (
     <div className="space-y-2">
-      {blocks.map((block, i) => {
+      {displayBlocks.map((block) => {
         switch (block.type) {
           case "reasoning":
             return (
               <ReasoningBlock
-                key={i}
+                key={block.key}
                 content={block.content}
                 isStreaming={block.streaming}
               />
@@ -124,7 +124,7 @@ function BlocksRenderer({ blocks }: { blocks: ContentBlock[] }) {
           case "text":
             return (
               <div
-                key={i}
+                key={block.key}
                 className="text-[0.88rem] text-white/70 leading-relaxed whitespace-pre-wrap break-words"
               >
                 {block.content}
@@ -134,35 +134,19 @@ function BlocksRenderer({ blocks }: { blocks: ContentBlock[] }) {
               </div>
             );
           case "tool_call": {
-            const resultInfo = toolResultMap.get(block.call.id);
             return (
               <ToolCallBlock
-                key={block.call.id}
+                key={block.key}
                 toolCall={block.call}
-                statusOverride={resultInfo?.status as ToolCallDisplay["status"]}
-                resultOverride={resultInfo?.result}
+                statusOverride={block.statusOverride}
+                resultOverride={block.resultOverride}
               />
             );
           }
-          case "tool_result":
-            return null;
           default:
             return null;
         }
       })}
     </div>
   );
-}
-
-function buildToolResultMap(blocks: ContentBlock[]) {
-  const map = new Map<string, { status: string; result?: string }>();
-  for (const block of blocks) {
-    if (block.type === "tool_result") {
-      map.set(block.callId, {
-        status: block.status,
-        result: block.result,
-      });
-    }
-  }
-  return map;
 }
