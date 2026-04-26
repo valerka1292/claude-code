@@ -12,6 +12,8 @@ interface InputAreaProps {
   isAgentRunning: boolean;
   onToggleAgent: () => void;
   activeModel?: string;
+  contextTokensUsed?: number;
+  contextWindow?: number;
 }
 
 export default function InputArea({
@@ -21,6 +23,8 @@ export default function InputArea({
   isAgentRunning,
   onToggleAgent,
   activeModel,
+  contextTokensUsed,
+  contextWindow,
 }: InputAreaProps) {
   const [text, setText] = React.useState('');
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -43,8 +47,8 @@ export default function InputArea({
     }
   }, [text]);
 
-  const contextUsed = 4821;
-  const contextMax = 32768;
+  const contextUsed = Math.max(0, contextTokensUsed ?? 0);
+  const contextMax = Math.max(1, contextWindow ?? 1);
   const contextPercent = Math.min((contextUsed / contextMax) * 100, 100);
 
   return (
@@ -159,6 +163,9 @@ export default function InputArea({
                 />
               </div>
               <span className="tabular-nums">{Math.round(contextPercent)}%</span>
+              <span className="tabular-nums text-[10px] text-text-secondary/80">
+                {contextUsed.toLocaleString()} / {contextMax.toLocaleString()}
+              </span>
             </div>
           </div>
 

@@ -89,6 +89,8 @@ export function streamChatCompletion(
       const decoder = new TextDecoder();
       let buffer = '';
       const accumulatedToolCalls: Record<number, ToolCallDelta> = {};
+      let lastUsage: CompletionUsage | undefined;
+      let doneCalled = false;
 
       try {
         while (true) {
@@ -109,20 +111,22 @@ export function streamChatCompletion(
 
             const jsonStr = trimmed.slice(5).trim();
             if (jsonStr === '[DONE]') {
-              callbacks.onDone();
+              if (!doneCalled) {
+                callbacks.onDone(lastUsage);
+                doneCalled = true;
+              }
               return;
             }
 
             try {
               const parsed = JSON.parse(jsonStr) as CompletionChunk;
+              if (parsed.usage) {
+                lastUsage = parsed.usage;
+              }
+
               const choice = parsed.choices?.[0];
               if (!choice) {
                 continue;
-              }
-
-              if (parsed.usage) {
-                callbacks.onDone(parsed.usage);
-                return;
               }
 
               const delta = choice.delta;
@@ -184,6 +188,10 @@ export function streamChatCompletion(
           return;
         }
         callbacks.onError(error);
+      }
+
+      if (!doneCalled) {
+        callbacks.onDone(lastUsage);
       }
     })
     .catch((error) => callbacks.onError(error));
