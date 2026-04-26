@@ -9,6 +9,7 @@ import { useMessageStream } from "./useMessageStream";
 import { buildChatHistory } from "../lib/chatHistory";
 import { useSessionPersist } from "./useSessionPersist";
 import type { StoredMessage } from "../types/session";
+import { applyToolExecutionResultToMessages } from "./toolExecutionUpdate";
 
 export function useAgent() {
   const { activeProvider } = useProviders();
@@ -32,7 +33,6 @@ export function useAgent() {
     appendReasoningChunk,
     appendContentChunk,
     addToolCall,
-    updateToolCallStatus,
     appendBlock,
     resetMessageStream,
   } = useMessageStream(activeSession);
@@ -191,19 +191,8 @@ export function useAgent() {
             );
           },
           onToolExecutionDone: (id, result) => {
-            updateToolCallStatus(assistantId, id, "success", result);
             setMessages((prev) =>
-              prev.map((m) => {
-                if (m.id !== assistantId || !m.toolCalls) return m;
-                const blocks = m.blocks ?? [];
-                const lastBlockIdx = blocks.length - 1;
-                if (lastBlockIdx >= 0 && blocks[lastBlockIdx].type === "tool_result" && (blocks[lastBlockIdx] as { callId: string }).callId === id) {
-                  const updatedBlocks = [...blocks];
-                  updatedBlocks[lastBlockIdx] = { type: "tool_result", callId: id, status: "success", result };
-                  return { ...m, blocks: updatedBlocks };
-                }
-                return m;
-              })
+              applyToolExecutionResultToMessages(prev, assistantId, id, "success", result)
             );
             const toolCall = turnMessages
               .flatMap((m) => m.tool_calls ?? [])
@@ -223,19 +212,8 @@ export function useAgent() {
             });
           },
           onToolExecutionError: (id, error) => {
-            updateToolCallStatus(assistantId, id, "error", error);
             setMessages((prev) =>
-              prev.map((m) => {
-                if (m.id !== assistantId || !m.toolCalls) return m;
-                const blocks = m.blocks ?? [];
-                const lastBlockIdx = blocks.length - 1;
-                if (lastBlockIdx >= 0 && blocks[lastBlockIdx].type === "tool_result" && (blocks[lastBlockIdx] as { callId: string }).callId === id) {
-                  const updatedBlocks = [...blocks];
-                  updatedBlocks[lastBlockIdx] = { type: "tool_result", callId: id, status: "error", result: error };
-                  return { ...m, blocks: updatedBlocks };
-                }
-                return m;
-              })
+              applyToolExecutionResultToMessages(prev, assistantId, id, "error", error)
             );
             const toolCall = turnMessages
               .flatMap((m) => m.tool_calls ?? [])
@@ -311,7 +289,6 @@ export function useAgent() {
       setIsTyping,
       setMessages,
       startSessionNameGeneration,
-      updateToolCallStatus,
       updateMsg,
     ]
   );
