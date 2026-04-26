@@ -18,6 +18,7 @@ export function useAgent() {
     activeSession,
     initSession,
     getActiveSessionSnapshot,
+    setTurnActive,
   } = useSession();
 
   const [mode, setMode] = useState<Mode>("Ask");
@@ -66,6 +67,7 @@ export function useAgent() {
 
       if (!normalizedValue || !fp || !pk || isProcessingRef.current) return;
       isProcessingRef.current = true;
+      setTurnActive(true);
 
       const controller = replaceActiveController();
       const sendTs = Date.now();
@@ -75,15 +77,16 @@ export function useAgent() {
       setIsTyping(true);
 
       if (!ap) {
-        setTimeout(() => {
+          setTimeout(() => {
           updateMsg(assistantId, {
             content: "⚠ No provider configured. Please add one in Settings.",
             isStreaming: false,
           });
-          setIsTyping(false);
-          isProcessingRef.current = false;
-        }, 300);
-        return;
+            setIsTyping(false);
+            isProcessingRef.current = false;
+            setTurnActive(false);
+          }, 300);
+          return;
       }
 
       startSessionNameGeneration({
@@ -241,6 +244,7 @@ export function useAgent() {
             });
             setIsTyping(false);
             isProcessingRef.current = false;
+            setTurnActive(false);
           },
           onDone: async () => {
             setMessages((prev) =>
@@ -267,6 +271,7 @@ export function useAgent() {
               turnMessages,
             });
             isProcessingRef.current = false;
+            setTurnActive(false);
           },
         },
           fp,
@@ -274,6 +279,7 @@ export function useAgent() {
         );
       } finally {
         isProcessingRef.current = false;
+        setTurnActive(false);
       }
     },
     [
@@ -289,6 +295,8 @@ export function useAgent() {
       setIsTyping,
       setMessages,
       startSessionNameGeneration,
+      setTurnActive,
+      updateToolCallStatus,
       updateMsg,
     ]
   );
