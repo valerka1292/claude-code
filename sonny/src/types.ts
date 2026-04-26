@@ -15,7 +15,6 @@ export interface Message {
   content: string;
   timestamp: Date;
   thinking?: string;
-  thinkingDone?: boolean;
   toolCalls?: ToolCall[];
 }
 

@@ -4,6 +4,7 @@ import * as Select from '@radix-ui/react-select';
 import { AgentMode } from '../types';
 import { AGENT_MODES } from '../constants';
 import { cn } from '../lib/utils';
+import { ContextIndicator } from './ContextIndicator';
 
 interface InputAreaProps {
   mode: AgentMode;
@@ -12,9 +13,7 @@ interface InputAreaProps {
   hasProvider: boolean;
   isAgentRunning: boolean;
   onToggleAgent: () => void;
-  activeModel?: string;
   contextTokensUsed?: number;
-  contextWindow?: number;
 }
 
 export default function InputArea({
@@ -24,9 +23,7 @@ export default function InputArea({
   hasProvider,
   isAgentRunning,
   onToggleAgent,
-  activeModel,
   contextTokensUsed,
-  contextWindow,
 }: InputAreaProps) {
   const [text, setText] = React.useState('');
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -51,8 +48,6 @@ export default function InputArea({
   }, [text]);
 
   const contextUsed = Math.max(0, contextTokensUsed ?? 0);
-  const contextMax = Math.max(1, contextWindow ?? 1);
-  const contextPercent = Math.min((contextUsed / contextMax) * 100, 100);
 
   return (
     <div className="sticky bottom-0 left-0 right-0 bg-gradient-to-t from-bg-0 via-bg-0 to-transparent pt-4 pb-6">
@@ -153,25 +148,7 @@ export default function InputArea({
         </div>
 
         <div className="mt-1 flex items-center justify-between px-1 text-xs text-text-secondary">
-          <div className="flex items-center gap-3">
-            <span>{activeModel ?? 'No provider selected'}</span>
-            <span className="text-border">•</span>
-            <div className="flex items-center gap-2">
-              <div className="h-1.5 w-20 overflow-hidden rounded-full border border-border bg-bg-2">
-                <div
-                  className={cn(
-                    'h-full rounded-full transition-all',
-                    contextPercent < 50 ? 'bg-green-500' : contextPercent < 80 ? 'bg-yellow-500' : 'bg-red-500',
-                  )}
-                  style={{ width: `${contextPercent}%` }}
-                />
-              </div>
-              <span className="tabular-nums">{contextPercent.toFixed(2)}%</span>
-              <span className="tabular-nums text-[10px] text-text-secondary/80">
-                {contextUsed.toLocaleString()} / {contextMax.toLocaleString()}
-              </span>
-            </div>
-          </div>
+          <ContextIndicator usedTokens={contextUsed} />
 
           <div className="hidden items-center justify-end gap-1.5 text-text-secondary/60 sm:flex">
             <kbd className="rounded border border-border bg-bg-2 px-1.5 py-0.5 font-mono text-[10px]">↵</kbd>
