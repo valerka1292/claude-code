@@ -124,10 +124,7 @@ export function useSessionPersist() {
 
       try {
         await sessionRepository.save(projectKey, finalSession);
-        const latestAfterSave = getActiveSessionSnapshot();
-        if (latestAfterSave && latestAfterSave.id === sessionId) {
-          updateSession(finalSession);
-        }
+        updateSession(finalSession);
       } catch (error) {
         onSessionSaveError(error);
       }

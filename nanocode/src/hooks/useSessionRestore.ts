@@ -5,19 +5,18 @@ import type { SessionData } from "../types/session";
 
 export function useSessionRestore(
   activeSession: SessionData | null,
-  replaceArchiveMessages: (nextMessages: Message[]) => void
+  replaceMessages: (nextMessages: Message[]) => void
 ) {
   const lastRestoredSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!activeSession) {
-      replaceArchiveMessages([]);
+      replaceMessages([]);
       lastRestoredSignatureRef.current = null;
       return;
     }
 
     if (activeSession.messages.length === 0) {
-      replaceArchiveMessages([]);
       lastRestoredSignatureRef.current = `${activeSession.id}:0`;
       return;
     }
@@ -28,8 +27,8 @@ export function useSessionRestore(
     }
 
     lastRestoredSignatureRef.current = signature;
-    replaceArchiveMessages(turnsToMessages(activeSession.messages));
-  }, [activeSession, activeSession?.messages.length, replaceArchiveMessages]);
+    replaceMessages(turnsToMessages(activeSession.messages));
+  }, [activeSession, activeSession?.messages.length, replaceMessages]);
 
   const resetSessionRestore = useCallback(() => {
     lastRestoredSignatureRef.current = null;
