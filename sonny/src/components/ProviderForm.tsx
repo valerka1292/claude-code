@@ -56,10 +56,10 @@ export default function ProviderForm({
 
   const onFieldChange =
     (field: keyof ProviderFormValues) => (event: React.ChangeEvent<HTMLInputElement>) => {
-      const value = field === 'contextWindowSize' ? event.target.value : event.target.value;
+      const value = event.target.value;
       setValues((prev) => ({
         ...prev,
-        [field]: field === 'contextWindowSize' ? Number(value) || 0 : value,
+        [field]: field === 'contextWindowSize' ? (Number(value) || 0) : value,
       }));
     };
 

@@ -1,21 +1,15 @@
 import React from 'react';
 
+function detectOS(): 'mac' | 'win' | 'linux' {
+  // Sync read from electron preload (set in main.cjs process.platform)
+  const platform = window.electron?.platform ?? '';
+  if (platform === 'darwin') return 'mac';
+  if (platform === 'linux') return 'linux';
+  return 'win';
+}
+
 export function useOS() {
-  const [os, setOS] = React.useState<'mac' | 'win' | 'linux'>('win');
-  
-  React.useEffect(() => {
-    if (window.electron?.platform) {
-      const platform = window.electron.platform;
-      if (platform === 'darwin') setOS('mac');
-      else if (platform === 'linux') setOS('linux');
-      else setOS('win');
-    } else {
-      const platform = window.navigator.platform.toLowerCase();
-      if (platform.includes('mac')) setOS('mac');
-      else if (platform.includes('linux')) setOS('linux');
-      else setOS('win');
-    }
-  }, []);
-  
+  // Use state with initializer to prevent flash
+  const [os] = React.useState<'mac' | 'win' | 'linux'>(detectOS);
   return os;
 }

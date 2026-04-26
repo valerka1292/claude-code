@@ -8,6 +8,16 @@ const providersPath = path.join(os.homedir(), '.sonny', 'providers.json');
 const historyDir = path.join(os.homedir(), '.sonny', 'history');
 const historyIndexPath = path.join(historyDir, 'index.json');
 
+const SAFE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
+function validateChatId(chatId) {
+  if (typeof chatId !== 'string' || !SAFE_ID_PATTERN.test(chatId)) {
+    console.error(`[Main] CRITICAL: Invalid chatId attempted: ${String(chatId)}`);
+    throw new Error(`Invalid chatId: ${String(chatId)}`);
+  }
+  return chatId;
+}
+
 async function pathExists(targetPath) {
   try {
     await fsPromises.access(targetPath);
@@ -17,12 +27,26 @@ async function pathExists(targetPath) {
   }
 }
 
-async function ensureProvidersDir() {
-  await fsPromises.mkdir(path.dirname(providersPath), { recursive: true });
+async function ensureDir(dirPath) {
+  await fsPromises.mkdir(dirPath, { recursive: true });
+}
+
+// Atomic write: write to .tmp then rename
+async function atomicWriteFile(targetPath, content) {
+  const tmpPath = `${targetPath}.tmp`;
+  try {
+    await ensureDir(path.dirname(targetPath));
+    await fsPromises.writeFile(tmpPath, content, 'utf-8');
+    await fsPromises.rename(tmpPath, targetPath);
+  } catch (error) {
+    console.error(`[Main] Atomic write failed for ${targetPath}:`, error);
+    await fsPromises.unlink(tmpPath).catch(() => {});
+    throw error;
+  }
 }
 
 async function readProviders() {
-  await ensureProvidersDir();
+  console.log('[Main] Reading providers...');
   if (!(await pathExists(providersPath))) {
     return { activeProviderId: null, providers: {} };
   }
@@ -33,74 +57,26 @@ async function readProviders() {
     const activeProviderId = typeof parsed?.activeProviderId === 'string' ? parsed.activeProviderId : null;
     const providers = typeof parsed?.providers === 'object' && parsed.providers !== null ? parsed.providers : {};
     return { activeProviderId, providers };
-  } catch {
+  } catch (error) {
+    console.error('[Main] Failed to read providers:', error);
     return { activeProviderId: null, providers: {} };
   }
 }
 
 async function writeProviders(data) {
-  await ensureProvidersDir();
+  console.log('[Main] Writing providers (atomic)...');
   const safeData = {
     activeProviderId: typeof data?.activeProviderId === 'string' ? data.activeProviderId : null,
     providers: typeof data?.providers === 'object' && data.providers !== null ? data.providers : {},
   };
-  try {
-    await fsPromises.writeFile(providersPath, JSON.stringify(safeData, null, 2), 'utf-8');
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to write providers file: ${message}`);
-  }
-}
-
-const SAFE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
-
-function validateChatId(chatId) {
-  if (typeof chatId !== 'string' || !SAFE_ID_PATTERN.test(chatId)) {
-    throw new Error(`Invalid chatId: ${String(chatId)}`);
-  }
-  return chatId;
-}
-
-function registerProvidersIpc() {
-  ipcMain.removeHandler('providers:getAll');
-  ipcMain.removeHandler('providers:save');
-
-  ipcMain.handle('providers:getAll', async () => {
-    console.log('[IPC] providers:getAll');
-    return readProviders();
-  });
-  ipcMain.handle('providers:save', async (_, data) => {
-    console.log('[IPC] providers:save');
-    await writeProviders(data);
-    return readProviders();
-  });
-}
-
-async function ensureHistoryDir() {
-  await fsPromises.mkdir(historyDir, { recursive: true });
+  await atomicWriteFile(providersPath, JSON.stringify(safeData, null, 2));
 }
 
 async function readHistoryIndex() {
-  await ensureHistoryDir();
-  if (!(await pathExists(historyIndexPath))) {
-    return null;
-  }
-
+  if (!(await pathExists(historyIndexPath))) return null;
   try {
     const raw = await fsPromises.readFile(historyIndexPath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return null;
-    }
-
-    return parsed
-      .filter((item) => item && typeof item === 'object')
-      .map((item) => ({
-        id: typeof item.id === 'string' ? item.id : '',
-        title: typeof item.title === 'string' ? item.title : 'Untitled Chat',
-        updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : 0,
-      }))
-      .filter((item) => item.id.length > 0);
+    return JSON.parse(raw);
   } catch (error) {
     console.error('[Main] Failed to read history index:', error);
     return null;
@@ -108,19 +84,14 @@ async function readHistoryIndex() {
 }
 
 async function writeHistoryIndex(chats) {
-  await ensureHistoryDir();
-  console.log(`[Main] Writing history index, count: ${chats.length}`);
-  await fsPromises.writeFile(historyIndexPath, JSON.stringify(chats, null, 2), 'utf-8');
+  console.log(`[Main] Updating history index (count: ${chats.length})`);
+  await atomicWriteFile(historyIndexPath, JSON.stringify(chats, null, 2));
 }
 
 async function readChat(chatId) {
   validateChatId(chatId);
-  await ensureHistoryDir();
   const filePath = path.join(historyDir, `${chatId}.json`);
-  if (!(await pathExists(filePath))) {
-    console.warn(`[Main] Chat file not found: ${filePath}`);
-    return null;
-  }
+  if (!(await pathExists(filePath))) return null;
 
   try {
     const raw = await fsPromises.readFile(filePath, 'utf-8');
@@ -133,97 +104,111 @@ async function readChat(chatId) {
 
 async function writeChat(chatId, data) {
   validateChatId(chatId);
-  await ensureHistoryDir();
   const filePath = path.join(historyDir, `${chatId}.json`);
-  console.log(`[Main] Writing chat file: ${filePath}, messages: ${data?.messages?.length ?? 0}`);
-  try {
-    await fsPromises.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to write chat "${chatId}": ${message}`);
-  }
+  console.log(`[Main] Writing chat ${chatId} (messages: ${data?.messages?.length ?? 0})`);
+  await atomicWriteFile(filePath, JSON.stringify(data, null, 2));
 }
 
 async function listChats() {
-  await ensureHistoryDir();
+  await ensureDir(historyDir);
   const index = await readHistoryIndex();
-  if (index) {
-    console.log(`[Main] Returning history from index, count: ${index.length}`);
-    return index.sort((a, b) => b.updatedAt - a.updatedAt);
+  if (index) return index.sort((a, b) => b.updatedAt - a.updatedAt);
+
+  console.log('[Main] Rebuilding history index from disk...');
+  const files = await fsPromises.readdir(historyDir);
+  const jsonFiles = files.filter(f => f.endsWith('.json') && f !== 'index.json');
+  
+  // Basic concurrency limit
+  const chats = [];
+  for (const file of jsonFiles) {
+    const id = path.basename(file, '.json');
+    const raw = await readChat(id);
+    if (raw) {
+      chats.push({
+        id: raw.id || id,
+        title: raw.title || 'Untitled Chat',
+        updatedAt: raw.updatedAt || 0
+      });
+    }
   }
 
-  console.log('[Main] Index not found, scanning directory...');
-  const files = await fsPromises.readdir(historyDir);
-  const chats = await Promise.all(files
-    .filter((fileName) => fileName.endsWith('.json'))
-    .filter((fileName) => fileName !== 'index.json')
-    .map(async (fileName) => {
-      const id = path.basename(fileName, '.json');
-      const raw = await readChat(id);
-      if (!raw || typeof raw !== 'object') {
-        return null;
-      }
-
-      return {
-        id: typeof raw.id === 'string' ? raw.id : id,
-        title: typeof raw.title === 'string' ? raw.title : 'Untitled Chat',
-        updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : 0,
-      };
-    }));
-
-  const normalized = chats.filter(Boolean).sort((a, b) => b.updatedAt - a.updatedAt);
-  await writeHistoryIndex(normalized);
-  return normalized;
+  const sorted = chats.sort((a, b) => b.updatedAt - a.updatedAt);
+  await writeHistoryIndex(sorted);
+  return sorted;
 }
 
-function registerHistoryIpc() {
-  ipcMain.removeHandler('history:list');
-  ipcMain.removeHandler('history:get');
-  ipcMain.removeHandler('history:save');
-  ipcMain.removeHandler('history:delete');
+function registerIpc() {
+  // Providers
+  ipcMain.removeHandler('providers:getAll');
+  ipcMain.handle('providers:getAll', async () => {
+    console.log('[IPC] providers:getAll');
+    return readProviders();
+  });
 
+  ipcMain.removeHandler('providers:save');
+  ipcMain.handle('providers:save', async (_, data) => {
+    console.log('[IPC] providers:save');
+    await writeProviders(data);
+    return readProviders();
+  });
+
+  // History
+  ipcMain.removeHandler('history:list');
   ipcMain.handle('history:list', async () => {
     console.log('[IPC] history:list');
     return listChats();
   });
+
+  ipcMain.removeHandler('history:get');
   ipcMain.handle('history:get', async (_, chatId) => {
-    console.log(`[IPC] history:get ${chatId}`);
+    console.log(`[IPC] history:get -> ${chatId}`);
     return readChat(chatId);
   });
+
+  ipcMain.removeHandler('history:save');
   ipcMain.handle('history:save', async (_, chatId, data) => {
-    console.log(`[IPC] history:save ${chatId}`);
+    console.log(`[IPC] history:save -> ${chatId}`);
     await writeChat(chatId, data);
-    const current = (await readHistoryIndex()) ?? [];
-    const nextItem = {
-      id: typeof data?.id === 'string' ? data.id : chatId,
-      title: typeof data?.title === 'string' ? data.title : 'Untitled Chat',
-      updatedAt: typeof data?.updatedAt === 'number' ? data.updatedAt : Date.now(),
-    };
-    const withoutCurrent = current.filter((chat) => chat.id !== chatId);
-    const nextList = [...withoutCurrent, nextItem].sort((a, b) => b.updatedAt - a.updatedAt);
-    await writeHistoryIndex(nextList);
-    return nextList;
+    const list = await listChats();
+    const updated = list.filter(c => c.id !== chatId);
+    const final = [{ id: chatId, title: data.title || 'Untitled Chat', updatedAt: Date.now() }, ...updated];
+    await writeHistoryIndex(final);
+    return final;
   });
+
+  ipcMain.removeHandler('history:delete');
   ipcMain.handle('history:delete', async (_, chatId) => {
-    console.log(`[IPC] history:delete ${chatId}`);
-    await ensureHistoryDir();
+    validateChatId(chatId); // FIXED: Added validation
+    console.log(`[IPC] history:delete -> ${chatId}`);
     const filePath = path.join(historyDir, `${chatId}.json`);
     if (await pathExists(filePath)) {
       await fsPromises.unlink(filePath);
     }
-    const current = (await readHistoryIndex()) ?? [];
-    const nextList = current.filter((chat) => chat.id !== chatId);
-    await writeHistoryIndex(nextList);
-    return nextList;
+    const list = (await readHistoryIndex() || []).filter(c => c.id !== chatId);
+    await writeHistoryIndex(list);
+    return list;
   });
+
+  // Window
+  ipcMain.removeAllListeners('minimize-window');
+  ipcMain.on('minimize-window', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize());
+
+  ipcMain.removeAllListeners('maximize-window');
+  ipcMain.on('maximize-window', (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win) return;
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+  });
+
+  ipcMain.removeAllListeners('close-window');
+  ipcMain.on('close-window', (e) => BrowserWindow.fromWebContents(e.sender)?.close());
 }
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 800,
-    minHeight: 600,
+    width: 1400, height: 900,
+    minWidth: 800, minHeight: 600,
     frame: false,
     backgroundColor: '#0f0f0f',
     webPreferences: {
@@ -235,40 +220,20 @@ function createWindow() {
 
   if (isDev) {
     win.loadURL('http://localhost:3000');
-    // win.webContents.openDevTools();
   } else {
     win.loadFile(path.join(__dirname, '../dist/index.html'));
   }
-
-  ipcMain.removeAllListeners('minimize-window');
-  ipcMain.removeAllListeners('maximize-window');
-  ipcMain.removeAllListeners('close-window');
-
-  ipcMain.on('minimize-window', () => win.minimize());
-  ipcMain.on('maximize-window', () => {
-    if (win.isMaximized()) {
-      win.unmaximize();
-    } else {
-      win.maximize();
-    }
-  });
-  ipcMain.on('close-window', () => win.close());
 }
 
 app.whenReady().then(() => {
-  registerProvidersIpc();
-  registerHistoryIpc();
+  registerIpc();
   createWindow();
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });

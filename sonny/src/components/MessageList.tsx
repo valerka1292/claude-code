@@ -110,39 +110,40 @@ export default function MessageList({ messages, isTyping }: MessageListProps) {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-[768px] mx-auto px-4 py-8 flex flex-col gap-6">
-        {messages.map((msg, idx) => (
-          <motion.div
-            key={msg.id}
-            initial={{ opacity: 0, y: 5 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: idx * 0.05 }}
-            className="flex flex-col gap-2 items-start"
-          >
-            {msg.role === 'assistant' ? (
-              <div className="flex gap-3 w-full items-start">
-                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-bg-2 to-bg-3 border border-border flex items-center justify-center shrink-0 mt-0.5">
-                  <Cpu size={14} className="text-text-primary" />
+        {messages.map((msg, idx) => {
+          const isNew = idx >= messages.length - 2;
+          return (
+            <motion.div
+              key={msg.id}
+              initial={isNew ? { opacity: 0, y: 5 } : false}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="flex flex-col gap-2 items-start"
+            >
+              {msg.role === 'assistant' ? (
+                <div className="flex gap-3 w-full items-start">
+                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-bg-2 to-bg-3 border border-border flex items-center justify-center shrink-0 mt-0.5">
+                    <Cpu size={14} className="text-text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0 markdown-body text-[15px] leading-relaxed text-text-primary">
+                    {msg.thinking && (
+                      <ReasoningBlock
+                        content={msg.thinking}
+                        isStreaming={isTyping && idx === messages.length - 1 && msg.role === 'assistant'}
+                      />
+                    )}
+                    {msg.toolCalls?.map(renderToolCall)}
+                    <ReactMarkdown components={MarkdownComponents}>{msg.content}</ReactMarkdown>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0 markdown-body text-[15px] leading-relaxed text-text-primary">
-                  {msg.thinking && (
-                    <ReasoningBlock
-                      content={msg.thinking}
-                      isStreaming={isTyping && idx === messages.length - 1 && msg.role === 'assistant'}
-                    />
-                  )}
-
-                  {msg.toolCalls?.map(renderToolCall)}
-
-                  <ReactMarkdown components={MarkdownComponents}>{msg.content}</ReactMarkdown>
+              ) : (
+                <div className="max-w-lg bg-bg-2 px-4 py-2.5 rounded-[18px] text-[15px] leading-relaxed text-text-primary self-end border border-border whitespace-pre-wrap">
+                  {msg.content}
                 </div>
-              </div>
-            ) : (
-              <div className="max-w-lg bg-bg-2 px-4 py-2.5 rounded-[18px] text-[15px] leading-relaxed text-text-primary self-end border border-border whitespace-pre-wrap">
-                {msg.content}
-              </div>
-            )}
-          </motion.div>
-        ))}
+              )}
+            </motion.div>
+          );
+        })}
 
         {isTyping && (
           <motion.div
