@@ -6,6 +6,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Message, ToolCall } from '../types';
 import { ReasoningBlock } from './ReasoningBlock';
+import { ToolCallCard } from './ToolCallCard';
 
 interface MessageListProps {
   messages: Message[];
@@ -94,17 +95,7 @@ export default function MessageList({ messages, isTyping }: MessageListProps) {
   }
 
   const renderToolCall = (tc: ToolCall) => (
-    <div key={tc.index} className="my-2 p-3 rounded-md bg-bg-2 border border-border text-sm">
-      <div className="flex items-center gap-2 text-text-secondary mb-1">
-        <Wrench size={14} />
-        <span className="font-mono font-semibold">{tc.function?.name ?? `Tool call #${tc.index}`}</span>
-      </div>
-      {tc.function?.arguments && (
-        <pre className="text-xs text-text-secondary overflow-x-auto mt-1">
-          <code>{tc.function.arguments}</code>
-        </pre>
-      )}
-    </div>
+    <ToolCallCard key={tc.index} toolCall={tc} />
   );
 
   return (

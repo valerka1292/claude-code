@@ -5,9 +5,12 @@ import InputArea from './components/InputArea';
 import SettingsModal from './components/SettingsModal';
 import Titlebar from './components/Titlebar';
 import { AgentMode, Message, ToolCall } from './types';
-import { generateChatName, streamChatCompletion } from './services/llmService';
+import { generateChatName, getToolDefinitions, streamChatCompletion } from './services/llmService';
 import { useProviders } from './hooks/useProviders';
 import { useChats } from './hooks/useChats';
+import { executeTool, getSystemPrompt } from './services/toolBridge';
+
+const MAX_TOOL_ITERATIONS = 10;
 
 export default function App() {
   const {
@@ -84,178 +87,212 @@ export default function App() {
       };
 
       console.log(`[App] Adding user message to chat ${chatIdSnapshot}`);
-      const nextMessagesBase = [...existingMessages, userMsg];
-      setMessages(nextMessagesBase);
+      let currentMessages = [...existingMessages, userMsg];
+      setMessages(currentMessages);
 
-      const nextLlmHistory = [...llmHistoryRef.current, { role: 'user', content }];
-      setLlmHistory(nextLlmHistory);
+      const systemPromptText = await getSystemPrompt();
+      let currentLlmHistory = [...llmHistoryRef.current, { role: 'user', content }];
+      
+      let toolIteration = 0;
 
-      const assistantId = (Date.now() + 1).toString();
-      const assistantMsg: Message = {
-        id: assistantId,
-        role: 'assistant',
-        content: '',
-        timestamp: new Date(),
-        thinking: '',
-        toolCalls: [],
+      const runIteration = async (history: any[]) => {
+        if (toolIteration++ >= MAX_TOOL_ITERATIONS) {
+          console.error('[App] Max tool iterations reached');
+          setIsTyping(false);
+          return;
+        }
+
+        const assistantId = (Date.now() + toolIteration).toString();
+        const assistantMsg: Message = {
+          id: assistantId,
+          role: 'assistant',
+          content: '',
+          timestamp: new Date(),
+          thinking: '',
+          toolCalls: [],
+        };
+
+        let workingMessages = [...currentMessages, assistantMsg];
+        setMessages(workingMessages);
+        setIsTyping(true);
+
+        let finalAssistantContent = '';
+        let finalAssistantThinking = '';
+        const finalToolCalls = new Map<number, ToolCall>();
+        const toolDefinitions = await getToolDefinitions();
+
+        const historyForLLM = [{ role: 'system', content: systemPromptText }, ...history];
+
+        console.log(`[App] Starting iteration ${toolIteration}...`);
+        await streamChatCompletion(
+          activeProvider,
+          historyForLLM,
+          {
+            onContent: (text) => {
+              if (activeChatIdRef.current !== chatIdSnapshot) return;
+              finalAssistantContent += text;
+              workingMessages = workingMessages.map((m) =>
+                m.id === assistantId ? { ...m, content: m.content + text } : m,
+              );
+              setMessages(workingMessages);
+              scheduleAutoSave();
+            },
+            onThinking: (text) => {
+              if (activeChatIdRef.current !== chatIdSnapshot) return;
+              finalAssistantThinking += text;
+              workingMessages = workingMessages.map((m) =>
+                m.id === assistantId ? { ...m, thinking: (m.thinking ?? '') + text } : m,
+              );
+              setMessages(workingMessages);
+              scheduleAutoSave();
+            },
+            onToolCall: (toolCall) => {
+              if (activeChatIdRef.current !== chatIdSnapshot) return;
+              const existing = finalToolCalls.get(toolCall.index) || {};
+              finalToolCalls.set(toolCall.index, { ...existing, ...toolCall });
+              
+              workingMessages = workingMessages.map((m) => {
+                if (m.id !== assistantId) return m;
+                const toolCalls = [...(m.toolCalls || [])];
+                const idx = toolCalls.findIndex(tc => tc.index === toolCall.index);
+                if (idx >= 0) toolCalls[idx] = { ...toolCalls[idx], ...toolCall };
+                else toolCalls.push(toolCall);
+                return { ...m, toolCalls };
+              });
+              setMessages(workingMessages);
+              scheduleAutoSave();
+            },
+            onDone: async (usage) => {
+              if (activeChatIdRef.current !== chatIdSnapshot) return;
+              
+              const finalToolCallsList = Array.from(finalToolCalls.values());
+              const lastAssistant: Message = {
+                ...assistantMsg,
+                content: finalAssistantContent,
+                thinking: finalAssistantThinking,
+                toolCalls: finalToolCallsList,
+              };
+              
+              currentMessages = [...currentMessages, lastAssistant];
+              setMessages(currentMessages);
+              
+              // Correct LLM History update
+              const historyWithAssistant: any[] = [...history, { 
+                role: 'assistant', 
+                content: finalAssistantContent || '', 
+                ...(finalToolCallsList.length > 0 ? { tool_calls: finalToolCallsList.map(tc => ({
+                  id: tc.id,
+                  type: 'function',
+                  function: {
+                    name: tc.function?.name,
+                    arguments: tc.function?.arguments
+                  }
+                })) } : {})
+              }];
+              
+              if (usage?.total_tokens) setContextTokensUsed(usage.total_tokens);
+
+              if (finalToolCallsList.length > 0) {
+                console.log(`[App] Executing ${finalToolCallsList.length} tools...`);
+                const toolResultsHistory = [...historyWithAssistant];
+                
+                for (const tc of finalToolCallsList) {
+                  const tcIndexInMsg = currentMessages.length - 1;
+                  try {
+                    currentMessages[tcIndexInMsg] = {
+                      ...currentMessages[tcIndexInMsg],
+                      toolCalls: currentMessages[tcIndexInMsg].toolCalls?.map(t => 
+                        t.index === tc.index ? { ...t, result: { status: 'running' } } : t
+                      )
+                    };
+                    setMessages([...currentMessages]);
+
+                    const args = tc.function?.arguments ? JSON.parse(tc.function.arguments) : {};
+                    const output = await executeTool(tc.function!.name!, args);
+                    
+                    currentMessages[tcIndexInMsg] = {
+                      ...currentMessages[tcIndexInMsg],
+                      toolCalls: currentMessages[tcIndexInMsg].toolCalls?.map(t => 
+                        t.index === tc.index ? { ...t, result: { status: 'success', output } } : t
+                      )
+                    };
+                    
+                    // FIXED: Correct tool message format
+                    toolResultsHistory.push({ 
+                      role: 'tool', 
+                      tool_call_id: tc.id, 
+                      content: typeof output === 'string' ? output : JSON.stringify(output) 
+                    });
+                  } catch (error: any) {
+                    currentMessages[tcIndexInMsg] = {
+                      ...currentMessages[tcIndexInMsg],
+                      toolCalls: currentMessages[tcIndexInMsg].toolCalls?.map(t => 
+                        t.index === tc.index ? { ...t, result: { status: 'error', error: error.message } } : t
+                      )
+                    };
+                    toolResultsHistory.push({ 
+                      role: 'tool', 
+                      tool_call_id: tc.id, 
+                      content: `Error: ${error.message}` 
+                    });
+                  }
+                  setMessages([...currentMessages]);
+                }
+                
+                await runIteration(toolResultsHistory);
+              } else {
+                setIsTyping(false);
+                setLlmHistory(historyWithAssistant);
+                await persistChatData(chatIdSnapshot, currentMessages, historyWithAssistant, usage?.total_tokens ?? contextTokensUsedRef.current);
+                
+                if (isFirstMessage) {
+                  const title = await generateChatName(activeProvider, content, requestController.signal);
+                  if (activeChatIdRef.current === chatIdSnapshot) await renameChat(chatIdSnapshot, title);
+                }
+              }
+            },
+            onError: async (error: any) => {
+              console.error('[App] Stream error:', error);
+              setIsTyping(false);
+              const errorAssistantMsg = {
+                ...assistantMsg,
+                content: finalAssistantContent || `Error: ${error.message}`,
+                thinking: finalAssistantThinking,
+                toolCalls: Array.from(finalToolCalls.values()),
+              };
+              const erroredMessages = [...currentMessages, errorAssistantMsg];
+              setMessages(erroredMessages);
+              const erroredHistory = [...history, { role: 'assistant', content: errorAssistantMsg.content }];
+              setLlmHistory(erroredHistory);
+              await persistChatData(chatIdSnapshot, erroredMessages, erroredHistory, contextTokensUsedRef.current);
+            },
+          },
+          requestController.signal,
+          toolDefinitions
+        );
       };
 
-      let workingMessages: Message[] = [...nextMessagesBase, assistantMsg];
-      setMessages(workingMessages);
-      setIsTyping(true);
-
-      let finalAssistantContent = '';
-      let finalAssistantThinking = '';
-      const finalToolCalls = new Map<number, ToolCall>();
-
-      console.log('[App] Starting LLM stream...');
-      await streamChatCompletion(
-        activeProvider,
-        nextLlmHistory,
-        {
-          onContent: (text) => {
-            if (activeChatIdRef.current !== chatIdSnapshot) {
-              console.warn('[App] onContent ignored: chat changed');
-              return;
-            }
-
-            finalAssistantContent += text;
-            workingMessages = workingMessages.map((m) =>
-              m.id === assistantId ? { ...m, content: m.content + text } : m,
-            );
-            setMessages(workingMessages);
-            scheduleAutoSave();
-          },
-          onThinking: (text) => {
-            if (activeChatIdRef.current !== chatIdSnapshot) return;
-
-            finalAssistantThinking += text;
-            workingMessages = workingMessages.map((m) =>
-              m.id === assistantId ? { ...m, thinking: (m.thinking ?? '') + text } : m,
-            );
-            setMessages(workingMessages);
-            scheduleAutoSave();
-          },
-          onToolCall: (toolCall) => {
-            if (activeChatIdRef.current !== chatIdSnapshot) return;
-
-            console.log(`[App] Tool call update for index ${toolCall.index}`);
-            finalToolCalls.set(toolCall.index, { ...(finalToolCalls.get(toolCall.index) ?? {}), ...toolCall });
-
-            workingMessages = workingMessages.map((m) => {
-              if (m.id !== assistantId) return m;
-
-              const existingToolCalls: ToolCall[] = m.toolCalls ? [...m.toolCalls] : [];
-              const idx = existingToolCalls.findIndex((tc) => tc.index === toolCall.index);
-
-              if (idx >= 0) {
-                existingToolCalls[idx] = { ...existingToolCalls[idx], ...toolCall };
-              } else {
-                existingToolCalls.push(toolCall);
-              }
-
-              return { ...m, toolCalls: existingToolCalls };
-            });
-            setMessages(workingMessages);
-            scheduleAutoSave();
-          },
-          onDone: async (usage) => {
-            console.log('[App] Stream done');
-            if (pendingRequestControllerRef.current === requestController) {
-              pendingRequestControllerRef.current = null;
-            }
-
-            if (activeChatIdRef.current !== chatIdSnapshot) {
-              console.warn('[App] onDone ignored: chat changed');
-              return;
-            }
-
-            setIsTyping(false);
-            const finalTokens = usage?.total_tokens ?? contextTokensUsedRef.current;
-            if (usage?.total_tokens) {
-              setContextTokensUsed(usage.total_tokens);
-            }
-
-            const finalAssistantMsg: Message = {
-              ...assistantMsg,
-              content: finalAssistantContent,
-              thinking: finalAssistantThinking,
-              toolCalls: Array.from(finalToolCalls.values()),
-            };
-
-            const finalMessages = [...nextMessagesBase, finalAssistantMsg];
-            const finalLlmHistory = [...nextLlmHistory, { role: 'assistant', content: finalAssistantContent }];
-
-            setMessages(finalMessages);
-            setLlmHistory(finalLlmHistory);
-            
-            console.log(`[App] Persisting final chat data for ${chatIdSnapshot}`);
-            await persistChatData(chatIdSnapshot, finalMessages, finalLlmHistory, finalTokens);
-
-            if (isFirstMessage) {
-              console.log('[App] Generating title for new chat');
-              const title = await generateChatName(activeProvider, content, requestController.signal);
-              if (activeChatIdRef.current === chatIdSnapshot) {
-                await renameChat(chatIdSnapshot, title);
-              }
-            }
-          },
-          onError: async (error) => {
-            console.error('[App] Stream error:', error);
-            if (pendingRequestControllerRef.current === requestController) {
-              pendingRequestControllerRef.current = null;
-            }
-
-            if (activeChatIdRef.current !== chatIdSnapshot) return;
-
-            setIsTyping(false);
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            const errorAssistantMsg: Message = {
-              ...assistantMsg,
-              content: finalAssistantContent || `Error: ${errorMessage}`,
-              thinking: finalAssistantThinking,
-              toolCalls: Array.from(finalToolCalls.values()),
-            };
-            const erroredMessages = [...nextMessagesBase, errorAssistantMsg];
-            setMessages(erroredMessages);
-            await persistChatData(chatIdSnapshot, erroredMessages, nextLlmHistory, contextTokensUsedRef.current);
-          },
-        },
-        requestController.signal,
-      );
+      await runIteration(currentLlmHistory);
     },
     [
-      activeChatIdRef,
-      activeProvider,
-      cancelPendingRequest,
-      createChat,
-      persistChatData,
-      renameChat,
-      scheduleAutoSave,
-      messagesRef,
-      llmHistoryRef,
-      contextTokensUsedRef,
-      setContextTokensUsed,
-      setIsTyping,
-      setLlmHistory,
-      setMessages,
+      activeChatIdRef, activeProvider, cancelPendingRequest, createChat, 
+      persistChatData, renameChat, scheduleAutoSave, messagesRef, 
+      llmHistoryRef, contextTokensUsedRef, setContextTokensUsed, 
+      setIsTyping, setLlmHistory, setMessages
     ],
   );
 
   const handleNewChat = useCallback(async () => {
-    console.log('[App] handleNewChat');
     cancelPendingRequest();
     await newChat();
   }, [cancelPendingRequest, newChat]);
 
   const handleSwitchChat = useCallback(async (chatId: string) => {
-    console.log(`[App] handleSwitchChat: ${chatId}`);
     cancelPendingRequest();
     await switchChat(chatId);
   }, [cancelPendingRequest, switchChat]);
 
   const handleDeleteChat = useCallback(async (chatId: string) => {
-    console.log(`[App] handleDeleteChat: ${chatId}`);
     cancelPendingRequest();
     await deleteChat(chatId);
   }, [cancelPendingRequest, deleteChat]);
@@ -263,12 +300,9 @@ export default function App() {
 
   const handleRenameChat = useCallback(async () => {
     if (!activeChatId) return;
-
     const currentTitle = chats.find((chat) => chat.id === activeChatId)?.title ?? 'Untitled Chat';
     const nextTitle = window.prompt('Rename chat', currentTitle);
     if (nextTitle === null) return;
-
-    console.log(`[App] handleRenameChat: ${nextTitle}`);
     await renameChat(activeChatId, nextTitle);
   }, [activeChatId, chats, renameChat]);
 

@@ -1,5 +1,11 @@
 export type AgentMode = 'Chat' | 'Autonomy' | 'Improve' | 'Dream';
 
+export interface ToolCallResult {
+  status: 'running' | 'success' | 'error';
+  error?: string;
+  output?: any;
+}
+
 export interface ToolCall {
   index: number;
   id?: string;
@@ -7,6 +13,7 @@ export interface ToolCall {
     name?: string;
     arguments?: string;
   };
+  result?: ToolCallResult;
 }
 
 export interface Message {
@@ -39,7 +46,7 @@ export interface ChatData {
   createdAt: number;
   updatedAt: number;
   messages: StoredMessage[];
-  llmHistory: { role: string; content: string }[];
+  llmHistory: { role: string; content: string; tool_call_id?: string; tool_calls?: any[] }[];
   contextTokensUsed: number;
 }
 

@@ -84,6 +84,20 @@ const SET_DIALOG_NAME_TOOL = {
   },
 };
 
+import { listTools } from './toolBridge';
+
+export async function getToolDefinitions(): Promise<any[]> {
+  const tools = await listTools();
+  return tools.map(t => ({
+    type: 'function' as const,
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.inputSchema,
+    },
+  }));
+}
+
 export async function streamChatCompletion(
   provider: Provider,
   messages: { role: string; content: string }[],

@@ -15,4 +15,9 @@ contextBridge.exposeInMainWorld('electron', {
     save: (chatId, data) => ipcRenderer.invoke('history:save', chatId, data),
     delete: (chatId) => ipcRenderer.invoke('history:delete', chatId),
   },
+  tools: {
+    list: () => ipcRenderer.invoke('tool:list'),
+    execute: (name, input) => ipcRenderer.invoke('tool:execute', { name, input }),
+  },
+  getSystemPrompt: () => ipcRenderer.invoke('get-system-prompt'),
 });
