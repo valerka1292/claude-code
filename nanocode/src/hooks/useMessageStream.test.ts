@@ -34,7 +34,37 @@ describe("message stream state transitions", () => {
       { id: "a-user", role: "user", content: "prev", ts: 1 },
       { id: "a-assistant", role: "assistant", content: "done", ts: 2 },
       { id: "l-user", role: "user", content: "new", ts: 3 },
-      { id: "l-assistant", role: "assistant", content: "answer", reasoning: "thinking", ts: 4 },
+      {
+        id: "l-assistant-tools",
+        role: "assistant",
+        content: "",
+        reasoning: "thinking",
+        tool_calls: [
+          {
+            id: "tool-1",
+            type: "function",
+            function: {
+              name: "search",
+              arguments: "{\"q\":\"nanocode\"}",
+            },
+          },
+        ],
+        ts: 4,
+      },
+      {
+        id: "l-tool",
+        role: "tool",
+        content: "{\"ok\":true}",
+        tool_call_id: "tool-1",
+        name: "search",
+        ts: 5,
+      },
+      {
+        id: "l-assistant-final",
+        role: "assistant",
+        content: "answer",
+        ts: 6,
+      },
     ];
 
     // useSessionRestore now updates archive slice only.
@@ -53,6 +83,21 @@ describe("message stream state transitions", () => {
       content: "thinking",
     });
     assert.deepEqual(visibleAfterRestore.at(-1)?.blocks?.[1], {
+      type: "tool_call",
+      call: {
+        id: "tool-1",
+        name: "search",
+        arguments: { q: "nanocode" },
+        status: "success",
+      },
+    });
+    assert.deepEqual(visibleAfterRestore.at(-1)?.blocks?.[2], {
+      type: "tool_result",
+      callId: "tool-1",
+      status: "success",
+      result: "{\"ok\":true}",
+    });
+    assert.deepEqual(visibleAfterRestore.at(-1)?.blocks?.[3], {
       type: "text",
       content: "answer",
     });

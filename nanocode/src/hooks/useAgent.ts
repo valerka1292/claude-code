@@ -36,6 +36,8 @@ export function useAgent() {
     appendBlock,
     finalizeAndCommitLiveTurn,
     resetMessageStream,
+    suspendSessionRestore,
+    resumeSessionRestore,
   } = useMessageStream(activeSession);
   const { replaceActiveController, abortActiveRequest, resetAbortController } =
     useAbortController();
@@ -261,18 +263,39 @@ export function useAgent() {
             setTurnActive(false);
           },
           onDone: async () => {
-            finalizeAndCommitLiveTurn();
-            setIsTyping(false);
+            const hasFinalAssistantInTurn = turnMessages.some(
+              (msg) =>
+                msg.role === "assistant" &&
+                !msg.tool_calls &&
+                (msg.content ?? "") === assistantContent
+            );
+            if (assistantContent && !hasFinalAssistantInTurn) {
+              turnMessages.push({
+                id: crypto.randomUUID(),
+                role: "assistant",
+                content: assistantContent,
+                reasoning: assistantReasoning || undefined,
+                ts: Date.now(),
+              });
+            }
 
-            await persistCompletedTurn({
-              projectKey: projectKeyRef.current,
-              sessionId: session.id,
-              userInput: value,
-              sendTs,
-              assistantContent,
-              assistantReasoning,
-              turnMessages,
-            });
+            suspendSessionRestore();
+            try {
+              finalizeAndCommitLiveTurn();
+              setIsTyping(false);
+
+              await persistCompletedTurn({
+                projectKey: projectKeyRef.current,
+                sessionId: session.id,
+                userInput: value,
+                sendTs,
+                assistantContent,
+                assistantReasoning,
+                turnMessages,
+              });
+            } finally {
+              resumeSessionRestore();
+            }
             isProcessingRef.current = false;
             setTurnActive(false);
           },
@@ -299,6 +322,8 @@ export function useAgent() {
       updateLiveTurn,
       finalizeAndCommitLiveTurn,
       startSessionNameGeneration,
+      suspendSessionRestore,
+      resumeSessionRestore,
       setTurnActive,
       updateMsg,
     ]

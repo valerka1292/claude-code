@@ -105,6 +105,23 @@ export function useSessionPersist() {
       let messagesToAdd: StoredMessage[];
       if (turnMessages.length > 0) {
         messagesToAdd = [userStored, ...turnMessages];
+
+        const hasFinalAssistantInTurn = turnMessages.some(
+          (msg) =>
+            msg.role === "assistant" &&
+            !msg.tool_calls &&
+            (msg.content ?? "") === assistantContent
+        );
+
+        if (assistantContent && !hasFinalAssistantInTurn) {
+          messagesToAdd.push({
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: assistantContent,
+            reasoning: assistantReasoning || undefined,
+            ts: Date.now(),
+          });
+        }
       } else {
         const assistantStored: StoredMessage = {
           id: crypto.randomUUID(),
