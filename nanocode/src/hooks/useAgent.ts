@@ -34,6 +34,7 @@ export function useAgent() {
     appendReasoningChunk,
     appendContentChunk,
     appendBlock,
+    finalizeLiveTurn,
     commitLiveTurnAndPersist,
     resetMessageStream,
   } = useMessageStream(activeSession);
@@ -252,7 +253,7 @@ export function useAgent() {
           onUsage: (prompt, completion) => setUsedTokens(prompt + completion),
           onError: (err) => {
             if (isAbortError(err)) {
-              updateLiveTurn((prev) => prev.filter((message) => message.id !== assistantId));
+              finalizeLiveTurn();
               setIsTyping(false);
               isProcessingRef.current = false;
               setTurnActive(false);
@@ -322,6 +323,7 @@ export function useAgent() {
       setUsedTokens,
       setIsTyping,
       commitLiveTurnAndPersist,
+      finalizeLiveTurn,
       startSessionNameGeneration,
       setTurnActive,
       updateMsg,
