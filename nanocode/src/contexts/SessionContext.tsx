@@ -18,12 +18,15 @@ import {
   sessionRepository,
 } from "../lib/sessions/index";
 import { useProject } from "./ProjectContext";
+import { startNewSessionWithGuard } from "./sessionStartGuard";
 
 interface SessionContextValue {
   activeSession: SessionData | null;
   sessionList: SessionMeta[];
   isLoadingList: boolean;
-  startNewSession: () => Promise<void>;
+  isTurnActive: boolean;
+  setTurnActive: (isActive: boolean) => void;
+  startNewSession: () => Promise<boolean>;
   openSession: (id: string) => Promise<void>;
   updateSession: (updated: SessionData) => void;
   initSession: (projectPath: string) => SessionData;
@@ -41,13 +44,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [activeSession, setActiveSession] = useState<SessionData | null>(null);
   const [sessionList, setSessionList] = useState<SessionMeta[]>([]);
   const [isLoadingList, setIsLoadingList] = useState(false);
+  const [isTurnActive, setIsTurnActive] = useState(false);
 
   const activeSessionRef = useRef<SessionData | null>(null);
   activeSessionRef.current = activeSession;
 
   const projectKeyRef = useRef<string | null>(null);
   projectKeyRef.current = projectKey;
+  const isTurnActiveRef = useRef(false);
+  isTurnActiveRef.current = isTurnActive;
   const isMountedRef = useRef(true);
+
+  const setTurnActive = useCallback((isActive: boolean) => {
+    isTurnActiveRef.current = isActive;
+    if (isMountedRef.current) {
+      setIsTurnActive(isActive);
+    }
+  }, []);
 
   const onSessionSaveError = useCallback((error: unknown) => {
     console.error("[sessions] save error:", error);
@@ -95,22 +108,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const startNewSession = useCallback(async () => {
-    const current = activeSessionRef.current;
-    const key = projectKeyRef.current;
-
-    if (isMountedRef.current) {
-      setActiveSession(null);
-    }
-
-    if (current && key && current.messages.length > 0) {
-      try {
-        await sessionRepository.save(key, current);
-      } catch (error) {
-        onSessionSaveError(error);
-      }
-    }
-  }, [onSessionSaveError]);
+  const startNewSession = useCallback(
+    async () =>
+      startNewSessionWithGuard({
+        isTurnActive: isTurnActiveRef.current,
+        currentSession: activeSessionRef.current,
+        projectKey: projectKeyRef.current,
+        clearActiveSession: () => {
+          if (isMountedRef.current) {
+            setActiveSession(null);
+          }
+        },
+        saveSession: sessionRepository.save,
+        onSessionSaveError,
+      }),
+    [onSessionSaveError]
+  );
 
   const openSession = useCallback(async (id: string) => {
     const key = projectKeyRef.current;
@@ -165,6 +178,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         activeSession,
         sessionList,
         isLoadingList,
+        isTurnActive,
+        setTurnActive,
         startNewSession,
         openSession,
         updateSession,

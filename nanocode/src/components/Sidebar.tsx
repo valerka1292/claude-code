@@ -17,6 +17,7 @@ interface SidebarProps {
   sessionList: SessionMeta[];
   activeSessionId: string | null;
   isLoadingList: boolean;
+  isTurnActive: boolean;
 }
 
 export function Sidebar({
@@ -27,6 +28,7 @@ export function Sidebar({
   sessionList,
   activeSessionId,
   isLoadingList,
+  isTurnActive,
 }: SidebarProps) {
   const { folderPath } = useProject();
   const hasProject = !!folderPath;
@@ -37,11 +39,13 @@ export function Sidebar({
         <div className="px-3 py-3">
           <button
             onClick={onNewSession}
+            disabled={isTurnActive}
             className="
               w-full flex items-center gap-2 px-3 py-2
               rounded-lg bg-white/[0.04] border border-white/[0.06]
               text-[0.75rem] text-white/50 hover:text-white/80
               hover:bg-white/[0.07] hover:border-white/[0.1]
+              disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white/[0.04]
               transition-all duration-150 group
             "
           >

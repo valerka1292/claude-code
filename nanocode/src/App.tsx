@@ -21,6 +21,7 @@ export default function App() {
 
   const {
     activeSession,
+    isTurnActive,
     startNewSession,
     openSession,
     sessionList,
@@ -46,9 +47,11 @@ export default function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, isTyping, messages.at(-1)?.content?.length]);
 
-  const handleNewSession = useCallback(() => {
-    resetAgentUi();
-    startNewSession();
+  const handleNewSession = useCallback(async () => {
+    const started = await startNewSession();
+    if (started) {
+      resetAgentUi();
+    }
   }, [resetAgentUi, startNewSession]);
 
   const handleOpenSession = useCallback(
@@ -93,6 +96,7 @@ export default function App() {
           sessionList={sessionList}
           activeSessionId={activeSession?.id ?? null}
           isLoadingList={isLoadingList}
+          isTurnActive={isTurnActive}
         />
 
         <div className="flex flex-col flex-1 overflow-hidden">
