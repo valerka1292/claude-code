@@ -8,7 +8,6 @@
 
 import type { Tool, ToolExecutionContext } from "../types";
 import { formatToolError } from "../utils/format";
-import { hasNodeRuntime } from "../utils/node";
 import { expandPath, toRelativePath } from "../utils/path";
 import { validateDirectoryPath } from "../utils/validation";
 import {
@@ -44,12 +43,10 @@ async function execute(
     const electronApi =
       typeof window !== "undefined" ? window.electronAPI : undefined;
 
-    if (
-      !hasNodeRuntime() &&
-      (!electronApi?.glob || !electronApi?.stat)
-    ) {
+    if (!electronApi?.glob || !electronApi?.stat) {
       return formatToolError("Glob tool is unavailable: electronAPI not initialized");
     }
+    const { glob, stat } = electronApi;
 
     const pattern = typeof input.pattern === "string" ? input.pattern.trim() : "";
     const requestedPath = typeof input.path === "string" ? input.path : undefined;
@@ -68,7 +65,7 @@ async function execute(
       : context.cwd;
 
     const startedAt = Date.now();
-    const files = await electronApi.glob(pattern, {
+    const files = await glob(pattern, {
       cwd: searchDir,
       absolute: true,
       nodir: true,
@@ -79,7 +76,7 @@ async function execute(
     const filesWithMtime = await Promise.all(
       files.map(async (file) => {
         try {
-          const stats = await electronApi.stat(file);
+          const stats = await stat(file);
           return { file, mtime: stats.mtimeMs };
         } catch {
           return { file, mtime: 0 };
