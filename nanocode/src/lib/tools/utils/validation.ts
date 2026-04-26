@@ -40,6 +40,8 @@ export async function validateDirectoryPath(
   }
 
   try {
+    // electronApi.stat is bridged through ipcRenderer.invoke in preload,
+    // so it is asynchronous in the renderer process.
     const stats = await electronApi.stat(absolutePath);
 
     if (!stats.isDirectory) {

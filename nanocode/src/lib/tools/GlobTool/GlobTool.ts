@@ -68,11 +68,6 @@ async function execute(
       : context.cwd;
 
     const startedAt = Date.now();
-
-    if (!electronApi?.glob || !electronApi?.stat) {
-      return formatToolError("Filesystem API is not available in this environment.");
-    }
-
     const files = await electronApi.glob(pattern, {
       cwd: searchDir,
       absolute: true,

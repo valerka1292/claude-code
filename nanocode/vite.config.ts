@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 
+const EXTERNAL_NODE_MODULES = ['glob', 'node:fs/promises', 'node:fs', 'node:path'];
+
 export default defineConfig(({mode}) => {
   void mode;
   return {
@@ -15,15 +17,15 @@ export default defineConfig(({mode}) => {
     },
     build: {
       rollupOptions: {
-        external: ['glob', 'node:fs/promises', 'node:fs', 'node:path'],
+        external: EXTERNAL_NODE_MODULES,
       },
     },
     optimizeDeps: {
-      exclude: ['glob', 'node:fs/promises', 'node:fs', 'node:path'],
+      exclude: EXTERNAL_NODE_MODULES,
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
+      // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
     },
   };

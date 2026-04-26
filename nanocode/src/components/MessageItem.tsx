@@ -5,6 +5,7 @@
 
 import { motion } from "motion/react";
 import { User } from "lucide-react";
+import { useMemo } from "react";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { ToolCallBlock } from "./ToolCallBlock";
 import type { Message, ContentBlock, ToolCallDisplay } from "../types/message";
@@ -106,15 +107,7 @@ export function MessageItem({ message }: MessageItemProps) {
 }
 
 function BlocksRenderer({ blocks }: { blocks: ContentBlock[] }) {
-  const toolResultMap = new Map<string, { status: string; result?: string }>();
-  for (const block of blocks) {
-    if (block.type === "tool_result") {
-      toolResultMap.set(block.callId, {
-        status: block.status,
-        result: block.result,
-      });
-    }
-  }
+  const toolResultMap = useMemo(() => buildToolResultMap(blocks), [blocks]);
 
   return (
     <div className="space-y-2">
@@ -159,4 +152,17 @@ function BlocksRenderer({ blocks }: { blocks: ContentBlock[] }) {
       })}
     </div>
   );
+}
+
+function buildToolResultMap(blocks: ContentBlock[]) {
+  const map = new Map<string, { status: string; result?: string }>();
+  for (const block of blocks) {
+    if (block.type === "tool_result") {
+      map.set(block.callId, {
+        status: block.status,
+        result: block.result,
+      });
+    }
+  }
+  return map;
 }
