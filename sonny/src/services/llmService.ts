@@ -84,6 +84,7 @@ export async function streamChatCompletion(
 
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let doneCalled = false;
+  let shouldCancelReader = false;
 
   const safeDone = (usage?: CompletionUsage) => {
     if (!doneCalled) {
@@ -210,9 +211,12 @@ export async function streamChatCompletion(
       safeDone();
       return;
     }
+    shouldCancelReader = true;
     callbacks.onError(error);
   } finally {
-    await reader?.cancel().catch(() => undefined);
+    if (shouldCancelReader && reader) {
+      await reader.cancel().catch(() => undefined);
+    }
   }
 }
 
