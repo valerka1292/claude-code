@@ -34,7 +34,12 @@ function writeProviders(data) {
     activeProviderId: typeof data?.activeProviderId === 'string' ? data.activeProviderId : null,
     providers: typeof data?.providers === 'object' && data.providers !== null ? data.providers : {},
   };
-  fs.writeFileSync(providersPath, JSON.stringify(safeData, null, 2), 'utf-8');
+  try {
+    fs.writeFileSync(providersPath, JSON.stringify(safeData, null, 2), 'utf-8');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to write providers file: ${message}`);
+  }
 }
 
 function registerProvidersIpc() {
@@ -67,7 +72,12 @@ function readChat(chatId) {
 function writeChat(chatId, data) {
   ensureHistoryDir();
   const filePath = path.join(historyDir, `${chatId}.json`);
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to write chat "${chatId}": ${message}`);
+  }
 }
 
 function listChats() {
